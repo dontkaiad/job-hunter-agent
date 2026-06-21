@@ -23,13 +23,13 @@ Run a one-shot web ingest:
 from __future__ import annotations
 
 import re
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
 from typing import Callable, List, Optional
 
 import httpx
+import psycopg
 
 from . import store
 from .clock import now_utc
@@ -307,7 +307,7 @@ def filter_new_messages(
     return out
 
 
-def ingest(cfg: Config, conn: sqlite3.Connection, reader: Optional[WebReader] = None) -> List[int]:
+def ingest(cfg: Config, conn: psycopg.Connection, reader: Optional[WebReader] = None) -> List[int]:
     """Read every configured channel over public HTTP and store new items.
 
     INCREMENTAL + date-aware:
@@ -352,21 +352,21 @@ def ingest(cfg: Config, conn: sqlite3.Connection, reader: Optional[WebReader] = 
 
 
 def ingest_with_own_connection(cfg: Config, reader: Optional[WebReader] = None) -> List[int]:
-    """Open a fresh sqlite connection, ingest, and close it -- all in the
+    """Open a fresh psycopg connection, ingest, and close it -- all in the
     CALLING thread.
 
-    sqlite3 connections have thread affinity: a connection may only be used in
-    the thread that created it. ``run.ingest`` offloads the synchronous web
-    path via ``asyncio.to_thread``, so the connection it uses for the store
-    writes MUST be created inside that worker thread (not shared in from the
-    main thread). This function is the unit of work handed to the thread: it
-    owns its connection end-to-end.
+    Each thread owns its OWN database connection. ``run.ingest`` offloads the
+    synchronous web path via ``asyncio.to_thread``, so the connection it uses
+    for the store writes is created inside that worker thread (not shared in
+    from the main thread). This function is the unit of work handed to the
+    thread: it owns its connection end-to-end and never crosses it back over the
+    thread boundary.
 
-    ``reader`` is injectable for tests (mock the HTTP fetch); the sqlite layer
-    is intentionally NOT injectable here so the real thread-affinity behaviour
-    is exercised.
+    ``reader`` is injectable for tests (mock the HTTP fetch); the storage layer
+    is intentionally NOT injectable here so the real thread-own-connection
+    behaviour is exercised.
     """
-    conn = store.connect(cfg.db_path)
+    conn = store.connect(cfg.database_url)
     try:
         store.init_db(conn)
         return ingest(cfg, conn, reader=reader)

@@ -36,45 +36,38 @@ ALLOWED_UID = 777
 
 
 # ---------------------------------------------------------------------------
-# Part A — DB persistence: absolute DB_PATH flows through to the open DB file
+# Part A — DB connection: DATABASE_URL flows through to the open connection
 # ---------------------------------------------------------------------------
 
 
-def test_config_reads_db_path_from_env_absolute(monkeypatch, tmp_path):
-    """DB_PATH from the environment flows verbatim into cfg.db_path (absolute)."""
-    abs_path = str(tmp_path / "sub" / "job_hunter.db")
-    monkeypatch.setenv("DB_PATH", abs_path)
+def test_config_reads_database_url_from_env(monkeypatch):
+    """DATABASE_URL from the environment flows verbatim into cfg.database_url."""
+    dsn = "postgresql://user:pass@db-host:5432/jobhunter"
+    monkeypatch.setenv("DATABASE_URL", dsn)
     cfg = load_config()
-    assert cfg.db_path == abs_path
-    assert os.path.isabs(cfg.db_path)
+    assert cfg.database_url == dsn
 
 
-def test_config_db_path_default_is_relative_when_unset(monkeypatch):
-    """Local-dev invariant: with DB_PATH UNSET the default stays RELATIVE.
-
-    (The container's absolute /app/data path is supplied by the image ENV, NOT
-    hardcoded into config.py — so local runs keep the relative default.)
-    """
-    monkeypatch.delenv("DB_PATH", raising=False)
+def test_config_database_url_default_is_empty_when_unset(monkeypatch):
+    """With DATABASE_URL UNSET the default is empty; cfg.require('database_url')
+    then fails fast at startup rather than silently using a bogus DSN."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     cfg = load_config()
-    assert cfg.db_path == "job_hunter.db"
-    assert not os.path.isabs(cfg.db_path)
+    assert cfg.database_url == ""
+    with pytest.raises(RuntimeError):
+        cfg.require("database_url")
 
 
-def test_serve_opens_db_at_exact_absolute_path(tmp_path, monkeypatch):
-    """serve._amain opens the DB at EXACTLY cfg.db_path (a nested abs path) and
-    the .db file is created THERE — not at a relative path under cwd."""
-    nested = tmp_path / "data" / "sub"
-    db_path = str(nested / "job_hunter.db")
-    # The parent dir must exist (the container entrypoint mkdir -p's it; here we
-    # create it so store.connect can open the file).
-    nested.mkdir(parents=True)
+def test_serve_opens_db_at_exact_database_url(pg_dsn, tmp_path, monkeypatch):
+    """serve._amain opens the DB at EXACTLY cfg.database_url and runs init_db
+    against it (schema present)."""
+    db_path = pg_dsn
 
     cfg = Config(
         bot_token=VALID_TOKEN,
         notify_chat_id=123,
         allowed_user_ids={ALLOWED_UID},
-        db_path=db_path,
+        database_url=db_path,
     )
 
     opened_paths = []
@@ -87,8 +80,11 @@ def test_serve_opens_db_at_exact_absolute_path(tmp_path, monkeypatch):
     monkeypatch.setattr(serve.store, "connect", spy_connect)
 
     async def fake_run(self):
-        # Prove the DB file exists at the exact absolute path while serve runs.
-        assert os.path.exists(db_path)
+        # Prove init_db ran against the connection opened at the exact DSN.
+        row = self.conn.execute(
+            "SELECT to_regclass('public.work_items') AS t"
+        ).fetchone()
+        assert row is not None and row["t"] is not None
 
     async def fake_aclose(self):
         pass
@@ -101,10 +97,6 @@ def test_serve_opens_db_at_exact_absolute_path(tmp_path, monkeypatch):
     asyncio.run(serve._amain(cfg))
 
     assert opened_paths == [db_path]
-    # File created at the exact absolute path, NOT at a relative location.
-    assert os.path.exists(db_path)
-    assert not os.path.exists(os.path.join(os.getcwd(), "job_hunter.db")) or \
-        os.path.abspath("job_hunter.db") != db_path
 
 
 # ---------------------------------------------------------------------------
@@ -253,9 +245,19 @@ def _make_bot():
     cfg = Config(
         bot_token=VALID_TOKEN, notify_chat_id=1, allowed_user_ids={1},
     )
-    import sqlite3
+    # These tests exercise on_startup / on_error which never touch the DB; the
+    # bot just needs SOME connection object. Connect to the ALWAYS-PRESENT base
+    # maintenance DB on the test server (NOT the per-test clone, which only
+    # exists inside a test that requested the postgresql fixture).
+    import os as _os
 
-    b = bot.JobHunterBot(cfg, sqlite3.connect(":memory:"), Deps(llm_client=None, fx=None))
+    host = _os.environ.get("PGHOST", "127.0.0.1")
+    port = _os.environ.get("PGPORT", "55432")
+    user = _os.environ.get("PGUSER", "jobhunter")
+    password = _os.environ.get("PGPASSWORD", "jobhunter")
+    maint_db = _os.environ.get("PGMAINTDB", "jobhunter_test")
+    dsn = f"postgresql://{user}:{password}@{host}:{port}/{maint_db}"
+    b = bot.JobHunterBot(cfg, store.connect(dsn), Deps(llm_client=None, fx=None))
     return b
 
 
@@ -412,18 +414,18 @@ def test_heartbeat_path_env_override(monkeypatch, tmp_path):
     assert serve.heartbeat_path() == custom
 
 
-def test_serve_amain_starts_and_cancels_heartbeat(tmp_path, monkeypatch):
+def test_serve_amain_starts_and_cancels_heartbeat(pg_dsn, tmp_path, monkeypatch):
     """serve._amain creates the heartbeat under its asyncio.run (file written)
     and cancels it on teardown."""
     hb_path = str(tmp_path / "hb")
-    db_path = str(tmp_path / "serve.db")
+    db_path = pg_dsn
     monkeypatch.setenv("HEARTBEAT_PATH", hb_path)
 
     cfg = Config(
         bot_token=VALID_TOKEN,
         notify_chat_id=123,
         allowed_user_ids={ALLOWED_UID},
-        db_path=db_path,
+        database_url=db_path,
     )
 
     async def fake_run(self):
@@ -514,20 +516,20 @@ def test_tg_logger_unconfigured_warning_fires_only_once(monkeypatch, caplog):
     )
 
 
-def test_heartbeat_task_is_done_after_amain_completes(tmp_path, monkeypatch):
+def test_heartbeat_task_is_done_after_amain_completes(pg_dsn, tmp_path, monkeypatch):
     """The heartbeat asyncio.Task must be done (cancelled) after _amain returns.
     An un-cancelled task would be an orphaned task leaking into the next
     asyncio.run() or triggering warnings.
     """
     hb_path = str(tmp_path / "hb_orphan")
-    db_path = str(tmp_path / "orphan.db")
+    db_path = pg_dsn
     monkeypatch.setenv("HEARTBEAT_PATH", hb_path)
 
     cfg = Config(
         bot_token=VALID_TOKEN,
         notify_chat_id=123,
         allowed_user_ids={ALLOWED_UID},
-        db_path=db_path,
+        database_url=db_path,
     )
 
     captured_task = {}

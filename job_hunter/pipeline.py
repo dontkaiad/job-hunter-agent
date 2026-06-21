@@ -16,7 +16,8 @@ HITL transitions without a legal decision return 'needs_human' and do not move.
 from __future__ import annotations
 
 import json
-import sqlite3
+
+import psycopg
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -126,7 +127,7 @@ def _salary_floor_rub(deps: Deps) -> Optional[float]:
 # --- Per-transition handlers ------------------------------------------------
 
 
-def _do_extract(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
+def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T1: discovered -> extracted (LLM smart extract, heuristic fallback)."""
     source_channel = item.source_channel or ""
     raw = item.raw_text or ""
@@ -176,7 +177,7 @@ def _store_reasoning(extracted_json: str, reasoning: str) -> str:
     return agents.merge_aux(extracted_json, REASONING_KEY, reasoning)
 
 
-def _do_score(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
+def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T2: extracted -> scored.
 
     Routed judgment:
@@ -234,7 +235,7 @@ def _do_score(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
     )
 
 
-def _do_reject_or_surface(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
+def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T3/T4: scored -> rejected | surfaced.
 
     Deterministic only:
@@ -282,7 +283,7 @@ def _do_reject_or_surface(conn: sqlite3.Connection, item: WorkItem, deps: Deps) 
     )
 
 
-def _do_research(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
+def _do_research(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T10: approved -> researched (agent/LLM)."""
     extracted = _load_extracted(item)
     if extracted is None:
@@ -303,7 +304,7 @@ def _do_research(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> Advanc
                          extra={"research": research_data})
 
 
-def _do_draft(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
+def _do_draft(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T11: researched -> drafted (agent/LLM)."""
     extracted = _load_extracted(item)
     if extracted is None:
@@ -332,7 +333,7 @@ def _do_draft(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                          extra={"draft": draft_text})
 
 
-def _do_close(conn: sqlite3.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
+def _do_close(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T13: sent -> closed (deterministic)."""
     store.update_state(
         conn, item.id, CLOSED,
@@ -357,7 +358,7 @@ _AUTO_HANDLERS = {
 
 
 def advance(
-    conn: sqlite3.Connection,
+    conn: psycopg.Connection,
     item: WorkItem,
     decision: Optional[str] = None,
     deps: Optional[Deps] = None,
@@ -416,7 +417,7 @@ def advance(
 
 
 def advance_by_id(
-    conn: sqlite3.Connection,
+    conn: psycopg.Connection,
     item_id: int,
     decision: Optional[str] = None,
     deps: Optional[Deps] = None,
@@ -430,7 +431,7 @@ def advance_by_id(
 
 
 def run_to_gate(
-    conn: sqlite3.Connection, item_id: int, deps: Optional[Deps] = None, max_steps: int = 10
+    conn: psycopg.Connection, item_id: int, deps: Optional[Deps] = None, max_steps: int = 10
 ) -> List[AdvanceResult]:
     """Drive an item through all automatic transitions until it needs a human
     or reaches a terminal state. Used by ingestion to surface candidates."""

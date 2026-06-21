@@ -66,8 +66,8 @@ def _seed_surfaced(conn, n):
     return ids
 
 
-def test_amain_awaits_all_sends_then_closes_session(tmp_path, monkeypatch):
-    db_path = str(tmp_path / "lifecycle.db")
+def test_amain_awaits_all_sends_then_closes_session(pg_dsn, monkeypatch):
+    db_path = pg_dsn
     conn = store.connect(db_path)
     store.init_db(conn)
     ids = _seed_surfaced(conn, 4)
@@ -79,7 +79,7 @@ def test_amain_awaits_all_sends_then_closes_session(tmp_path, monkeypatch):
     from job_hunter.config import Config
 
     monkeypatch.setattr(run, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(run, "load_config", lambda: Config(db_path=db_path))
+    monkeypatch.setattr(run, "load_config", lambda: Config(database_url=db_path))
     monkeypatch.setattr(run, "build_deps", lambda cfg: object())
 
     async def fake_ingest(cfg, conn):
@@ -109,10 +109,10 @@ def test_amain_awaits_all_sends_then_closes_session(tmp_path, monkeypatch):
     assert len(send_idx) == len(ids)
 
 
-def test_amain_closes_session_even_on_error(tmp_path, monkeypatch):
+def test_amain_closes_session_even_on_error(pg_dsn, monkeypatch):
     """If the body raises, the finally must still close the bot session so
     there is never an unclosed client session at loop teardown."""
-    db_path = str(tmp_path / "err.db")
+    db_path = pg_dsn
     conn = store.connect(db_path)
     store.init_db(conn)
     conn.close()
@@ -121,7 +121,7 @@ def test_amain_closes_session_even_on_error(tmp_path, monkeypatch):
     from job_hunter.config import Config
 
     monkeypatch.setattr(run, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(run, "load_config", lambda: Config(db_path=db_path))
+    monkeypatch.setattr(run, "load_config", lambda: Config(database_url=db_path))
     monkeypatch.setattr(run, "build_deps", lambda cfg: object())
 
     async def boom_ingest(cfg, conn):

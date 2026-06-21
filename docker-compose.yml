@@ -1,5 +1,7 @@
-# One container: aiogram long-polling + a daily 10:00-local harvest, sharing the
-# host-mounted SQLite DB and a read-only host-mounted candidate profile.
+# Single service: the job-hunter app (aiogram long-polling + a daily 10:00-local
+# harvest). PostgreSQL is NOT bundled here — the app talks to an EXISTING shared
+# Postgres (container "nexus-arcana-db") over the external "nexus-arcana_default"
+# network. DATABASE_URL (host=nexus-arcana-db) is supplied by the host-side .env.
 services:
   job-hunter:
     build:
@@ -16,8 +18,15 @@ services:
     # Survive crashes and host reboots, but not an explicit `docker compose stop`.
     restart: unless-stopped
 
+    # Join the EXISTING shared network so the app can resolve the Postgres host
+    # "nexus-arcana-db" (the DB lives in another compose project). The network is
+    # declared `external` below — it must already exist (created by nexus-arcana).
+    networks:
+      - nexus-arcana_default
+
     # Host-side .env (gitignored) is read at CONTAINER CREATE time — NOT baked
-    # into the image. NOTE: changing .env requires `docker compose up -d
+    # into the image. It supplies DATABASE_URL (host=nexus-arcana-db) and every
+    # other secret. NOTE: changing .env requires `docker compose up -d
     # --force-recreate` to take effect (a plain restart re-uses the old env).
     env_file: .env
 
@@ -25,15 +34,11 @@ services:
     # local" is correct; SCHEDULE_TZ (read from env_file too) is what the
     # scheduler's cron trigger actually uses. Default to UTC only if TZ is unset
     # on the host so command stays valid; set TZ/SCHEDULE_TZ in .env to your tz.
+    # DATABASE_URL is intentionally NOT set here — it comes from .env (env_file).
     environment:
       TZ: ${TZ:-UTC}
 
     volumes:
-      # Persist the SQLite DB on the HOST so it survives `docker compose
-      # up --force-recreate` / image rebuilds. cfg.db_path must resolve to this
-      # path: set DB_PATH=/app/data/job_hunter.db in .env (see .env.example).
-      # /app/data is owned by the non-root appuser in the image so it is writable.
-      - ./data:/app/data
       # The REAL candidate profile lives on the HOST and is mounted READ-ONLY,
       # so personal data is never copied into the image. The app reads it at
       # config/profile.local.yaml (relative to WORKDIR /app).
@@ -57,3 +62,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 40s
+
+# The shared Postgres network, owned by the nexus-arcana compose project. It must
+# already exist; `external: true` tells Compose to attach, not create it.
+networks:
+  nexus-arcana_default:
+    external: true

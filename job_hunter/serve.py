@@ -18,20 +18,19 @@ that fires the SAME ingest -> score -> notify path as ``run.py`` via the shared
 ``run.harvest`` coroutine. So one container both delivers fresh cards each
 morning AND handles the button taps continuously.
 
-Both processes/paths share the SAME SQLite DB (``cfg.db_path``), so buttons on
+Both processes/paths share the SAME PostgreSQL DB (``cfg.database_url``), so buttons on
 cards delivered by ``run`` (or by the scheduled harvest) work here.
 
-DB connection ownership (sqlite thread affinity)
-------------------------------------------------
-sqlite3 connections have thread affinity: a connection may only be used in the
-thread that created it. ``serve`` opens its OWN connection inside the polling
-process/thread (here, in ``_amain`` which runs under ``asyncio.run`` on this
-thread). The scheduled harvest is SAFE to reuse this connection because
-``AsyncIOScheduler`` runs the job coroutine on the SAME event loop / thread as
-``serve`` — there is no thread crossing. (Web ingest itself offloads its sync
-httpx work to a worker thread that opens its OWN connection, so that part keeps
-its existing affinity discipline; serve's ``conn`` is only ever touched on the
-loop thread.)
+DB connection ownership (psycopg thread affinity)
+-------------------------------------------------
+psycopg connections are not safe to share across threads concurrently, so
+``serve`` opens its OWN connection inside the polling process/thread (here, in
+``_amain`` which runs under ``asyncio.run`` on this thread). The scheduled
+harvest is SAFE to reuse this connection because ``AsyncIOScheduler`` runs the
+job coroutine on the SAME event loop / thread as ``serve`` — there is no thread
+crossing. (Web ingest itself offloads its sync httpx work to a worker thread
+that opens its OWN connection, so that part keeps its existing affinity
+discipline; serve's ``conn`` is only ever touched on the loop thread.)
 
 Timezone (scheduler trigger ONLY)
 ---------------------------------
@@ -184,9 +183,9 @@ async def _amain(cfg: Config | None = None) -> None:
     load_dotenv()
     cfg = cfg or load_config()
     # Fail fast with a clear message if the bot can't be served at all.
-    cfg.require("bot_token", "notify_chat_id")
+    cfg.require("bot_token", "notify_chat_id", "database_url")
 
-    conn = store.connect(cfg.db_path)
+    conn = store.connect(cfg.database_url)
     store.init_db(conn)
     deps = build_deps(cfg)
 
@@ -202,7 +201,7 @@ async def _amain(cfg: Config | None = None) -> None:
     )
 
     print(
-        f"[serve] long-polling started (db={cfg.db_path}); "
+        f"[serve] long-polling started (db={cfg.database_url}); "
         f"daily harvest at {HARVEST_HOUR:02d}:{HARVEST_MINUTE:02d} {tz}; Ctrl-C to stop"
     )
     # Heartbeat: a background task on THIS loop writes the liveness epoch file

@@ -60,13 +60,14 @@ def _fake_get(url):
     return FakeResp(SAMPLE_HTML)
 
 
-def test_run_ingest_web_crosses_thread_with_real_sqlite(tmp_path, monkeypatch):
+def test_run_ingest_web_crosses_thread_with_real_sqlite(pg_dsn, monkeypatch):
     """run.ingest (web mode) must work end-to-end through asyncio.to_thread
-    against a real file-based sqlite DB. Reproduces the thread-affinity bug
-    without the fix; passes with it.
+    against a real PostgreSQL DB. The worker thread opens its OWN connection
+    (each thread its own psycopg conn); the main thread observes the committed
+    rows after the thread finishes.
     """
-    db_path = str(tmp_path / "thread_affinity.db")
-    cfg = Config(ingest_mode="web", telegram_channels=["@jobschan"], db_path=db_path)
+    db_path = pg_dsn
+    cfg = Config(ingest_mode="web", telegram_channels=["@jobschan"], database_url=db_path)
 
     # Force the REAL httpx fetch to use our fake (no network). We patch the
     # module-level default so WebReader() built inside the worker thread uses
@@ -75,7 +76,7 @@ def test_run_ingest_web_crosses_thread_with_real_sqlite(tmp_path, monkeypatch):
 
     # Mirror run._amain: the MAIN thread opens its connection on the same file
     # DB, then the web ingest is offloaded to a worker thread.
-    conn = store.connect(cfg.db_path)
+    conn = store.connect(cfg.database_url)
     store.init_db(conn)
     try:
         # This goes through asyncio.to_thread -> ingest_with_own_connection,
@@ -101,11 +102,11 @@ def test_run_ingest_web_crosses_thread_with_real_sqlite(tmp_path, monkeypatch):
         conn.close()
 
 
-def test_ingest_with_own_connection_writes_real_db(tmp_path):
+def test_ingest_with_own_connection_writes_real_db(pg_dsn):
     """The worker unit-of-work opens its own connection and persists rows that
     survive after it closes -- verified by reopening the file DB."""
-    db_path = str(tmp_path / "own_conn.db")
-    cfg = Config(ingest_mode="web", telegram_channels=["@jobschan"], db_path=db_path)
+    db_path = pg_dsn
+    cfg = Config(ingest_mode="web", telegram_channels=["@jobschan"], database_url=db_path)
     reader = web.WebReader(http_get=_fake_get)
 
     new_ids = web.ingest_with_own_connection(cfg, reader=reader)

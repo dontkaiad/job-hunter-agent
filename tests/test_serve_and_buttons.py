@@ -235,11 +235,11 @@ def test_finalize_card_robust_called_directly(conn, deps):
 
 
 class _ConnProxy:
-    """Delegates everything to a real sqlite3.Connection but records close().
+    """Delegates everything to a real psycopg connection but records close().
 
-    sqlite3.Connection.close is a read-only C attribute, so it cannot be
-    monkeypatched in place; this thin proxy lets tests observe the close call
-    while every other DB operation passes straight through.
+    The connection's close attribute cannot always be monkeypatched in place;
+    this thin proxy lets tests observe the close call while every other DB
+    operation passes straight through.
     """
 
     def __init__(self, real, on_close):
@@ -254,17 +254,17 @@ class _ConnProxy:
         return getattr(self._real, name)
 
 
-def test_serve_amain_opens_db_runs_and_tears_down(tmp_path, monkeypatch):
-    """serve._amain opens its OWN DB connection on cfg.db_path, runs init_db,
+def test_serve_amain_opens_db_runs_and_tears_down(pg_dsn, monkeypatch):
+    """serve._amain opens its OWN DB connection on cfg.database_url, runs init_db,
     uses build_deps, runs the bot (mocked, NO polling), and tears down with
     bot.aclose() + conn.close() in the finally."""
-    db_path = str(tmp_path / "serve_test.db")
+    db_path = pg_dsn
     cfg = Config(
         bot_token="x",
         notify_chat_id=123,
         anthropic_api_key=None,
         allowed_user_ids={ALLOWED_UID},
-        db_path=db_path,
+        database_url=db_path,
     )
 
     events = []
@@ -274,9 +274,9 @@ def test_serve_amain_opens_db_runs_and_tears_down(tmp_path, monkeypatch):
         events.append("run")
         # Prove the bot got a live DB connection that init_db ran on.
         row = self.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='work_items'"
+            "SELECT to_regclass('public.work_items') AS t"
         ).fetchone()
-        assert row is not None, "init_db must have created the schema"
+        assert row is not None and row["t"] is not None, "init_db must have created the schema"
 
     async def fake_aclose(self):
         events.append("aclose")
@@ -312,16 +312,16 @@ def test_serve_amain_opens_db_runs_and_tears_down(tmp_path, monkeypatch):
     assert closed["conn"] is True
 
 
-def test_serve_amain_tears_down_on_keyboard_interrupt(tmp_path, monkeypatch):
+def test_serve_amain_tears_down_on_keyboard_interrupt(pg_dsn, monkeypatch):
     """If bot.run raises (e.g. cancellation / Ctrl-C), the finally still closes
     the session AND the DB connection (resources never leak)."""
-    db_path = str(tmp_path / "serve_kbi.db")
+    db_path = pg_dsn
     cfg = Config(
         bot_token="x",
         notify_chat_id=123,
         anthropic_api_key=None,
         allowed_user_ids={ALLOWED_UID},
-        db_path=db_path,
+        database_url=db_path,
     )
 
     events = []
@@ -380,7 +380,8 @@ def test_serve_main_wraps_single_asyncio_run_and_swallows_keyboard_interrupt(mon
 def test_serve_amain_requires_bot_token_and_chat(tmp_path, monkeypatch):
     """_amain fails fast (cfg.require) when bot_token / notify_chat_id missing,
     before opening any DB connection or constructing the bot."""
-    cfg = Config(bot_token=None, notify_chat_id=None, db_path=str(tmp_path / "x.db"))
+    cfg = Config(bot_token=None, notify_chat_id=None,
+                 database_url="postgresql://u:p@localhost:5432/x")
 
     connected = {"called": False}
     real_connect = store.connect

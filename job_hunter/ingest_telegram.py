@@ -17,10 +17,11 @@ Generate a reusable StringSession (interactive login):
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
+
+import psycopg
 
 from . import digest, store
 from .config import Config, load_config
@@ -106,7 +107,7 @@ def expand_message(msg: IngestMessage) -> List[IngestMessage]:
     return out
 
 
-def store_messages(conn: sqlite3.Connection, messages: List[IngestMessage]) -> List[int]:
+def store_messages(conn: psycopg.Connection, messages: List[IngestMessage]) -> List[int]:
     """Insert normalized messages, skipping duplicates. Returns new item ids.
 
     Digest bundles are expanded into per-vacancy items (or skipped when not
@@ -163,7 +164,7 @@ async def fetch_channel_messages(client, channel: str, limit: int) -> List[Inges
     return out
 
 
-async def ingest_async(cfg: Config, conn: sqlite3.Connection) -> List[int]:
+async def ingest_async(cfg: Config, conn: psycopg.Connection) -> List[int]:
     """Connect, read all configured channels, store new items. Network I/O."""
     cfg.require("telegram_channels")
     client = _build_client(cfg)
@@ -187,7 +188,8 @@ def run_ingest() -> List[int]:
 
     load_dotenv()
     cfg = load_config()
-    conn = store.connect(cfg.db_path)
+    cfg.require("database_url")
+    conn = store.connect(cfg.database_url)
     store.init_db(conn)
     try:
         return asyncio.run(ingest_async(cfg, conn))

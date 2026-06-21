@@ -118,10 +118,10 @@ def test_build_scheduler_default_local_tz_when_unset():
 # --- shared harvest callable: ingest -> run_to_gate -> notify ---------------
 
 
-def test_run_harvest_runs_ingest_score_notify(monkeypatch, tmp_path):
+def test_run_harvest_runs_ingest_score_notify(monkeypatch, pg_dsn):
     """The shared run.harvest calls ingest, drives run_to_gate, and notifies the
     surfaced items — all mocked, no real network."""
-    db_path = str(tmp_path / "harvest.db")
+    db_path = pg_dsn
     conn = store.connect(db_path)
     store.init_db(conn)
 
@@ -172,7 +172,7 @@ def test_run_harvest_runs_ingest_score_notify(monkeypatch, tmp_path):
             pass
 
     fake_bot = FakeBot()
-    cfg = _cfg(db_path=db_path)
+    cfg = _cfg(database_url=db_path)
 
     sent = asyncio.run(run.harvest(cfg, conn, fake_bot, object()))
     conn.close()
@@ -183,7 +183,7 @@ def test_run_harvest_runs_ingest_score_notify(monkeypatch, tmp_path):
     assert sorted(sent) == sorted(ids)  # both surfaced cards delivered
 
 
-def test_run_main_one_shot_uses_shared_harvest(monkeypatch):
+def test_run_main_one_shot_uses_shared_harvest(monkeypatch, pg_dsn):
     """run.main's one-shot path drives the SAME run.harvest callable that the
     scheduled job uses -> manual one-shot == scheduled harvest logic."""
     called = {"harvest": 0}
@@ -194,7 +194,7 @@ def test_run_main_one_shot_uses_shared_harvest(monkeypatch):
 
     monkeypatch.setattr(run, "harvest", fake_harvest)
     monkeypatch.setattr(run, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(run, "load_config", lambda: Config(db_path=":memory:"))
+    monkeypatch.setattr(run, "load_config", lambda: Config(database_url=pg_dsn))
     monkeypatch.setattr(run, "build_deps", lambda cfg: object())
 
     class FakeBot:
@@ -240,12 +240,12 @@ class _ConnProxy:
 
 
 def test_serve_amain_starts_scheduler_and_shuts_it_down_before_session_and_conn(
-    tmp_path, monkeypatch
+    pg_dsn, monkeypatch
 ):
     """serve._amain starts the scheduler then polls; on teardown it shuts the
     scheduler down BEFORE bot.aclose() and conn.close()."""
-    db_path = str(tmp_path / "serve_sched.db")
-    cfg = _cfg(db_path=db_path)
+    db_path = pg_dsn
+    cfg = _cfg(database_url=db_path)
 
     events = []
     fake_sched = _FakeScheduler()
@@ -291,11 +291,11 @@ def test_serve_amain_starts_scheduler_and_shuts_it_down_before_session_and_conn(
     assert closed["conn"] is True
 
 
-def test_serve_amain_shuts_scheduler_down_even_on_error(tmp_path, monkeypatch):
+def test_serve_amain_shuts_scheduler_down_even_on_error(pg_dsn, monkeypatch):
     """If polling raises, the finally still shuts the scheduler down and closes
     the DB connection."""
-    db_path = str(tmp_path / "serve_err.db")
-    cfg = _cfg(db_path=db_path)
+    db_path = pg_dsn
+    cfg = _cfg(database_url=db_path)
 
     fake_sched = _FakeScheduler()
     monkeypatch.setattr(serve, "build_scheduler", lambda f, tz: fake_sched)
@@ -324,11 +324,11 @@ def test_serve_amain_shuts_scheduler_down_even_on_error(tmp_path, monkeypatch):
     assert closed["conn"] is True
 
 
-def test_serve_amain_wires_real_run_harvest_as_the_job(tmp_path, monkeypatch):
+def test_serve_amain_wires_real_run_harvest_as_the_job(pg_dsn, monkeypatch):
     """The job factory serve passes to build_scheduler, when called, invokes the
     SHARED run.harvest (same callable the one-shot uses) — not a fork."""
-    db_path = str(tmp_path / "serve_wire.db")
-    cfg = _cfg(db_path=db_path)
+    db_path = pg_dsn
+    cfg = _cfg(database_url=db_path)
 
     captured = {}
 

@@ -6,12 +6,9 @@ FROM python:3.9-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Bake the CONTAINER default DB path into the image so the SQLite DB is written
-# to the host-mounted ./data:/app/data volume (NOT the relative WORKDIR default,
-# which would be lost on every recreate). config.py keeps its RELATIVE default
-# ("job_hunter.db") for local dev; this ENV only overrides it inside the image.
-# A real .env (env_file in docker-compose) can still override DB_PATH at runtime.
-ENV DB_PATH=/app/data/job_hunter.db
+# The DB now lives in a separate PostgreSQL service (see docker-compose.yml).
+# The app reads its connection string from DATABASE_URL at runtime (supplied via
+# env_file / environment in compose) — there is no on-disk DB file in this image.
 
 # Build-time git sha for the ops startup ping. .dockerignore excludes .git, so
 # the sha CANNOT be read from git at runtime — it is injected here at build time
@@ -37,22 +34,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ModuleNotFoundError crash-loop at startup.
 COPY . .
 
-# Privilege-drop entrypoint: runs as root to chown the bind-mounted /app/data,
-# then drops to appuser (uid 10001) before exec'ing the CMD. See the script.
+# Privilege-drop entrypoint: starts as root, then drops to appuser (uid 10001)
+# before exec'ing the CMD. See the script. (No data-dir chown is needed anymore:
+# the DB lives in the separate Postgres service, not an on-disk file here.)
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# Create a non-root user and a writable mount point for the host-mounted SQLite
-# DB. The real .env and config/profile.local.yaml are NOT baked in (excluded via
-# .dockerignore); they are bind-mounted at runtime by docker-compose. /app/data
-# is owned by appuser so the host-mounted DB is read/writable; /app/config is
-# owned so the read-only profile mount can be read.
+# Create the non-root user. The real .env and config/profile.local.yaml are NOT
+# baked in (excluded via .dockerignore); they are bind-mounted at runtime by
+# docker-compose. /app/config is owned so the read-only profile mount can be read.
 RUN useradd --create-home --uid 10001 appuser \
-    && mkdir -p /app/data \
     && chown -R appuser:appuser /app
 # NOTE: no `USER appuser` here. The container starts as ROOT so the entrypoint
-# can chown the (root-owned) host-mounted /app/data, then it DROPS to appuser
-# itself via `runuser` before exec'ing the CMD. The final process is uid 10001.
+# can DROP to appuser via `runuser` before exec'ing the CMD. The final process
+# is uid 10001.
 
 # Entrypoint drops privileges; CMD is the serve process: aiogram long-polling +
 # AsyncIOScheduler daily harvest + heartbeat task, one event loop, one

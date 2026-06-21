@@ -1,4 +1,4 @@
-"""CRUD + transition logging + UTC strings (in-memory sqlite)."""
+"""CRUD + transition logging + UTC strings (ephemeral PostgreSQL)."""
 
 from datetime import datetime
 
@@ -35,6 +35,26 @@ def test_dedup_on_channel_and_message_id(conn):
     assert b is None  # duplicate skipped
 
 
+def test_dedup_rolls_back_so_same_conn_stays_usable(conn):
+    """Postgres ABORTS the transaction on the UniqueViolation; insert_item must
+    rollback before returning None so the SAME connection keeps working. Without
+    the rollback the next statement would fail with "current transaction is
+    aborted". This proves the UniqueViolation rollback path."""
+    a = store.insert_item(conn, raw_text="x", source_channel="@c", source_message_id="100")
+    assert a is not None
+
+    # Duplicate -> None, and (critically) the transaction is rolled back.
+    dup = store.insert_item(conn, raw_text="dup", source_channel="@c", source_message_id="100")
+    assert dup is None
+
+    # The SAME connection must still be usable: a fresh non-dup insert succeeds,
+    # and a read returns the expected rows.
+    c = store.insert_item(conn, raw_text="next", source_channel="@c", source_message_id="101")
+    assert c is not None and c != a
+    items = store.list_by_state(conn, DISCOVERED)
+    assert {i.source_message_id for i in items} == {"100", "101"}
+
+
 def test_null_message_id_not_deduped(conn):
     a = store.insert_item(conn, raw_text="x", source_channel="@c", source_message_id=None)
     b = store.insert_item(conn, raw_text="y", source_channel="@c", source_message_id=None)
@@ -62,9 +82,11 @@ def test_list_by_state(conn):
 
 def test_check_constraint_rejects_bad_state(conn):
     item_id = store.insert_item(conn, raw_text="a", source_channel="@c", source_message_id="1")
-    import sqlite3
+    import psycopg
     import pytest
 
-    with pytest.raises(sqlite3.IntegrityError):
+    # The CHECK (state IN (...)) constraint is enforced by Postgres; update_state
+    # rolls back and re-raises on failure (see store.update_state).
+    with pytest.raises(psycopg.errors.CheckViolation):
         store.update_state(conn, item_id, "bogus_state", from_state=DISCOVERED,
                            kind=KIND_DETERMINISTIC, actor="system")

@@ -35,14 +35,13 @@ async def ingest(cfg: Config, conn) -> List[int]:
 
     'web' uses the public t.me/s/ HTTP reader with no authentication. It runs
     synchronously (httpx) but is offloaded to a worker thread so the async
-    caller is not blocked. Because sqlite3 connections have thread affinity (a
-    connection can only be used in the thread that created it), the worker
-    thread opens and closes its OWN connection via
+    caller is not blocked. Each thread owns its OWN database connection: the
+    worker thread opens and closes its own psycopg connection via
     ``ingest_web.ingest_with_own_connection`` -- the main-thread ``conn`` is
     deliberately NOT passed across the thread boundary.
 
     'telethon' runs on the event loop (this thread) and therefore uses the
-    main-thread ``conn`` directly -- no thread crossing, no affinity issue.
+    main-thread ``conn`` directly -- no thread crossing.
     """
     mode = (cfg.ingest_mode or "web").lower()
     if mode == "telethon":
@@ -111,7 +110,8 @@ async def _amain() -> None:
     """
     load_dotenv()
     cfg = load_config()
-    conn = store.connect(cfg.db_path)
+    cfg.require("database_url")
+    conn = store.connect(cfg.database_url)
     store.init_db(conn)
     deps = build_deps(cfg)
 

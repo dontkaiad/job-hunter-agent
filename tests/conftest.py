@@ -1,18 +1,90 @@
-"""Shared pytest fixtures: in-memory sqlite store + fakes for LLM/FX."""
+"""Shared pytest fixtures: ephemeral PostgreSQL store + fakes for LLM/FX.
+
+HOW TO RUN THE TESTS
+--------------------
+The suite runs against a REAL, ephemeral PostgreSQL using pytest-postgresql's
+``postgresql_noproc`` fixture, which connects to an EXTERNALLY-provided Postgres
+server and clones a FRESH database per test (function scope) — preserving the
+per-test isolation the old in-memory SQLite gave.
+
+This macOS box has no local ``initdb``/``pg_ctl`` on PATH, so we point
+``postgresql_noproc`` at a Docker ``postgres:16`` container instead. Start it
+once with:
+
+    docker run -d --name jobhunter-test-pg \
+        -e POSTGRES_USER=jobhunter -e POSTGRES_PASSWORD=jobhunter \
+        -e POSTGRES_DB=jobhunter_test -p 55432:5432 postgres:16
+
+Then run the suite:
+
+    .venv/bin/python -m pytest
+
+The connection coordinates default to that container (host 127.0.0.1, port
+55432, user/password ``jobhunter``); override via the PGHOST / PGPORT / PGUSER /
+PGPASSWORD env vars if your test Postgres lives elsewhere.
+"""
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
+import psycopg
 import pytest
+from pytest_postgresql import factories
 
 from job_hunter import store
 from job_hunter.pipeline import Deps
 
+# Coordinates of the externally-provided test Postgres (the docker postgres:16
+# container above). Overridable via env so CI / a different box can repoint it.
+_PG_HOST = os.environ.get("PGHOST", "127.0.0.1")
+_PG_PORT = int(os.environ.get("PGPORT", "55432"))
+_PG_USER = os.environ.get("PGUSER", "jobhunter")
+_PG_PASSWORD = os.environ.get("PGPASSWORD", "jobhunter")
+# NOTE: this is the per-test working DB that pytest-postgresql CREATES (and
+# drops) from a template — it must NOT be a DB that already exists on the server
+# (the container's own POSTGRES_DB=jobhunter_test is the maintenance DB it
+# connects to). So use a distinct name here.
+_PG_DBNAME = os.environ.get("PGDATABASE", "jobhunter_pytest")
+
+# noproc => connect to an already-running server (no initdb/pg_ctl needed). The
+# `postgresql` client fixture below clones a fresh DB per test from this.
+postgresql_noproc = factories.postgresql_noproc(
+    host=_PG_HOST,
+    port=_PG_PORT,
+    user=_PG_USER,
+    password=_PG_PASSWORD,
+    dbname=_PG_DBNAME,
+)
+postgresql = factories.postgresql("postgresql_noproc")
+
+
+def _dsn_from_fixture(pg) -> str:
+    """Build a postgresql:// DSN from a pytest-postgresql connection's info."""
+    info = pg.info
+    return psycopg.conninfo.make_conninfo(
+        host=info.host,
+        port=info.port,
+        user=info.user,
+        password=info.password or _PG_PASSWORD,
+        dbname=info.dbname,
+    )
+
 
 @pytest.fixture
-def conn():
-    c = store.connect(":memory:")
+def pg_dsn(postgresql) -> str:
+    """The DSN of the fresh, per-test ephemeral PostgreSQL database.
+
+    Test files that open their OWN store.connect(...) (the inline call-sites)
+    request this fixture and pass it where they used to pass a sqlite file path.
+    """
+    return _dsn_from_fixture(postgresql)
+
+
+@pytest.fixture
+def conn(pg_dsn):
+    c = store.connect(pg_dsn)
     store.init_db(c)
     yield c
     c.close()

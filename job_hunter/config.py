@@ -63,8 +63,10 @@ class Config:
     # the set is empty and the bot FAILS CLOSED (ignores everyone).
     allowed_user_ids: Set[int] = field(default_factory=set)
 
-    # Storage
-    db_path: str = "job_hunter.db"
+    # Storage: PostgreSQL connection DSN (DATABASE_URL), e.g.
+    #   postgresql://USER:PASSWORD@HOST:5432/jobhunter
+    # Required at runtime (store.connect opens a psycopg3 connection from it).
+    database_url: str = ""
 
     # Ops logging (OPTIONAL): a separate "ops" Telegram bot/chat/thread that
     # receives lifecycle pings (startup) and error notifications. These are
@@ -136,7 +138,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         bot_token=get("BOT_TOKEN") or None,
         notify_chat_id=notify_chat_id,
         allowed_user_ids=allowed_user_ids,
-        db_path=get("DB_PATH") or "job_hunter.db",
+        database_url=get("DATABASE_URL"),
         tg_log_bot_token=get("TG_LOG_BOT_TOKEN") or None,
         tg_log_chat_id=_int_or_none(get("TG_LOG_CHAT_ID")),
         tg_log_thread_jobhunter=_int_or_none(get("TG_LOG_THREAD_JOBHUNTER")),

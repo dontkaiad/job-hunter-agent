@@ -101,11 +101,11 @@ class _BoomNotifyBot(_TrackingBot):
         raise RuntimeError(f"notify boom for {item_id}")
 
 
-def test_amain_closes_session_when_notify_raises(tmp_path, monkeypatch):
+def test_amain_closes_session_when_notify_raises(pg_dsn, monkeypatch):
     """If notify() raises (beyond isolated per-send errors), the finally block
     in _amain must still call bot.aclose() exactly once so there is no
     unclosed client session."""
-    db_path = str(tmp_path / "notify_err.db")
+    db_path = pg_dsn
     conn = store.connect(db_path)
     store.init_db(conn)
     # Seed ONE surfaced item so notify is actually called.
@@ -125,7 +125,7 @@ def test_amain_closes_session_when_notify_raises(tmp_path, monkeypatch):
     from job_hunter.config import Config
 
     monkeypatch.setattr(run, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(run, "load_config", lambda: Config(db_path=db_path))
+    monkeypatch.setattr(run, "load_config", lambda: Config(database_url=db_path))
     monkeypatch.setattr(run, "build_deps", lambda cfg: object())
 
     async def fake_ingest(cfg, conn):

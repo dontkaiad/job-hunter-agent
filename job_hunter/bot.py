@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import html
 import json
-import sqlite3
 from typing import Any, List, Optional, Set, Tuple
+
+import psycopg
 
 from . import fx as fx_mod
 from . import pipeline, store
@@ -443,7 +444,7 @@ def _build_keyboard(spec: List[ButtonSpec]):
 class JobHunterBot:
     """Encapsulates the aiogram Bot/Dispatcher + a DB connection + Deps."""
 
-    def __init__(self, cfg: Config, conn: sqlite3.Connection, deps: Deps) -> None:
+    def __init__(self, cfg: Config, conn: psycopg.Connection, deps: Deps) -> None:
         self.cfg = cfg
         self.conn = conn
         self.deps = deps

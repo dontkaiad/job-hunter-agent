@@ -1,19 +1,26 @@
--- job-hunter-agent SQLite schema (DESIGN.md §2)
--- Datetimes are ISO-8601 UTC strings. Booleans stored as INTEGER (0/1).
-
-PRAGMA foreign_keys = ON;
+-- job-hunter-agent PostgreSQL schema (DESIGN.md §2)
+--
+-- Behaviour-preserving port of migrations/schema.sql from SQLite. The datetime
+-- convention is DELIBERATELY UNCHANGED: created_at / updated_at / last_post_at
+-- stay TEXT columns holding UTC ISO-8601 strings produced by clock.now_iso().
+-- They are NOT timestamptz — switching types would change the now_iso() string
+-- round-trip and the lexicographic watermark comparison that the incremental
+-- ingestion relies on (all strings are same-format UTC ISO with +00:00).
+--
+-- init_db() runs these statements one-by-one (psycopg3 has no executescript).
+-- Every statement is idempotent (IF NOT EXISTS), so init_db is safe to re-run.
 
 CREATE TABLE IF NOT EXISTS work_items (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    state             TEXT    NOT NULL,
+    id                SERIAL PRIMARY KEY,
+    state             TEXT             NOT NULL,
     source_channel    TEXT,
     source_link       TEXT,
     source_message_id TEXT,
     raw_text          TEXT,
     extracted_json    TEXT,
-    relevance_score   REAL,
-    created_at        TEXT    NOT NULL,
-    updated_at        TEXT    NOT NULL,
+    relevance_score   DOUBLE PRECISION,
+    created_at        TEXT             NOT NULL,
+    updated_at        TEXT             NOT NULL,
     CHECK (state IN (
         'discovered','extracted','scored','rejected','surfaced',
         'skipped','backlog','approved','researched','drafted','sent','closed'
@@ -24,14 +31,14 @@ CREATE INDEX IF NOT EXISTS idx_work_items_state      ON work_items (state);
 CREATE INDEX IF NOT EXISTS idx_work_items_updated_at ON work_items (updated_at);
 
 -- Dedup on (source_channel, source_message_id), enforced only when
--- source_message_id is present (NULLs are distinct in SQLite UNIQUE indexes,
--- and the partial WHERE keeps NULL message ids out of the constraint).
+-- source_message_id is present. A partial unique index (WHERE ...) keeps NULL
+-- message ids out of the constraint, matching the SQLite behaviour.
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_work_items_source
     ON work_items (source_channel, source_message_id)
     WHERE source_message_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS state_transitions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         SERIAL PRIMARY KEY,
     item_id    INTEGER NOT NULL REFERENCES work_items(id),
     from_state TEXT,
     to_state   TEXT    NOT NULL,

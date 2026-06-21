@@ -16,5 +16,16 @@ APScheduler==3.11.2
 # no system tzdata, so ZoneInfo("Europe/Belgrade") would raise without this.
 tzdata==2026.2
 httpx==0.27.2
+# PostgreSQL driver: synchronous psycopg v3. The [binary] extra installs the
+# precompiled libpq wheel (manylinux), so no system libpq / build toolchain is
+# needed in the slim image.
+psycopg[binary]==3.2.9
+
+# --- dev / test only --------------------------------------------------------
 pytest==8.3.3
 pytest-asyncio==0.24.0
+# Ephemeral PostgreSQL for the test suite. With the postgresql_noproc fixture it
+# connects to an externally-provided Postgres (a docker postgres:16 container on
+# this machine) and creates a fresh template-cloned DB per test (function scope),
+# preserving the per-test isolation the old in-memory SQLite gave.
+pytest-postgresql==6.1.1
