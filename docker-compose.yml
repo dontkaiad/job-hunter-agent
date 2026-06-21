@@ -63,6 +63,81 @@ services:
       retries: 3
       start_period: 40s
 
+  # ---------------------------------------------------------------------------
+  # Dashboard (issue #6 part 1): the FastAPI read/draft dashboard served by
+  # uvicorn, as its OWN container — SEPARATE from the bot above. It is published
+  # ONLY on the VPS loopback (127.0.0.1) so the Telegram-login auth gating can be
+  # verified before any public exposure. Public exposure (Caddy/DNS/TLS) is part
+  # 2 and is intentionally NOT configured here.
+  #
+  # This service is INDEPENDENT of `job-hunter`: there is NO depends_on, so
+  # bringing the dashboard up or down never recreates or disturbs the bot. It
+  # only needs the external nexus-arcana-db (not part of this compose project),
+  # reached via the shared network below.
+  dashboard:
+    # Reuse the EXACT build + image of the bot so both share one image (the
+    # dashboard adds no new dependencies). `image: job-hunter:latest` means the
+    # already-built bot image is reused; with --build the same image is rebuilt.
+    build:
+      context: .
+      args:
+        GIT_SHA: "${GIT_SHA:-unknown}"
+    image: job-hunter:latest
+    container_name: dashboard
+    restart: unless-stopped
+
+    # The entrypoint (/docker-entrypoint.sh) runs `exec runuser -u appuser -- "$@"`,
+    # so this command becomes "$@" and uvicorn runs as the non-root appuser.
+    #
+    # `--host 0.0.0.0` is the IN-CONTAINER bind and is REQUIRED + SAFE: Docker's
+    # published-port forwarding connects to the container's IP, so uvicorn must
+    # listen on all interfaces INSIDE the container. This is NOT a public
+    # exposure — the loopback-only guarantee comes ENTIRELY from the host publish
+    # prefix `127.0.0.1:` in `ports:` below, never from the in-container host.
+    command: ["uvicorn", "job_hunter.webapi:app", "--host", "0.0.0.0", "--port", "8000"]
+
+    # Join the SAME shared network as the bot so the dashboard can resolve both
+    # the jobhunter DB and the auth DB on container "nexus-arcana-db".
+    networks:
+      - nexus-arcana_default
+
+    # Same host-side .env as the bot — NO new env vars are required. It supplies
+    # DATABASE_URL, AUTH_DATABASE_URL, SESSION_SECRET, COOKIE_DOMAIN,
+    # SUPERUSER_TG_IDS, TG_LOGIN_BOT_TOKEN, TG_LOGIN_BOT_USERNAME, etc.
+    env_file: .env
+
+    # Mirror the bot's container clock timezone for consistency.
+    environment:
+      TZ: ${TZ:-UTC}
+
+    volumes:
+      # Same READ-ONLY profile mount as the bot, so the /draft endpoint's
+      # build_deps can load the candidate profile.
+      - ./config/profile.local.yaml:/app/config/profile.local.yaml:ro
+
+    # LOOPBACK ONLY. The `127.0.0.1:` host prefix means the published port is
+    # bound to the VPS loopback interface — it is NOT reachable from outside the
+    # VPS. Format is host_ip:host_port:container_port. Do NOT change this to
+    # `8001:8000` or `0.0.0.0:8001:8000`: either would publish on ALL host
+    # interfaces and make the dashboard publicly reachable. Public exposure is
+    # part 2 (Caddy reverse proxy), not this issue.
+    ports:
+      - "127.0.0.1:8001:8000"
+
+    # Liveness check via PYTHON, not curl: the slim base image has NO curl (and
+    # no wget). Python 3 IS in the image, so we use urllib to GET /login — a
+    # PUBLIC route that returns 200 with no auth. urllib.request.urlopen raises
+    # on any non-2xx response, which makes `python -c` exit non-zero -> the
+    # container is reported unhealthy; a 200 exits 0 -> healthy. localhost:8000
+    # is the in-container port (the left side of the ports mapping is irrelevant
+    # inside the container).
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/login', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 # The shared Postgres network, owned by the nexus-arcana compose project. It must
 # already exist; `external: true` tells Compose to attach, not create it.
 networks:
