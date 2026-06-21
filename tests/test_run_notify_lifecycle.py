@@ -1,0 +1,143 @@
+"""run._amain lifecycle: surfaced cards are AWAITED to completion and the bot
+HTTP session is closed LAST (in a finally), under a single asyncio.run.
+
+This is the regression test for the delivery bug where surfaced cards were
+logged ("N surfaced; notifying operator") but never delivered, and teardown
+threw "Unclosed client session" / "Unclosed connector" / "Event loop is
+closed" -- because the aiogram session was never closed and the loop was torn
+down with HTTP requests still in flight.
+
+No real network / aiogram: the JobHunterBot and the ingest path are mocked.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+from job_hunter import run, store
+
+
+class FakeBot:
+    """Stand-in for JobHunterBot in run._amain. Records send order vs close."""
+
+    def __init__(self, cfg, conn, deps):
+        self.cfg = cfg
+        self.conn = conn
+        self.deps = deps
+        self.events = []
+        self.started = 0
+        self.completed = 0
+        self.close_calls = 0
+        self.closed = False
+
+    async def notify_surfaced(self, item_id):
+        self.started += 1
+        self.events.append(("send_start", item_id))
+        await asyncio.sleep(0)
+        if self.closed:
+            raise AssertionError(f"send for {item_id} after close")
+        self.completed += 1
+        self.events.append(("send", item_id))
+
+    async def aclose(self):
+        self.close_calls += 1
+        self.closed = True
+        self.events.append(("close", None))
+
+
+def _seed_surfaced(conn, n):
+    import json
+
+    ids = []
+    for i in range(n):
+        iid = store.insert_item(
+            conn, raw_text=f"job {i}", source_channel="@c", source_message_id=str(i)
+        )
+        store.update_state(
+            conn, iid, "extracted", from_state="discovered",
+            kind="deterministic", actor="system",
+            extracted_json=json.dumps({"title": f"job {i}"}), relevance_score=80.0,
+        )
+        # surfaced is reached via the pipeline normally; here we set it directly
+        # for the lifecycle test (we are NOT testing the state machine).
+        store.update_state(conn, iid, "surfaced", from_state="extracted",
+                           kind="deterministic", actor="system")
+        ids.append(iid)
+    return ids
+
+
+def test_amain_awaits_all_sends_then_closes_session(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "lifecycle.db")
+    conn = store.connect(db_path)
+    store.init_db(conn)
+    ids = _seed_surfaced(conn, 4)
+    conn.close()
+
+    captured = {}
+
+    # Patch the heavy pieces: config, ingest, pipeline, deps, and the Bot.
+    from job_hunter.config import Config
+
+    monkeypatch.setattr(run, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(run, "load_config", lambda: Config(db_path=db_path))
+    monkeypatch.setattr(run, "build_deps", lambda cfg: object())
+
+    async def fake_ingest(cfg, conn):
+        return []
+
+    monkeypatch.setattr(run, "ingest", fake_ingest)
+    monkeypatch.setattr(run.pipeline, "run_to_gate", lambda *a, **k: None)
+
+    def make_bot(cfg, conn, deps):
+        captured["bot"] = FakeBot(cfg, conn, deps)
+        return captured["bot"]
+
+    monkeypatch.setattr(run, "JobHunterBot", make_bot)
+
+    asyncio.run(run._amain())
+
+    bot = captured["bot"]
+    # Every surfaced card was AWAITED to completion.
+    assert bot.started == len(ids)
+    assert bot.completed == len(ids) == bot.started
+    # Session closed exactly once, and LAST (after all sends).
+    assert bot.close_calls == 1
+    assert bot.events[-1] == ("close", None)
+    send_idx = [i for i, (k, _) in enumerate(bot.events) if k == "send"]
+    close_idx = bot.events.index(("close", None))
+    assert all(i < close_idx for i in send_idx)
+    assert len(send_idx) == len(ids)
+
+
+def test_amain_closes_session_even_on_error(tmp_path, monkeypatch):
+    """If the body raises, the finally must still close the bot session so
+    there is never an unclosed client session at loop teardown."""
+    db_path = str(tmp_path / "err.db")
+    conn = store.connect(db_path)
+    store.init_db(conn)
+    conn.close()
+
+    captured = {}
+    from job_hunter.config import Config
+
+    monkeypatch.setattr(run, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(run, "load_config", lambda: Config(db_path=db_path))
+    monkeypatch.setattr(run, "build_deps", lambda cfg: object())
+
+    async def boom_ingest(cfg, conn):
+        raise RuntimeError("ingest blew up")
+
+    monkeypatch.setattr(run, "ingest", boom_ingest)
+
+    def make_bot(cfg, conn, deps):
+        captured["bot"] = FakeBot(cfg, conn, deps)
+        return captured["bot"]
+
+    monkeypatch.setattr(run, "JobHunterBot", make_bot)
+
+    try:
+        asyncio.run(run._amain())
+    except RuntimeError:
+        pass
+
+    assert captured["bot"].close_calls == 1

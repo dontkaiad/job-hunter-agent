@@ -1,0 +1,13 @@
+anthropic==0.40.0
+telethon==1.37.0
+# Pinned at 3.13.1: the Bot API 9.4 inline-button `style` field landed in
+# aiogram 3.23.0+, which requires Python >=3.10,<3.15. This interpreter is
+# 3.9, so upgrading is infeasible. We pass `style` through instead — aiogram's
+# InlineKeyboardButton model is `extra='allow'`, so the field is accepted and
+# serialised into the Bot API JSON (see job_hunter/bot.py::_build_button).
+aiogram==3.13.1
+python-dotenv==1.0.1
+PyYAML==6.0.2
+httpx==0.27.2
+pytest==8.3.3
+pytest-asyncio==0.24.0

@@ -1,0 +1,92 @@
+# ---------------------------------------------------------------------------
+# job-hunter-agent — CANDIDATE PROFILE (example / fictional placeholder)
+#
+# This is a GENERIC, runnable example profile. It contains NO real person's
+# data. The bot loads config/profile.local.yaml if it exists, otherwise it
+# falls back to THIS file (see job_hunter/profile.py).
+#
+# To run the bot for yourself: copy this file to config/profile.local.yaml and
+# fill in your own details. config/profile.local.yaml is gitignored and must
+# NEVER be committed.
+#
+# Every field below is INJECTED into the LLM prompts at runtime (the scoring
+# rubric profile block and the draft instructions). The judge/rubric logic and
+# the honesty/gender RULES live in code (job_hunter/llm.py); the DATA lives
+# here.
+# ---------------------------------------------------------------------------
+
+# Short role headline — what the candidate owns / does.
+role: >-
+  AI / Prompt Engineer who owns model behavior end-to-end (prompts, routing,
+  RAG, output control, cost-optimization). Not a mere "API bolt-on" developer
+  who just calls an LLM endpoint from a backend.
+
+# Target seniority grade and the grade rules.
+target_grade: >-
+  Target MIDDLE. Thinking / architecture is above middle; hard skills are
+  filled in as they go. Does NOT take lead / management roles. A junior-titled
+  role is acceptable ONLY if the salary is at/above the salary floor below.
+
+# Short note on years / proof of skill (kept generic).
+experience_note: >-
+  Several years in IT with some formal employment; proof of skill is the
+  GitHub / portfolio, NOT a formal employment record.
+
+# HANDS-ON skills the candidate MAY claim as real, completed experience.
+hands_on:
+  - prompt engineering, few-shot, prompt regressions
+  - cost-aware routing + caching
+  - production RAG (vector DB, multi-collection, embedding migration)
+  - output control (validate -> retry -> fallback, JSON)
+  - speech / vision / image-gen integrations
+  - local LLM (open-weight models on small hardware)
+  - LLM monitoring / observability
+  - system design / specs / review (coordinates developers)
+
+# IN-DEVELOPMENT items — being learned / built toward, NOT yet hands-on.
+# These must NEVER be presented as completed experience in drafts.
+in_development:
+  - evals (designs them, learning to build them by hand)
+
+# Tech stack. Note caveats inline (e.g. reads/reviews vs writes-from-scratch).
+stack:
+  - Python (reads / reviews / architects, does NOT write from scratch)
+  - major LLM APIs (Claude / OpenAI / Gemini / OpenRouter)
+  - vector DB
+  - LLM observability tooling
+  - FastAPI
+  - aiogram
+  - SQL
+  - Docker
+  - SSH / single-board computers
+
+# Languages note (free text; mention current speaking/writing level honestly).
+languages: >-
+  English at an intermediate working level on paper, currently a bit rusty
+  (recovers quickly).
+
+# LOCATION PRIORITY ladder (highest -> lowest preference). Free-text lines.
+location_priority:
+  - A company offering relocation / work abroad -> top.
+  - Fully remote -> high.
+  - Hybrid -> medium.
+  - Office in home country -> low.
+  - Abroad with relocation / visa sponsorship -> high (relocation is a goal).
+
+# Grammatical gender used for first-person self-reference in drafts.
+# Allowed: "female" (feminine Russian forms), "male" (masculine forms),
+# or "unspecified" (neutral / avoid gendered self-reference).
+gender: unspecified
+
+# Hard salary floor, EUR per month (gross). A junior role is acceptable only
+# at/above this; postings whose salary top is below it are hard-rejected.
+# This is a GENERIC placeholder — set your own in profile.local.yaml.
+salary_floor_eur: 1000
+
+# Draft signature appended verbatim to every generated отклик.
+draft_signature:
+  # GitHub / portfolio URL shown as proof of skill (no scheme prefix).
+  github: github.com/example
+  # Resume reference — a literal PLACEHOLDER the operator swaps at send time.
+  # Never a fabricated real URL.
+  resume: "[resume: link]"
