@@ -59,6 +59,14 @@ postgresql_noproc = factories.postgresql_noproc(
 )
 postgresql = factories.postgresql("postgresql_noproc")
 
+# A SECOND client fixture cloned from the same noproc server, used for the
+# SEPARATE auth/grants database in issue #5 tests (it must be a DIFFERENT DB
+# from the pipeline DB). pytest-postgresql gives each its own fresh template
+# clone, so the two never share state.
+postgresql_auth = factories.postgresql(
+    "postgresql_noproc", dbname="jobhunter_auth_pytest"
+)
+
 
 def _dsn_from_fixture(pg) -> str:
     """Build a postgresql:// DSN from a pytest-postgresql connection's info."""
@@ -158,6 +166,66 @@ def fake_llm():
 @pytest.fixture
 def fake_fx():
     return FakeFx()
+
+
+# --- issue #5 auth test helpers ---------------------------------------------
+
+# A fixed test signing secret + login-bot token + superuser id. Never real.
+TEST_SESSION_SECRET = "test-session-secret-do-not-use-in-prod"
+TEST_LOGIN_BOT_TOKEN = "123456:test-login-bot-token"
+TEST_LOGIN_BOT_USERNAME = "l4rk_test_bot"
+TEST_SUPERUSER_ID = 67686090
+TEST_COOKIE_DOMAIN = ".heylark.dev"
+
+
+@pytest.fixture
+def auth_conn(postgresql_auth):
+    """A connection to the SEPARATE auth/grants Postgres with schema created.
+
+    Distinct DB from the pipeline ``conn`` fixture. Tests seed grants here.
+    """
+    from job_hunter import tg_auth
+
+    dsn = _dsn_from_fixture(postgresql_auth)
+    c = tg_auth.connect_auth(dsn)
+    tg_auth.init_auth_schema(c)
+    yield c
+    c.close()
+
+
+def make_auth_settings(**over):
+    """Build a webapi.AuthSettings with test defaults, overridable per call."""
+    from job_hunter import webapi
+
+    base = dict(
+        session_secret=TEST_SESSION_SECRET,
+        superuser_ids={TEST_SUPERUSER_ID},
+        login_bot_token=TEST_LOGIN_BOT_TOKEN,
+        login_bot_username=TEST_LOGIN_BOT_USERNAME,
+        cookie_domain=TEST_COOKIE_DOMAIN,
+        auth_database_url="postgresql://unused-in-tests",
+    )
+    base.update(over)
+    return webapi.AuthSettings(**base)
+
+
+def apply_auth_overrides(app, auth_conn, **settings_over):
+    """Override the webapi auth dependencies on ``app`` to use the test auth DB
+    and a test AuthSettings. Returns the AuthSettings used."""
+    from job_hunter import webapi
+
+    settings = make_auth_settings(**settings_over)
+    app.dependency_overrides[webapi.get_auth_settings] = lambda: settings
+    app.dependency_overrides[webapi.get_auth_conn] = lambda: auth_conn
+    return settings
+
+
+def make_session_cookie(tg_id, *, remember=False, secret=TEST_SESSION_SECRET):
+    """Mint a valid session cookie token for ``tg_id`` (matches the test secret)."""
+    from job_hunter import tg_auth
+
+    token, _ = tg_auth.issue_session(tg_id, secret=secret, remember=remember)
+    return token
 
 
 @pytest.fixture

@@ -40,7 +40,13 @@ from job_hunter.states import (
     SKIPPED,
     SURFACED,
 )
-from tests.conftest import FakeFx, FakeLLM
+from tests.conftest import (
+    TEST_SUPERUSER_ID,
+    FakeFx,
+    FakeLLM,
+    apply_auth_overrides,
+    make_session_cookie,
+)
 
 
 def _extracted(**over) -> str:
@@ -105,12 +111,14 @@ def deps_factory():
 
 
 @pytest.fixture
-def client(conn, deps_factory):
+def client(conn, auth_conn, deps_factory):
     app = webapi.create_app()
     app.dependency_overrides[webapi.get_conn] = lambda: conn
     app.dependency_overrides[webapi.get_fx] = lambda: FakeFx()
     app.dependency_overrides[webapi.get_deps] = deps_factory
+    apply_auth_overrides(app, auth_conn)
     with TestClient(app) as c:
+        c.cookies.set("hl_session", make_session_cookie(TEST_SUPERUSER_ID))
         yield c
     app.dependency_overrides.clear()
 

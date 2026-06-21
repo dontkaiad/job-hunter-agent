@@ -37,15 +37,20 @@ processed (разобрано / неразобрано) — JUDGMENT CALL (tweak
 from __future__ import annotations
 
 import json
-from typing import Iterator, List, Optional
+import os
+from dataclasses import dataclass
+from typing import Iterator, List, Optional, Set
 
 import psycopg
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from . import fx as fx_mod
 from . import pipeline as pipeline_mod
 from . import store
+from . import tg_auth
 from .config import Config, load_config
 from .pipeline import REASONING_KEY, Deps
 from .schema_extract import ExtractResult, from_dict
@@ -211,9 +216,120 @@ def get_fx(config: Config = Depends(get_config)) -> fx_mod.FxRates:
     return fx_mod.FxRates(provider=config.fx_provider, cache_ttl=config.fx_cache_ttl)
 
 
+# --- Auth (issue #5): Telegram-Login-Widget + SSO cookie + grants ------------
+#
+# The reusable PRIMITIVES live in job_hunter.tg_auth (framework-agnostic). This
+# section is the jobhunter-specific FastAPI GLUE: it threads the config secrets
+# into those primitives via overridable dependencies and gates every /api route.
+
+# The app key this dashboard authorizes against (grants.app). Per-app opt-in:
+# only routers that Depends(require_auth(app=...)) are gated; another app reusing
+# tg_auth would pass its own app name and stays independent.
+APP_NAME = "jobhunter"
+
+# Session cookie name. Shared across heylark apps (same Domain) so it is a
+# single-sign-on token.
+SESSION_COOKIE = "hl_session"
+
+# Templates for the public /login page (HTML kept OUT of this module).
+_TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+
+
+@dataclass
+class AuthSettings:
+    """Resolved auth knobs, injected as ONE dependency so tests can override the
+    secret / superuser set / login-bot token together. NEVER hardcoded — all
+    values come from Config (env)."""
+
+    session_secret: str
+    superuser_ids: Set[int]
+    login_bot_token: str
+    login_bot_username: str
+    cookie_domain: str
+    auth_database_url: str
+
+
+def get_auth_settings(config: Config = Depends(get_config)) -> AuthSettings:
+    """Build AuthSettings from Config. Overridden in tests to inject a test
+    secret, a test superuser set and a fake login-bot token."""
+    return AuthSettings(
+        session_secret=config.session_secret or "",
+        superuser_ids=set(config.superuser_tg_ids),
+        login_bot_token=config.tg_login_bot_token or "",
+        login_bot_username=config.tg_login_bot_username or "",
+        cookie_domain=config.cookie_domain,
+        auth_database_url=config.auth_database_url,
+    )
+
+
+def get_auth_conn(
+    settings: AuthSettings = Depends(get_auth_settings),
+) -> Iterator[psycopg.Connection]:
+    """Yield a connection to the SEPARATE auth Postgres (AUTH_DATABASE_URL),
+    closed after the request. Overridden in tests to inject the ephemeral
+    auth-DB connection with seeded grants. This is a DIFFERENT database from the
+    pipeline DB (get_conn) — it never touches pipeline state."""
+    conn = tg_auth.connect_auth(settings.auth_database_url)
+    try:
+        yield conn
+    finally:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        conn.close()
+
+
+def require_auth(app: str):
+    """Dependency FACTORY: returns a FastAPI dependency that authenticates the
+    session cookie and authorizes the tg_id against ``app``'s grants.
+
+    Behaviour:
+      1. No/invalid session cookie -> 401 for /api/* (JSON). For a non-/api HTML
+         route it 307-redirects to /login instead (so an HTML page could reuse
+         this same gate). All currently-gated routes are /api, so they 401.
+      2. Valid tg_id but not authorized (no approved grant, or pending/denied)
+         -> 403.
+      3. Authorized -> returns the tg_id (endpoints may consume it).
+    """
+
+    def dependency(
+        request: Request,
+        settings: AuthSettings = Depends(get_auth_settings),
+        auth_conn: psycopg.Connection = Depends(get_auth_conn),
+    ) -> int:
+        token = request.cookies.get(SESSION_COOKIE)
+        tg_id = (
+            tg_auth.read_session(token, secret=settings.session_secret)
+            if token
+            else None
+        )
+        if tg_id is None:
+            # API paths return JSON 401; HTML pages would redirect to /login.
+            if request.url.path.startswith("/api"):
+                raise HTTPException(status_code=401, detail="authentication required")
+            raise HTTPException(
+                status_code=307,
+                detail="redirect to login",
+                headers={"Location": "/login"},
+            )
+        if not tg_auth.authorize(
+            auth_conn, tg_id, app, superuser_ids=settings.superuser_ids
+        ):
+            raise HTTPException(status_code=403, detail="not authorized for this app")
+        return tg_id
+
+    return dependency
+
+
 # --- Router / endpoints -----------------------------------------------------
 
-router = APIRouter(prefix="/api", tags=["pipeline"])
+router = APIRouter(
+    prefix="/api",
+    tags=["pipeline"],
+    dependencies=[Depends(require_auth(app=APP_NAME))],
+)
 
 
 @router.get("/pipeline", response_model=List[PipelineItem])
@@ -393,17 +509,6 @@ def get_item_detail(
 # отклик (and avoids an implicit LLM call on every approve).
 
 
-def require_writer() -> None:
-    """Permissive no-op gate for ALL state-changing routes (issue #4).
-
-    Placeholder so issue #5 can implement real auth here (e.g. verify a session
-    / API key) WITHOUT touching any endpoint body — the writer router already
-    depends on it. Today it returns None (allow). Read routes (#3) are on the
-    separate ``router`` and stay unaffected.
-    """
-    return None
-
-
 def get_deps(config: Config = Depends(get_config)) -> Deps:
     """Build the SAME Deps bundle the bot uses (LLM client + FX + profile).
 
@@ -416,11 +521,13 @@ def get_deps(config: Config = Depends(get_config)) -> Deps:
     return build_deps(config)
 
 
-# Writer router: separate from the read ``router`` so #5 auth gates ONLY writes.
+# Writer router: gated by the SAME require_auth as the read router (issue #5
+# folds the #4 no-op require_writer into require_auth). Every /api route — the
+# GETs and all 5 POST actions — is now behind auth+authz.
 writer_router = APIRouter(
     prefix="/api",
     tags=["actions"],
-    dependencies=[Depends(require_writer)],
+    dependencies=[Depends(require_auth(app=APP_NAME))],
 )
 
 
@@ -573,20 +680,118 @@ def draft_item(
     return _build_item_detail(conn, updated, fx)
 
 
+# --- Public auth routes (issue #5): NOT gated -------------------------------
+#
+# These three routes are the login flow and MUST be reachable without a session.
+# They live on a separate router with NO require_auth dependency.
+
+auth_router = APIRouter(tags=["auth"])
+
+# Where to send the user after a successful login. Configurable later; "/" today.
+POST_LOGIN_PATH = "/"
+
+
+def _set_session_cookie(
+    response, token: str, max_age: Optional[int], settings: AuthSettings
+) -> None:
+    """Set the SSO session cookie with the cross-subdomain attributes.
+
+    Domain=COOKIE_DOMAIN (.heylark.dev), HttpOnly, Secure, SameSite=Lax. max_age
+    is ~30d for "remember me" or None for a session cookie (browser-lifetime).
+    """
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=max_age,
+        domain=settings.cookie_domain,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+
+
+@auth_router.get("/login", response_class=HTMLResponse)
+def login_page(
+    request: Request,
+    settings: AuthSettings = Depends(get_auth_settings),
+) -> HTMLResponse:
+    """Public login page rendering the Telegram Login Widget (uses the login
+    bot's USERNAME) + a remember-me checkbox. Template lives in
+    job_hunter/templates/login.html."""
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "bot_username": settings.login_bot_username,
+            "callback_url": "/auth/callback",
+        },
+    )
+
+
+@auth_router.get("/auth/callback")
+def auth_callback(
+    request: Request,
+    settings: AuthSettings = Depends(get_auth_settings),
+    auth_conn: psycopg.Connection = Depends(get_auth_conn),
+) -> RedirectResponse:
+    """Telegram Login Widget redirect target. Verifies the signed payload,
+    authorizes the grant, then mints + sets the SSO cookie and redirects.
+
+    Invalid signature / stale auth_date -> 401. Authenticated but not authorized
+    -> 403. Success -> 303 redirect to POST_LOGIN_PATH with the cookie set."""
+    params = dict(request.query_params)
+    remember = params.pop("remember", "0") in ("1", "true", "True", "on")
+
+    user = tg_auth.verify_login_widget(params, settings.login_bot_token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid Telegram login")
+
+    tg_id = user["id"]
+    if not tg_auth.authorize(
+        auth_conn, tg_id, APP_NAME, superuser_ids=settings.superuser_ids
+    ):
+        raise HTTPException(status_code=403, detail="not authorized for this app")
+
+    token, max_age = tg_auth.issue_session(
+        tg_id, secret=settings.session_secret, remember=remember
+    )
+    # 303 so the browser issues a GET to the post-login path after the redirect.
+    response = RedirectResponse(url=POST_LOGIN_PATH, status_code=303)
+    _set_session_cookie(response, token, max_age, settings)
+    return response
+
+
+@auth_router.post("/logout")
+def logout(settings: AuthSettings = Depends(get_auth_settings)):
+    """Clear the SSO cookie. Uses the SAME key + Domain so it actually clears the
+    cross-subdomain cookie. Returns ok."""
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(
+        key=SESSION_COOKIE,
+        domain=settings.cookie_domain,
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return response
+
+
 # --- App factory ------------------------------------------------------------
 
 
 def create_app() -> FastAPI:
-    """Build the READ-ONLY dashboard FastAPI app.
+    """Build the dashboard FastAPI app.
 
-    Issue #5 (auth) can later add an auth dependency to ``router`` (via
-    ``dependencies=[Depends(require_auth)]``) or wrap ``get_conn`` WITHOUT
-    changing endpoint code — that is why everything goes through the factory,
-    the router, and overridable dependencies.
+    Issue #5: every /api route (the read ``router`` and the action
+    ``writer_router``) is gated by ``require_auth(app="jobhunter")``. The public
+    login flow (``auth_router``: /login, /auth/callback, /logout) is NOT gated.
     """
     app = FastAPI(title="Job Hunter Dashboard API", version="1.0.0")
-    app.include_router(router)
-    app.include_router(writer_router)  # WRITE/action routes (issue #4), auth-ready
+    app.include_router(auth_router)  # public login flow (NOT gated)
+    app.include_router(router)  # read routes (issue #3), now gated
+    app.include_router(writer_router)  # write/action routes (issue #4), now gated
     return app
 
 

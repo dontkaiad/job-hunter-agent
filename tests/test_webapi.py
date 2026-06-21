@@ -29,7 +29,12 @@ from job_hunter.states import (
     SKIPPED,
     SURFACED,
 )
-from tests.conftest import FakeFx
+from tests.conftest import (
+    TEST_SUPERUSER_ID,
+    FakeFx,
+    apply_auth_overrides,
+    make_session_cookie,
+)
 
 
 def _extracted(**over) -> str:
@@ -92,23 +97,28 @@ _seed.counter = 1
 
 
 @pytest.fixture
-def client(conn):
-    """TestClient with get_conn -> test conn and get_fx -> FakeFx (no network)."""
+def client(conn, auth_conn):
+    """Authenticated TestClient: get_conn -> test conn, get_fx -> FakeFx, and a
+    valid superuser session cookie so the (now gated) /api routes pass auth."""
     app = webapi.create_app()
     app.dependency_overrides[webapi.get_conn] = lambda: conn
     app.dependency_overrides[webapi.get_fx] = lambda: FakeFx()
+    apply_auth_overrides(app, auth_conn)
     with TestClient(app) as c:
+        c.cookies.set("hl_session", make_session_cookie(TEST_SUPERUSER_ID))
         yield c
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
-def client_no_fx(conn):
-    """TestClient where FX is absent (get_fx -> None) to assert display=null."""
+def client_no_fx(conn, auth_conn):
+    """Authenticated TestClient where FX is absent (get_fx -> None)."""
     app = webapi.create_app()
     app.dependency_overrides[webapi.get_conn] = lambda: conn
     app.dependency_overrides[webapi.get_fx] = lambda: None
+    apply_auth_overrides(app, auth_conn)
     with TestClient(app) as c:
+        c.cookies.set("hl_session", make_session_cookie(TEST_SUPERUSER_ID))
         yield c
     app.dependency_overrides.clear()
 

@@ -77,6 +77,24 @@ class Config:
     tg_log_chat_id: Optional[int] = None
     tg_log_thread_jobhunter: Optional[int] = None
 
+    # --- Dashboard auth (issue #5): Telegram-Login-Widget + shared SSO ---
+    # Token of the LOGIN bot (the log-bot, e.g. l4rk_sys_bot) that SIGNS the
+    # widget; verify_login_widget uses it. Read from env, NEVER hardcoded.
+    tg_login_bot_token: Optional[str] = None
+    # USERNAME of that same login bot (no @) for the widget's data-telegram-login
+    # attribute on the /login page.
+    tg_login_bot_username: Optional[str] = None
+    # The SAME signing secret across ALL heylark apps — this shared value is what
+    # makes the cookie a cross-subdomain SSO token. Required for auth to work.
+    session_secret: Optional[str] = None
+    # Cookie Domain so the session is shared across *.heylark.dev subdomains.
+    cookie_domain: str = ".heylark.dev"
+    # Telegram user ids that are ALWAYS authorized for every app (no grant row).
+    superuser_tg_ids: Set[int] = field(default_factory=set)
+    # DSN of the SHARED auth Postgres holding the grants table. SEPARATE from
+    # database_url (the pipeline DB). Required for authorization.
+    auth_database_url: str = ""
+
     # FX
     fx_provider: str = "frankfurter"
     fx_cache_ttl: int = 86400
@@ -142,6 +160,12 @@ def load_config(env: Optional[dict] = None) -> Config:
         tg_log_bot_token=get("TG_LOG_BOT_TOKEN") or None,
         tg_log_chat_id=_int_or_none(get("TG_LOG_CHAT_ID")),
         tg_log_thread_jobhunter=_int_or_none(get("TG_LOG_THREAD_JOBHUNTER")),
+        tg_login_bot_token=get("TG_LOGIN_BOT_TOKEN") or None,
+        tg_login_bot_username=get("TG_LOGIN_BOT_USERNAME") or None,
+        session_secret=get("SESSION_SECRET") or None,
+        cookie_domain=get("COOKIE_DOMAIN") or ".heylark.dev",
+        superuser_tg_ids=_split_int_set(get("SUPERUSER_TG_IDS")),
+        auth_database_url=get("AUTH_DATABASE_URL"),
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,
         new_channel_lookback_days=_int_or_none(get("NEW_CHANNEL_LOOKBACK_DAYS")) or 14,

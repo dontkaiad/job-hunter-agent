@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in — Job Hunter</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1115;
+      color: #e6e8eb;
+      display: flex;
+      min-height: 100vh;
+      margin: 0;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #1a1d23;
+      padding: 2.5rem;
+      border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      text-align: center;
+      max-width: 360px;
+      width: 100%;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
+    p { color: #9aa0a6; font-size: 0.9rem; margin: 0 0 1.5rem; }
+    .remember {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      margin-top: 1.25rem;
+      font-size: 0.85rem;
+      color: #9aa0a6;
+    }
+    #tg-widget { display: flex; justify-content: center; min-height: 48px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Job Hunter Dashboard</h1>
+    <p>Sign in with Telegram to continue.</p>
+
+    <div id="tg-widget">
+      <!--
+        Telegram Login Widget. data-telegram-login is the LOGIN bot's username
+        (the bot that signs the widget). On success it redirects to
+        /auth/callback?<widget params>&remember=<0|1> which verifies the HMAC,
+        authorizes the grant, and sets the cross-subdomain session cookie.
+      -->
+      <script
+        async
+        src="https://telegram.org/js/telegram-widget.js?22"
+        data-telegram-login="{{ bot_username }}"
+        data-size="large"
+        data-userpic="true"
+        data-request-access="write"
+        data-auth-url="{{ callback_url }}"></script>
+    </div>
+
+    <label class="remember">
+      <input type="checkbox" id="remember" checked
+             onchange="updateAuthUrl()" />
+      Remember me for 30 days
+    </label>
+  </div>
+
+  <script>
+    // The widget builds the redirect from data-auth-url; append the current
+    // "remember me" choice so /auth/callback can pick the cookie lifetime.
+    function updateAuthUrl() {
+      var script = document.querySelector('#tg-widget script');
+      if (!script) return;
+      var base = "{{ callback_url }}";
+      var remember = document.getElementById('remember').checked ? '1' : '0';
+      var sep = base.indexOf('?') === -1 ? '?' : '&';
+      script.setAttribute('data-auth-url', base + sep + 'remember=' + remember);
+    }
+    updateAuthUrl();
+  </script>
+</body>
+</html>

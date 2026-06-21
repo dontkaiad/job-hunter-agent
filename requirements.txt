@@ -26,6 +26,11 @@ psycopg[binary]==3.2.9
 # driver is introduced — the dashboard reads via the SAME sync psycopg above.
 fastapi==0.115.14
 uvicorn==0.30.6
+# Dashboard auth (issue #5). itsdangerous signs/verifies the stateless session
+# cookie; jinja2 renders the /login page template (kept out of the Python
+# module). Both are pure-Python and 3.9-compatible.
+itsdangerous==2.2.0
+jinja2==3.1.4
 
 # --- dev / test only --------------------------------------------------------
 pytest==8.3.3

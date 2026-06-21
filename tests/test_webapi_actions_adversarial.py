@@ -39,7 +39,13 @@ from job_hunter.states import (
     SKIPPED,
     SURFACED,
 )
-from tests.conftest import FakeFx, FakeLLM
+from tests.conftest import (
+    TEST_SUPERUSER_ID,
+    FakeFx,
+    FakeLLM,
+    apply_auth_overrides,
+    make_session_cookie,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -103,12 +109,14 @@ def _draft_deps() -> Deps:
 
 
 @pytest.fixture
-def client(conn):
+def client(conn, auth_conn):
     app = webapi.create_app()
     app.dependency_overrides[webapi.get_conn] = lambda: conn
     app.dependency_overrides[webapi.get_fx] = lambda: FakeFx()
     app.dependency_overrides[webapi.get_deps] = _draft_deps
+    apply_auth_overrides(app, auth_conn)
     with TestClient(app) as c:
+        c.cookies.set("hl_session", make_session_cookie(TEST_SUPERUSER_ID))
         yield c
     app.dependency_overrides.clear()
 
@@ -237,35 +245,28 @@ def test_sent_action_persists_via_separate_connection(client, conn, pg_dsn):
 # ---------------------------------------------------------------------------
 
 
-def test_auth_gate_blocks_writes_not_reads(conn, pg_dsn):
-    """When require_writer raises 401, all 5 write routes must refuse.
-    The two GET read routes (pipeline + items/{id}) must still succeed.
-
-    This proves the auth injection point is correctly wired for issue #5.
+def test_auth_gate_blocks_all_api_without_session(conn, auth_conn):
+    """Issue #5: with NO session cookie, EVERY /api route (the 2 GET reads and
+    all 5 POST writes) must 401. The #4 require_writer no-op folded into
+    require_auth, so reads are now gated too.
     """
-
-    def _require_401():
-        raise HTTPException(status_code=401, detail="not authenticated")
-
     item_id = _seed(conn, state=SURFACED)
 
     app = webapi.create_app()
     app.dependency_overrides[webapi.get_conn] = lambda: conn
     app.dependency_overrides[webapi.get_fx] = lambda: FakeFx()
     app.dependency_overrides[webapi.get_deps] = _draft_deps
-    app.dependency_overrides[webapi.require_writer] = _require_401
+    apply_auth_overrides(app, auth_conn)
 
-    with TestClient(app) as c:
-        # All 5 write routes must be blocked.
+    with TestClient(app) as c:  # NOTE: no session cookie set
         for action in ("approve", "skip", "backlog", "sent", "draft"):
             r = c.post(f"/api/items/{item_id}/{action}")
             assert r.status_code == 401, (
                 f"write route /{action} should be 401, got {r.status_code}"
             )
-
-        # GET routes must still work (they are on the un-gated `router`).
-        assert c.get("/api/pipeline").status_code == 200
-        assert c.get(f"/api/items/{item_id}").status_code == 200
+        # GET routes are NOW also gated (issue #5).
+        assert c.get("/api/pipeline").status_code == 401
+        assert c.get(f"/api/items/{item_id}").status_code == 401
 
     app.dependency_overrides.clear()
 
@@ -275,7 +276,7 @@ def test_auth_gate_blocks_writes_not_reads(conn, pg_dsn):
 # ---------------------------------------------------------------------------
 
 
-def test_draft_without_llm_returns_409_not_500(conn):
+def test_draft_without_llm_returns_409_not_500(conn, auth_conn):
     """/draft when deps has llm_client=None must return 409 (not 500) and the
     item must stay in 'approved' — no partial write to 'researched'.
 
@@ -290,8 +291,10 @@ def test_draft_without_llm_returns_409_not_500(conn):
     app.dependency_overrides[webapi.get_conn] = lambda: conn
     app.dependency_overrides[webapi.get_fx] = lambda: FakeFx()
     app.dependency_overrides[webapi.get_deps] = lambda: no_llm_deps
+    apply_auth_overrides(app, auth_conn)
 
     with TestClient(app) as c:
+        c.cookies.set("hl_session", make_session_cookie(TEST_SUPERUSER_ID))
         resp = c.post(f"/api/items/{item_id}/draft")
 
     app.dependency_overrides.clear()
