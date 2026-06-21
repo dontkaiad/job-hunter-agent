@@ -1,0 +1,24 @@
+name: Deploy
+
+# Auto-deploy on every push to main: SSH into the VPS, pull, and rebuild the
+# job-hunter container. GIT_SHA is set inline so the ops startup ping keeps the
+# deployed commit hash (see Dockerfile ARG GIT_SHA / job_hunter/tg_logger.py).
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/heylark/job-hunter-agent
+            git pull
+            GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build job-hunter
+            docker compose ps
