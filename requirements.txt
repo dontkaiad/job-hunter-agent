@@ -20,6 +20,12 @@ httpx==0.27.2
 # precompiled libpq wheel (manylinux), so no system libpq / build toolchain is
 # needed in the slim image.
 psycopg[binary]==3.2.9
+# READ-ONLY dashboard API (issue #3). FastAPI 0.115.x is the last line that
+# still supports Python 3.9 (starlette<0.47). uvicorn 0.30.x is the ASGI server
+# for serving it. httpx (above) backs starlette's TestClient. No async DB
+# driver is introduced — the dashboard reads via the SAME sync psycopg above.
+fastapi==0.115.14
+uvicorn==0.30.6
 
 # --- dev / test only --------------------------------------------------------
 pytest==8.3.3

@@ -23,7 +23,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from .clock import now_iso
-from .states import DISCOVERED
+from .states import DISCOVERED, EXTRACTED, SCORED, SURFACED
 
 # PostgreSQL DDL run by init_db(). psycopg3 has no executescript, so the file is
 # split into individual statements and executed one-by-one (all idempotent).
@@ -225,6 +225,72 @@ def list_transitions(conn: psycopg.Connection, item_id: int) -> List[Mapping[str
         "SELECT * FROM state_transitions WHERE item_id = %s ORDER BY id ASC",
         (item_id,),
     ).fetchall()
+
+
+# --- Read-only dashboard queries (issue #3) ---------------------------------
+# Additive, pure-read helpers for the READ-ONLY FastAPI dashboard. They NEVER
+# write/commit and do NOT change any state. Column-backed filters (state /
+# relevance_score) are applied in SQL here; extracted_json-backed filters
+# (remote, free-text q) live in the API layer because extracted_json is a TEXT
+# JSON blob, not jsonb — so jsonb operators are not used.
+
+# "processed" partition (разобрано / неразобрано). UNPROCESSED = still in the
+# review inbox / automated pipeline; PROCESSED = a human acted or the item is
+# resolved. This is a judgment call (see webapi.py) the user can tweak.
+_UNPROCESSED_STATES = (DISCOVERED, EXTRACTED, SCORED, SURFACED)
+
+
+def list_pipeline(
+    conn: psycopg.Connection,
+    *,
+    status: Optional[str] = None,
+    min_score: Optional[float] = None,
+    processed: Optional[bool] = None,
+    limit: int = 1000,
+) -> List[WorkItem]:
+    """Return work items for the dashboard, SQL-side filtered (READ-ONLY).
+
+    Only COLUMN-backed filters are applied here:
+      - ``status``: exact ``state = %s``.
+      - ``min_score``: ``relevance_score >= %s``. Rows with a NULL score are
+        EXCLUDED when ``min_score`` is set (a NULL score cannot satisfy a
+        numeric floor).
+      - ``processed``: partition over ``state`` (see ``_UNPROCESSED_STATES``).
+
+    remote / free-text ``q`` filtering is intentionally NOT done here (they need
+    the parsed extracted_json blob) — the API layer applies them in Python.
+
+    Ordered by relevance_score DESC (NULLS LAST), then created_at DESC, so the
+    most relevant, most recent items come first. No writes, no commit.
+    """
+    clauses: List[str] = []
+    params: list = []
+
+    if status is not None:
+        clauses.append("state = %s")
+        params.append(status)
+
+    if min_score is not None:
+        clauses.append("relevance_score IS NOT NULL AND relevance_score >= %s")
+        params.append(float(min_score))
+
+    if processed is not None:
+        placeholders = ", ".join(["%s"] * len(_UNPROCESSED_STATES))
+        if processed:
+            clauses.append(f"state NOT IN ({placeholders})")
+        else:
+            clauses.append(f"state IN ({placeholders})")
+        params.extend(_UNPROCESSED_STATES)
+
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(int(limit))
+    rows = conn.execute(
+        "SELECT * FROM work_items"
+        + where
+        + " ORDER BY relevance_score DESC NULLS LAST, created_at DESC LIMIT %s",
+        params,
+    ).fetchall()
+    return [WorkItem.from_row(r) for r in rows]
 
 
 # --- Per-channel ingestion watermark (channel_state) ------------------------
