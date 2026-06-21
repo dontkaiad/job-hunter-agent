@@ -44,10 +44,21 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from . import fx as fx_mod
+from . import pipeline as pipeline_mod
 from . import store
 from .config import Config, load_config
-from .pipeline import REASONING_KEY
+from .pipeline import REASONING_KEY, Deps
 from .schema_extract import ExtractResult, from_dict
+from .states import (
+    APPROVED,
+    DECISION_APPROVE,
+    DECISION_BACKLOG,
+    DECISION_SEND,
+    DECISION_SKIP,
+    DRAFTED,
+    RESEARCHED,
+    transition_for_decision,
+)
 
 # Generous cap on the flat pipeline list (the dashboard is not paginated yet).
 _PIPELINE_LIMIT = 1000
@@ -172,11 +183,16 @@ def get_config() -> Config:
 
 
 def get_conn(config: Config = Depends(get_config)) -> Iterator[psycopg.Connection]:
-    """Yield a READ-ONLY psycopg connection from ``cfg.database_url``.
+    """Yield a psycopg connection from ``cfg.database_url`` (one per request).
 
-    A new connection per request, closed after. The endpoints never commit; we
-    rollback on teardown to drop any implicit read transaction. Tests override
-    this dependency to inject the ephemeral test connection.
+    Used by BOTH the read routes (#3) and the action/write routes (#4). The
+    GET endpoints never write; the action endpoints mutate state ONLY via
+    ``pipeline.advance_by_id`` / ``pipeline.run_to_gate``, which commit
+    internally (the store update runs with commit enabled). The teardown
+    rollback is therefore a no-op after a committed write and simply drops any
+    uncommitted read transaction otherwise. A new connection per request keeps
+    the API concurrency-safe with the bot at the PG level. Tests override this
+    dependency to inject the ephemeral test connection.
     """
     conn = store.connect(config.database_url)
     try:
@@ -272,18 +288,19 @@ def get_pipeline(
     return out
 
 
-@router.get("/items/{item_id}", response_model=ItemDetail)
-def get_item_detail(
-    item_id: int,
-    conn: psycopg.Connection = Depends(get_conn),
-    fx: fx_mod.FxRates = Depends(get_fx),
+def _build_item_detail(
+    conn: psycopg.Connection,
+    item: store.WorkItem,
+    fx: Optional[fx_mod.FxRates],
 ) -> ItemDetail:
-    """Full detail for one item incl. reasoning, draft, research and the state
-    transition history. READ-ONLY. 404 when the id does not exist."""
-    item = store.get_item(conn, item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
+    """Serialize a WorkItem into the full ItemDetail (the #3 detail shape).
 
+    Shared by the READ-ONLY ``GET /items/{id}`` and the WRITE/action endpoints so
+    every "return the updated item" response uses the IDENTICAL serializer (with
+    the new status + draft text + «Обоснование» + history). Callers that mutate
+    state MUST re-read the item (``store.get_item``) AFTER the transition and pass
+    the fresh row here.
+    """
     ex, data = _parse_extracted(item.extracted_json)
 
     reasoning = data.get(REASONING_KEY)
@@ -299,7 +316,7 @@ def get_item_detail(
             reason=t.get("reason"),
             created_at=t.get("created_at"),
         )
-        for t in store.list_transitions(conn, item_id)
+        for t in store.list_transitions(conn, item.id)
     ]
 
     return ItemDetail(
@@ -334,6 +351,228 @@ def get_item_detail(
     )
 
 
+@router.get("/items/{item_id}", response_model=ItemDetail)
+def get_item_detail(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+) -> ItemDetail:
+    """Full detail for one item incl. reasoning, draft, research and the state
+    transition history. READ-ONLY. 404 when the id does not exist."""
+    item = store.get_item(conn, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
+    return _build_item_detail(conn, item, fx)
+
+
+# --- WRITE / action endpoints (issue #4) ------------------------------------
+#
+# SOLE-WRITER DISCIPLINE: these endpoints NEVER write state directly. Every
+# mutation goes through the EXACT pipeline functions the Telegram bot uses —
+# ``pipeline.advance_by_id`` (HITL decisions) and ``pipeline.run_to_gate`` (the
+# agent T10/T11 chain) — so ``advance()`` remains the SOLE writer of
+# work_items.state. No ``store.update_state`` / no direct state SQL lives here.
+#
+# Action -> bot button -> decision -> transition map (mirrors bot.ACTION_TO_
+# DECISION + states.TRANSITIONS):
+#   approve  -> «✅» -> DECISION_APPROVE -> T7 surfaced->approved / T8 backlog->approved
+#   skip     -> «⏭️» -> DECISION_SKIP    -> T5 surfaced->skipped  / T9 backlog->skipped
+#   backlog  -> «📥» -> DECISION_BACKLOG -> T6 surfaced->backlog
+#   sent     -> «✅ Отправила» -> DECISION_SEND -> T12 drafted->sent
+#   draft    -> (no single button) run_to_gate -> T10 approved->researched,
+#               T11 researched->drafted (the SAME chain the bot fires after a
+#               successful approve).
+#
+# APPROVE / DRAFT SPLIT: the bot FUSES approve + auto-draft in handle_callback
+# (it runs run_to_gate right after a successful approve and then notifies the
+# draft). For the dashboard we SPLIT these into two routes that call the
+# IDENTICAL underlying functions: POST /approve performs ONLY the approve
+# transition (item ends in 'approved'); POST /draft is the separate step that
+# runs the SAME run_to_gate to drive approved->researched->drafted. This suits a
+# dashboard where the operator approves first, then explicitly generates the
+# отклик (and avoids an implicit LLM call on every approve).
+
+
+def require_writer() -> None:
+    """Permissive no-op gate for ALL state-changing routes (issue #4).
+
+    Placeholder so issue #5 can implement real auth here (e.g. verify a session
+    / API key) WITHOUT touching any endpoint body — the writer router already
+    depends on it. Today it returns None (allow). Read routes (#3) are on the
+    separate ``router`` and stay unaffected.
+    """
+    return None
+
+
+def get_deps(config: Config = Depends(get_config)) -> Deps:
+    """Build the SAME Deps bundle the bot uses (LLM client + FX + profile).
+
+    Reuses ``bot.build_deps(cfg)`` so the API's research/draft steps run through
+    the identical collaborators as the Telegram path. Overridden in tests to
+    inject a FAKE llm_client/fx so NO network/auth call happens.
+    """
+    from .bot import build_deps
+
+    return build_deps(config)
+
+
+# Writer router: separate from the read ``router`` so #5 auth gates ONLY writes.
+writer_router = APIRouter(
+    prefix="/api",
+    tags=["actions"],
+    dependencies=[Depends(require_writer)],
+)
+
+
+# Maps the action route -> the HITL decision the bot's button sends.
+_DECISION_LABELS = {
+    DECISION_APPROVE: "approve",
+    DECISION_SKIP: "skip",
+    DECISION_BACKLOG: "backlog",
+    DECISION_SEND: "sent",
+}
+
+
+def _apply_decision(
+    conn: psycopg.Connection,
+    item_id: int,
+    decision: str,
+    fx: Optional[fx_mod.FxRates],
+    deps: Deps,
+) -> ItemDetail:
+    """Run a single HITL decision through advance_by_id and serialize the result.
+
+    advance() is the SOLE transition guard: we DO NOT pre-check legality, we
+    inspect the AdvanceResult. ``status == 'moved'`` -> 200 with the re-read item.
+    Any non-moved status ('needs_human' / 'terminal' / 'noop') is an invalid
+    transition for the current state -> 409 Conflict naming the state + action.
+    404 when the id is unknown.
+    """
+    item = store.get_item(conn, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
+
+    current_state = item.state
+    result = pipeline_mod.advance_by_id(conn, item_id, decision=decision, deps=deps)
+
+    if result.status != "moved":
+        label = _DECISION_LABELS.get(decision, decision)
+        # transition_for_decision gives a nicer message, but advance() is the gate.
+        legal = transition_for_decision(current_state, decision)
+        hint = "" if legal else f" (no '{label}' transition from '{current_state}')"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"cannot '{label}' item {item_id} in state '{current_state}'"
+                f"{hint}: advance returned '{result.status}'"
+            ),
+        )
+
+    # Re-read AFTER the transition (advance committed internally) for the response.
+    updated = store.get_item(conn, item_id)
+    if updated is None:  # pragma: no cover - just-moved item cannot vanish
+        raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
+    return _build_item_detail(conn, updated, fx)
+
+
+@writer_router.post("/items/{item_id}/approve", response_model=ItemDetail)
+def approve_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_APPROVE: T7 surfaced->approved or T8 backlog->approved.
+
+    ONLY the approve transition (split from auto-draft; see module note). The
+    item ends in 'approved'; call POST /draft next to generate the отклик."""
+    return _apply_decision(conn, item_id, DECISION_APPROVE, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/skip", response_model=ItemDetail)
+def skip_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_SKIP: T5 surfaced->skipped or T9 backlog->skipped."""
+    return _apply_decision(conn, item_id, DECISION_SKIP, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/backlog", response_model=ItemDetail)
+def backlog_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_BACKLOG: T6 surfaced->backlog."""
+    return _apply_decision(conn, item_id, DECISION_BACKLOG, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/sent", response_model=ItemDetail)
+def sent_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_SEND: T12 drafted->sent (the bot's «✅ Отправила» manual-confirm)."""
+    return _apply_decision(conn, item_id, DECISION_SEND, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/draft", response_model=ItemDetail)
+def draft_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """Drive an approved/researched item to DRAFTED via the SAME run_to_gate the
+    bot uses (T10 research + T11 draft, both through advance()). Returns the
+    updated item incl. the отклик (draft text from extracted_json "draft").
+
+    - approved / researched -> run_to_gate -> expect DRAFTED -> 200.
+    - already 'drafted'      -> idempotent: return the existing draft, NO LLM rerun.
+    - any other state        -> 409 (cannot draft from there).
+    """
+    item = store.get_item(conn, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
+
+    if item.state == DRAFTED:
+        # Idempotent: do NOT re-run the LLM; return the already-generated draft.
+        return _build_item_detail(conn, item, fx)
+
+    if item.state not in (APPROVED, RESEARCHED):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"cannot draft item {item_id} in state '{item.state}': "
+                f"draft requires 'approved' or 'researched'"
+            ),
+        )
+
+    # SAME agent chain the bot runs after an approve. advance() stays sole writer.
+    pipeline_mod.run_to_gate(conn, item_id, deps=deps)
+
+    updated = store.get_item(conn, item_id)
+    if updated is None:  # pragma: no cover
+        raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
+    if updated.state != DRAFTED:
+        # run_to_gate could not reach DRAFTED (e.g. no LLM client wired). Surface
+        # a clear conflict rather than a misleading 200 with no draft.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"draft for item {item_id} did not reach 'drafted' "
+                f"(stopped at '{updated.state}')"
+            ),
+        )
+    return _build_item_detail(conn, updated, fx)
+
+
 # --- App factory ------------------------------------------------------------
 
 
@@ -347,6 +586,7 @@ def create_app() -> FastAPI:
     """
     app = FastAPI(title="Job Hunter Dashboard API", version="1.0.0")
     app.include_router(router)
+    app.include_router(writer_router)  # WRITE/action routes (issue #4), auth-ready
     return app
 
 
