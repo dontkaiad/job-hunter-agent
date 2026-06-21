@@ -55,6 +55,8 @@ order is: shut the scheduler down, then ``bot.aclose()``, then ``conn.close()``
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -68,6 +70,48 @@ from .config import Config, load_config
 # Daily harvest time (LOCAL to the resolved schedule timezone).
 HARVEST_HOUR = 10
 HARVEST_MINUTE = 0
+
+# --- Heartbeat healthcheck (Part C) -----------------------------------------
+# A background task writes the current epoch to HEARTBEAT_PATH every
+# HEARTBEAT_INTERVAL_S seconds. The docker-compose healthcheck reads this file
+# and marks the container unhealthy if it goes stale (> 90s old), which catches
+# a wedged event loop that a "is the PID alive?" grep would miss.
+HEARTBEAT_PATH_DEFAULT = "/tmp/heartbeat"
+HEARTBEAT_INTERVAL_S = 30
+
+
+def heartbeat_path() -> str:
+    """Resolve the heartbeat file path (HEARTBEAT_PATH env, default /tmp)."""
+    return os.environ.get("HEARTBEAT_PATH") or HEARTBEAT_PATH_DEFAULT
+
+
+def write_heartbeat(path: str) -> None:
+    """Write the current epoch (int seconds) to ``path``. NEVER raises.
+
+    The whole body is guarded so a transient write error (full /tmp, perms)
+    can never crash the heartbeat loop. Uses time.time() directly — this is a
+    liveness epoch file, NOT a stored business timestamp, so it does not go
+    through clock.now_utc.
+    """
+    try:
+        with open(path, "w", encoding="ascii") as f:
+            f.write(str(int(time.time())))
+    except Exception:
+        # Liveness file only; a failed write must not take down the loop.
+        pass
+
+
+async def heartbeat_loop(path: str, interval: float = HEARTBEAT_INTERVAL_S) -> None:
+    """Write the heartbeat every ``interval`` seconds until cancelled.
+
+    Writes once immediately (so the file exists right after startup, before the
+    first interval elapses), then loops. Cancellation (on shutdown) propagates
+    out cleanly via CancelledError.
+    """
+    write_heartbeat(path)
+    while True:
+        await asyncio.sleep(interval)
+        write_heartbeat(path)
 
 
 def resolve_schedule_tz(name: str | None):
@@ -151,8 +195,6 @@ async def _amain(cfg: Config | None = None) -> None:
     # Resolve the schedule timezone (local default; never hardcoded UTC) and
     # build the scheduler with one daily 10:00-local harvest using the SHARED
     # run.harvest path. The factory makes a fresh coroutine on each fire.
-    import os
-
     tz = resolve_schedule_tz(os.environ.get("SCHEDULE_TZ"))
     scheduler = build_scheduler(
         lambda: run_mod.harvest(cfg, conn, bot, deps),
@@ -163,6 +205,12 @@ async def _amain(cfg: Config | None = None) -> None:
         f"[serve] long-polling started (db={cfg.db_path}); "
         f"daily harvest at {HARVEST_HOUR:02d}:{HARVEST_MINUTE:02d} {tz}; Ctrl-C to stop"
     )
+    # Heartbeat: a background task on THIS loop writes the liveness epoch file
+    # every 30s. Created with asyncio.create_task BEFORE awaiting polling so it
+    # runs concurrently under the SAME asyncio.run; cancelled in the finally.
+    hb_path = heartbeat_path()
+    hb_task = asyncio.create_task(heartbeat_loop(hb_path))
+
     try:
         # Start the scheduler FIRST (non-blocking: it just arms the loop timer),
         # then await polling which blocks for the whole lifetime. The scheduler
@@ -170,6 +218,15 @@ async def _amain(cfg: Config | None = None) -> None:
         scheduler.start()
         await bot.run()
     finally:
+        # Stop the heartbeat task first (cancel + await its CancelledError) so it
+        # is fully torn down alongside the scheduler/bot — no orphaned task.
+        hb_task.cancel()
+        try:
+            await hb_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
         # Shut the scheduler down BEFORE closing the bot session / DB, so no
         # harvest can start running against a closed session or connection.
         # wait=False: don't block teardown on an in-flight job during a Ctrl-C.

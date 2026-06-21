@@ -2,7 +2,15 @@
 # host-mounted SQLite DB and a read-only host-mounted candidate profile.
 services:
   job-hunter:
-    build: .
+    build:
+      context: .
+      # Inject the short git sha at BUILD time for the ops startup ping. The
+      # .git dir is excluded from the image (.dockerignore), so the sha cannot
+      # be read from git at runtime — it must be baked in here. Build with:
+      #   GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+      # Falls back to "unknown" if GIT_SHA is not exported.
+      args:
+        GIT_SHA: "${GIT_SHA:-unknown}"
     image: job-hunter:latest
     container_name: job-hunter
     # Survive crashes and host reboots, but not an explicit `docker compose stop`.
@@ -33,20 +41,19 @@ services:
 
     # No ports: the bot is outbound-only (long-polling + sending). No dashboard.
 
-    # Liveness check: is the serve process running? The python:3.9-slim base has
-    # no pgrep/procps, so we ask the OS for the PID-1 command line and grep for
-    # our module (PID 1 is the ENTRYPOINT `python -m job_hunter.serve`).
+    # Liveness check: FRESHNESS of the heartbeat file (runbook pattern, like
+    # Nexus/Arcana). serve writes the current epoch to /tmp/heartbeat every 30s
+    # from a background asyncio task on the same loop as polling. The container
+    # is healthy while that file is younger than 90s: if serve's loop wedges or
+    # dies, the file goes stale and the check fails. This catches a HUNG process
+    # that a mere "is the PID alive?" grep would miss.
     #
-    # The test below uses NO `$` and NO command substitution, so Compose
-    # interpolation is irrelevant — there is no `$$`-escaping concern at all.
-    # `tr` converts the NUL-separated /proc/1/cmdline to spaces so grep can
-    # match the module name (a plain grep on raw NUL bytes is unreliable), via
-    # a direct pipe straight into grep.
+    # `$$` is Compose escaping: it renders to a literal `$` in the container, so
+    # the actual shell runs:
+    #   test $(( $(date +%s) - $(cat /tmp/heartbeat) )) -lt 90
     healthcheck:
-      test:
-        - CMD-SHELL
-        - tr '\0' ' ' < /proc/1/cmdline | grep -q job_hunter.serve || exit 1
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(cat /tmp/heartbeat) )) -lt 90"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 40s

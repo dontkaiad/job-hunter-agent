@@ -477,6 +477,15 @@ class JobHunterBot:
         async def on_callback(cb: CallbackQuery) -> None:  # noqa: ANN001
             await self.handle_callback(cb)
 
+        # --- Ops-channel plumbing (Part B) -------------------------------
+        # Wire the ops startup ping + global error handler onto THIS existing
+        # dispatcher (never a second Dispatcher). The handler bodies live as
+        # bound methods (on_startup / on_error) so they are directly unit-
+        # testable; here we just register them on the dispatcher's startup and
+        # errors observers.
+        self._dp.startup.register(self.on_startup)
+        self._dp.errors.register(self.on_error)
+
     def _make_access_gate(self):
         """Build the aiogram outer middleware that enforces the allowlist.
 
@@ -499,6 +508,38 @@ class JobHunterBot:
             return await handler(event, data)
 
         return access_gate
+
+    # --- Ops-channel hooks (Part B) -----------------------------------------
+
+    async def on_startup(self) -> None:
+        """aiogram @dp.startup() hook: ping the ops channel when polling starts.
+
+        SHORT_SHA is injected at image BUILD time (.dockerignore excludes .git,
+        so it cannot be read from git at runtime inside the container); defaults
+        to "unknown" for local runs. ``tg_logger.send_log`` no-ops gracefully
+        when the ops vars are unset and never raises.
+        """
+        import os as _os
+
+        from . import tg_logger
+
+        short_sha = _os.environ.get("GIT_SHA", "unknown")
+        await tg_logger.send_log(f"✅ jobhunter поднялся {short_sha}")
+
+    async def on_error(self, event) -> bool:  # noqa: ANN001
+        """aiogram @dp.errors() global handler: report unhandled errors to ops.
+
+        Receives an ErrorEvent whose ``exception`` is the unhandled error (we
+        fall back to the event itself if shaped otherwise). The send is
+        DEBOUNCED in tg_logger so a flapping update cannot flood the ops topic,
+        and never raises. Returns True to mark the error handled so it does not
+        crash the polling loop.
+        """
+        from . import tg_logger
+
+        exc = getattr(event, "exception", event)
+        await tg_logger.send_error_log(exc)
+        return True
 
     async def notify_surfaced(self, item_id: int) -> None:
         """Send a surfaced job with approve/backlog/skip buttons."""

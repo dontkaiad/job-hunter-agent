@@ -118,18 +118,26 @@ mkdir -p data                                          # host dir for the SQLite
 ```
 
 In `.env` set, at minimum, `BOT_TOKEN`, `NOTIFY_CHAT_ID`, `TELEGRAM_CHANNELS`,
-`ANTHROPIC_API_KEY`, and for the container set the DB path + timezone:
+`ANTHROPIC_API_KEY`, and for the container set the timezone:
 
 ```ini
-DB_PATH=/app/data/job_hunter.db   # matches the ./data:/app/data volume
 SCHEDULE_TZ=Europe/Belgrade       # the 10:00 harvest fires at 10:00 in this tz
 TZ=Europe/Belgrade                # container OS clock (same value as SCHEDULE_TZ)
+# DB_PATH defaults to /app/data/job_hunter.db inside the image (baked into the
+# Dockerfile), so you do NOT need to set it for Docker. Set it only to override.
 ```
 
-Then build and start:
+Optionally set the ops-logging vars (`TG_LOG_BOT_TOKEN`, `TG_LOG_CHAT_ID`,
+`TG_LOG_THREAD_JOBHUNTER`) to get startup pings + error notifications in a
+separate Telegram ops topic. They are optional — if unset, ops logging is a
+silent no-op.
+
+Then build and start. **Pass the short git sha at build time** so the startup
+ping reports which commit is running (the `.git` dir is excluded from the image,
+so the sha cannot be read at runtime — it must be baked in):
 
 ```bash
-docker compose up -d --build
+GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 docker compose logs -f job-hunter   # watch polling + the daily harvest
 ```
 
@@ -144,8 +152,14 @@ Notes:
   `docker compose restart` re-uses the old environment).
 - **No ports.** The bot is outbound-only (long-polling + sending); there is no
   dashboard, so the service publishes nothing.
-- **Healthcheck.** A lightweight check confirms the `serve` process is alive
-  (`restart: unless-stopped` revives it on crash / reboot).
+- **Healthcheck.** `serve` writes a heartbeat (epoch) to `/tmp/heartbeat` every
+  30s from a background task on the polling loop; the compose healthcheck marks
+  the container unhealthy if that file is older than 90s, catching a wedged loop
+  (not just a dead PID). `restart: unless-stopped` revives it on crash / reboot.
+- **Ownership.** The container starts as root, the entrypoint `chown`s the
+  bind-mounted `/app/data` to the non-root `appuser` (uid 10001), then drops
+  privileges (via `runuser`) before running `serve` — so the DB file is created
+  and owned correctly on the host volume and survives recreates.
 - **Timezone.** `SCHEDULE_TZ` controls the 10:00 harvest trigger; if left empty
   it falls back to the system local timezone (never hardcoded UTC). It affects
   the trigger only — stored timestamps are always UTC.

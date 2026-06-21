@@ -66,6 +66,15 @@ class Config:
     # Storage
     db_path: str = "job_hunter.db"
 
+    # Ops logging (OPTIONAL): a separate "ops" Telegram bot/chat/thread that
+    # receives lifecycle pings (startup) and error notifications. These are
+    # first-class config fields, but tg_logger reads os.environ directly so the
+    # logger stays self-contained/importable with no Config dependency. When the
+    # token or chat id is empty the logger no-ops (graceful degradation).
+    tg_log_bot_token: Optional[str] = None
+    tg_log_chat_id: Optional[int] = None
+    tg_log_thread_jobhunter: Optional[int] = None
+
     # FX
     fx_provider: str = "frankfurter"
     fx_cache_ttl: int = 86400
@@ -128,6 +137,9 @@ def load_config(env: Optional[dict] = None) -> Config:
         notify_chat_id=notify_chat_id,
         allowed_user_ids=allowed_user_ids,
         db_path=get("DB_PATH") or "job_hunter.db",
+        tg_log_bot_token=get("TG_LOG_BOT_TOKEN") or None,
+        tg_log_chat_id=_int_or_none(get("TG_LOG_CHAT_ID")),
+        tg_log_thread_jobhunter=_int_or_none(get("TG_LOG_THREAD_JOBHUNTER")),
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,
         new_channel_lookback_days=_int_or_none(get("NEW_CHANNEL_LOOKBACK_DAYS")) or 14,
