@@ -99,6 +99,61 @@ button); without it, Approve still advances the state but no draft is produced.
 > Note: `python -m job_hunter.bot` is an alias of `python -m job_hunter.serve`
 > (same startup → polling → graceful-teardown lifecycle).
 
+## Deploy (Docker / VPS)
+
+One container runs the long-lived `serve` process: aiogram long-polling **plus**
+a single daily harvest (the same ingest → score → notify path as
+`python -m job_hunter.run`) fired at **10:00 local time**, all under one event
+loop. So the container both delivers fresh cards every morning and handles the
+Approve / Backlog / Skip / «Отправила» taps continuously.
+
+The real secrets and your real profile live **on the host** and are never
+committed or baked into the image:
+
+```bash
+# On the VPS, in the repo dir:
+cp .env.example .env                                   # fill in real values
+cp config/profile.example.yaml config/profile.local.yaml   # fill in your profile
+mkdir -p data                                          # host dir for the SQLite DB
+```
+
+In `.env` set, at minimum, `BOT_TOKEN`, `NOTIFY_CHAT_ID`, `TELEGRAM_CHANNELS`,
+`ANTHROPIC_API_KEY`, and for the container set the DB path + timezone:
+
+```ini
+DB_PATH=/app/data/job_hunter.db   # matches the ./data:/app/data volume
+SCHEDULE_TZ=Europe/Belgrade       # the 10:00 harvest fires at 10:00 in this tz
+TZ=Europe/Belgrade                # container OS clock (same value as SCHEDULE_TZ)
+```
+
+Then build and start:
+
+```bash
+docker compose up -d --build
+docker compose logs -f job-hunter   # watch polling + the daily harvest
+```
+
+Notes:
+
+- **Persistence.** The SQLite DB lives on the host in `./data` (mounted to
+  `/app/data`) and survives `--force-recreate` / image rebuilds. The candidate
+  profile is bind-mounted **read-only** from `./config/profile.local.yaml`, so
+  the real profile stays on the host, never in the image.
+- **env_file is read at container CREATE, not on restart.** After editing
+  `.env`, apply it with `docker compose up -d --force-recreate` (a plain
+  `docker compose restart` re-uses the old environment).
+- **No ports.** The bot is outbound-only (long-polling + sending); there is no
+  dashboard, so the service publishes nothing.
+- **Healthcheck.** A lightweight check confirms the `serve` process is alive
+  (`restart: unless-stopped` revives it on crash / reboot).
+- **Timezone.** `SCHEDULE_TZ` controls the 10:00 harvest trigger; if left empty
+  it falls back to the system local timezone (never hardcoded UTC). It affects
+  the trigger only — stored timestamps are always UTC.
+
+The one-shot `python -m job_hunter.run` still works unchanged if you want to
+harvest by hand or via host cron instead of (or in addition to) the in-container
+daily schedule.
+
 ## Tests
 
 ```bash

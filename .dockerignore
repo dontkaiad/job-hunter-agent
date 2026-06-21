@@ -1,0 +1,27 @@
+# Keep the image lean and NEVER bake secrets / personal data / local state.
+# (The build context copies everything except these.)
+
+# Secrets & personal data — must live on the HOST and be bind-mounted, never
+# baked into the image.
+.env
+.env.*
+!.env.example
+config/profile.local.yaml
+
+# Local SQLite DB(s) and Telegram session files — host-mounted / regenerated.
+*.db
+*.session
+*.session-journal
+data/
+
+# Virtualenv / VCS / caches / tests — not needed at runtime, bloat the image.
+.venv
+.git
+.gitignore
+__pycache__/
+*.py[codz]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+.claude/

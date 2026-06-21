@@ -223,6 +223,13 @@ __marimo__/
 job_hunter.db
 *.db
 
+# Docker host-mounted persistence: the SQLite DB lives in ./data on the host
+# (mounted to /app/data). Never commit the DB or its dir. (Dockerfile,
+# docker-compose.yml and .dockerignore ARE committed — only this data dir and
+# the secrets/profile below stay ignored.)
+/data/
+data/
+
 # Local (REAL) candidate profile — holds personal data, NEVER commit it.
 # The bot falls back to config/profile.example.yaml (committed, generic).
 config/profile.local.yaml

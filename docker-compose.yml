@@ -1,0 +1,52 @@
+# One container: aiogram long-polling + a daily 10:00-local harvest, sharing the
+# host-mounted SQLite DB and a read-only host-mounted candidate profile.
+services:
+  job-hunter:
+    build: .
+    image: job-hunter:latest
+    container_name: job-hunter
+    # Survive crashes and host reboots, but not an explicit `docker compose stop`.
+    restart: unless-stopped
+
+    # Host-side .env (gitignored) is read at CONTAINER CREATE time — NOT baked
+    # into the image. NOTE: changing .env requires `docker compose up -d
+    # --force-recreate` to take effect (a plain restart re-uses the old env).
+    env_file: .env
+
+    # Container clock + scheduler timezone. TZ sets the OS clock so "10:00
+    # local" is correct; SCHEDULE_TZ (read from env_file too) is what the
+    # scheduler's cron trigger actually uses. Default to UTC only if TZ is unset
+    # on the host so command stays valid; set TZ/SCHEDULE_TZ in .env to your tz.
+    environment:
+      TZ: ${TZ:-UTC}
+
+    volumes:
+      # Persist the SQLite DB on the HOST so it survives `docker compose
+      # up --force-recreate` / image rebuilds. cfg.db_path must resolve to this
+      # path: set DB_PATH=/app/data/job_hunter.db in .env (see .env.example).
+      # /app/data is owned by the non-root appuser in the image so it is writable.
+      - ./data:/app/data
+      # The REAL candidate profile lives on the HOST and is mounted READ-ONLY,
+      # so personal data is never copied into the image. The app reads it at
+      # config/profile.local.yaml (relative to WORKDIR /app).
+      - ./config/profile.local.yaml:/app/config/profile.local.yaml:ro
+
+    # No ports: the bot is outbound-only (long-polling + sending). No dashboard.
+
+    # Liveness check: is the serve process running? The python:3.9-slim base has
+    # no pgrep/procps, so we ask the OS for the PID-1 command line and grep for
+    # our module (PID 1 is the ENTRYPOINT `python -m job_hunter.serve`).
+    #
+    # The test below uses NO `$` and NO command substitution, so Compose
+    # interpolation is irrelevant — there is no `$$`-escaping concern at all.
+    # `tr` converts the NUL-separated /proc/1/cmdline to spaces so grep can
+    # match the module name (a plain grep on raw NUL bytes is unreliable), via
+    # a direct pipe straight into grep.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - tr '\0' ' ' < /proc/1/cmdline | grep -q job_hunter.serve || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

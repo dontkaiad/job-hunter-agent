@@ -10,6 +10,11 @@ INGEST_MODE=telethon to use the optional Telethon userbot fallback instead
 (requires TELEGRAM_API_ID / TELEGRAM_API_HASH / TELEGRAM_SESSION).
 
     python -m job_hunter.run            # one-shot ingest + score + notify
+
+The ingest -> score -> notify body lives in the reusable ``harvest`` coroutine,
+which is called both here (one-shot) and by the daily scheduled job in
+``job_hunter.serve`` — so the manual run and the scheduled harvest share EXACTLY
+one implementation.
 """
 
 from __future__ import annotations
@@ -45,17 +50,64 @@ async def ingest(cfg: Config, conn) -> List[int]:
     return await asyncio.to_thread(ingest_web.ingest_with_own_connection, cfg)
 
 
+async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
+    """The SHARED ingest -> score -> notify pipeline body (no teardown).
+
+    This is the single source of truth for the harvest path. It is called BOTH
+    by ``run._amain`` (the one-shot ``python -m job_hunter.run``) AND by the
+    daily scheduled job inside ``job_hunter.serve`` — so the manual one-shot and
+    the scheduled harvest run EXACTLY the same logic, with no fork/duplication.
+
+    It deliberately does NOT own the lifecycle of ``conn`` or ``bot``: the
+    caller opens and closes them. ``run._amain`` builds short-lived resources
+    and closes them in a ``finally``; ``serve`` passes its already-open
+    connection + bot (same process/loop, so sqlite thread affinity is honoured)
+    and keeps them alive for continued polling.
+
+    Steps:
+      1) Ingest new posts (web by default; telethon when INGEST_MODE=telethon).
+      2) Drive every discovered/extracted/scored item to its gate via
+         ``pipeline.run_to_gate`` (the deterministic state machine; advance() is
+         still the sole writer).
+      3) Notify the operator about freshly surfaced items. ``notify`` awaits
+         EVERY send to completion (asyncio.gather) before returning — no
+         fire-and-forget, nothing left in flight when control returns.
+
+    Returns the list of item ids that were successfully delivered.
+    """
+    # 1) Ingest new posts (web by default; telethon when INGEST_MODE=telethon).
+    new_ids: List[int] = await ingest(cfg, conn)
+    print(f"[harvest] ingested {len(new_ids)} new items (mode={cfg.ingest_mode})")
+
+    # 2) Drive every discovered/extracted/scored item to its gate.
+    to_process = set(new_ids)
+    for st in ("discovered", "extracted", "scored", "approved", "researched"):
+        for item in store.list_by_state(conn, st):
+            to_process.add(item.id)
+    for item_id in sorted(to_process):
+        pipeline.run_to_gate(conn, item_id, deps=deps)
+
+    # 3) Notify operator about freshly surfaced items. ``notify`` awaits
+    # EVERY send to completion (asyncio.gather) before returning -- no
+    # fire-and-forget, nothing left in flight when we reach teardown.
+    surfaced = store.list_by_state(conn, SURFACED)
+    print(f"[harvest] {len(surfaced)} surfaced; notifying operator")
+    sent = await notify(bot, [item.id for item in surfaced])
+    print(f"[harvest] {len(sent)}/{len(surfaced)} cards delivered")
+    return sent
+
+
 async def _amain() -> None:
-    """The WHOLE pipeline under a single event loop: ingest -> score ->
-    notify -> teardown.
+    """The WHOLE one-shot pipeline under a single event loop: build resources,
+    run the SHARED ``harvest`` body, tear down.
 
     Lifecycle contract (see the bug fixed here): the aiogram Bot opens an
-    aiohttp ClientSession/connector on its first request. We must AWAIT every
-    card send to completion (``notify`` gathers and awaits them all) and only
-    THEN close the bot's HTTP session -- inside a ``finally`` so it always
-    runs, exactly once, after all sends are done. The DB connection is closed
-    last. Everything happens inside one ``asyncio.run`` (in ``main``): the loop
-    is never torn down while HTTP requests are still in flight.
+    aiohttp ClientSession/connector on its first request. ``harvest`` AWAITS
+    every card send to completion (``notify`` gathers and awaits them all) and
+    only THEN do we close the bot's HTTP session -- inside a ``finally`` so it
+    always runs, exactly once, after all sends are done. The DB connection is
+    closed last. Everything happens inside one ``asyncio.run`` (in ``main``):
+    the loop is never torn down while HTTP requests are still in flight.
     """
     load_dotenv()
     cfg = load_config()
@@ -65,25 +117,8 @@ async def _amain() -> None:
 
     bot = JobHunterBot(cfg, conn, deps)
     try:
-        # 1) Ingest new posts (web by default; telethon when INGEST_MODE=telethon).
-        new_ids: List[int] = await ingest(cfg, conn)
-        print(f"[run] ingested {len(new_ids)} new items (mode={cfg.ingest_mode})")
-
-        # 2) Drive every discovered/extracted/scored item to its gate.
-        to_process = set(new_ids)
-        for st in ("discovered", "extracted", "scored", "approved", "researched"):
-            for item in store.list_by_state(conn, st):
-                to_process.add(item.id)
-        for item_id in sorted(to_process):
-            pipeline.run_to_gate(conn, item_id, deps=deps)
-
-        # 3) Notify operator about freshly surfaced items. ``notify`` awaits
-        # EVERY send to completion (asyncio.gather) before returning -- no
-        # fire-and-forget, nothing left in flight when we reach teardown.
-        surfaced = store.list_by_state(conn, SURFACED)
-        print(f"[run] {len(surfaced)} surfaced; notifying operator")
-        sent = await notify(bot, [item.id for item in surfaced])
-        print(f"[run] {len(sent)}/{len(surfaced)} cards delivered")
+        # The one-shot harvest is the SAME callable the scheduler fires.
+        await harvest(cfg, conn, bot, deps)
     finally:
         # Teardown runs ONLY after all sends finished. Close the aiogram HTTP
         # session first (no "Unclosed client session"/"Unclosed connector"),
