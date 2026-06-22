@@ -93,6 +93,16 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
     print(f"[harvest] {len(surfaced)} surfaced; notifying operator")
     sent = await notify(bot, [item.id for item in surfaced])
     print(f"[harvest] {len(sent)}/{len(surfaced)} cards delivered")
+
+    # When the run surfaced/delivered ZERO cards, silence is ambiguous (did the
+    # harvest even run?). Send ONE concise line to the SAME operator chat so a
+    # completed-but-empty run is visible. When there ARE cards, the cards
+    # themselves are the notification — do NOT also send this line. This adds
+    # only a notification; advance() remains the sole state writer.
+    if not sent:
+        await bot.notify_text(
+            f"🟢 Harvest done — 0 new vacancies (ingested {len(new_ids)})."
+        )
     return sent
 
 

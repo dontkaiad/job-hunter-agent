@@ -135,7 +135,7 @@ def resolve_schedule_tz(name: str | None):
     return datetime.now().astimezone().tzinfo
 
 
-def build_scheduler(harvest_coro_factory, tz):
+def build_scheduler(harvest_coro_func, tz):
     """Build an ``AsyncIOScheduler`` with EXACTLY one daily harvest job.
 
     Pure-ish factory: it constructs and CONFIGURES the scheduler but does NOT
@@ -143,9 +143,17 @@ def build_scheduler(harvest_coro_factory, tz):
     starts it (``scheduler.start()``) once the loop is running.
 
     Args:
-        harvest_coro_factory: a zero-arg callable returning a fresh coroutine to
-            run on each fire (e.g. ``lambda: run.harvest(cfg, conn, bot, deps)``).
-            APScheduler awaits the coroutine on the shared event loop.
+        harvest_coro_func: a COROUTINE FUNCTION (``async def``), zero-arg, that
+            AWAITS the harvest on each fire (e.g. an ``async def`` wrapper that
+            does ``await run.harvest(cfg, conn, bot, deps)``). It must be a
+            coroutine function — ``asyncio.iscoroutinefunction`` must be True —
+            NOT a plain sync function that merely RETURNS a coroutine.
+            AsyncIOScheduler only AWAITS a job when the job func is itself a
+            coroutine function; a sync function returning a coroutine has its
+            return value discarded and the coroutine is NEVER awaited (the
+            harvest body never executes). It is awaited on the shared running
+            event loop — the SAME loop as aiogram polling — so there is no
+            second loop and no ``asyncio.run`` inside the job.
         tz: the ``tzinfo`` for the cron trigger (from ``resolve_schedule_tz``),
             so 10:00 means 10:00 local.
 
@@ -159,7 +167,7 @@ def build_scheduler(harvest_coro_factory, tz):
     scheduler = AsyncIOScheduler(timezone=tz)
     trigger = CronTrigger(hour=HARVEST_HOUR, minute=HARVEST_MINUTE, timezone=tz)
     scheduler.add_job(
-        harvest_coro_factory,
+        harvest_coro_func,
         trigger=trigger,
         id="daily_harvest",
         name="daily_harvest",
@@ -193,12 +201,21 @@ async def _amain(cfg: Config | None = None) -> None:
 
     # Resolve the schedule timezone (local default; never hardcoded UTC) and
     # build the scheduler with one daily 10:00-local harvest using the SHARED
-    # run.harvest path. The factory makes a fresh coroutine on each fire.
+    # run.harvest path.
+    #
+    # The job MUST be a coroutine function (``async def``) so AsyncIOScheduler
+    # AWAITS it. A plain sync lambda that RETURNS ``run_mod.harvest(...)`` (a
+    # coroutine) would have its return value discarded and never awaited -> the
+    # ingest->score->notify body would never run ("coroutine was never
+    # awaited"). The async wrapper closes over the local cfg/conn/bot/deps and
+    # awaits harvest on the EXISTING running loop (the same loop asyncio.run
+    # below runs aiogram polling on) — no second event loop, no asyncio.run
+    # inside the job, so serve's loop-thread ``conn`` keeps its thread affinity.
+    async def _scheduled_harvest():
+        await run_mod.harvest(cfg, conn, bot, deps)
+
     tz = resolve_schedule_tz(os.environ.get("SCHEDULE_TZ"))
-    scheduler = build_scheduler(
-        lambda: run_mod.harvest(cfg, conn, bot, deps),
-        tz,
-    )
+    scheduler = build_scheduler(_scheduled_harvest, tz)
 
     print(
         f"[serve] long-polling started (db={cfg.database_url}); "

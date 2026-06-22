@@ -542,6 +542,21 @@ class JobHunterBot:
         await tg_logger.send_error_log(exc)
         return True
 
+    async def notify_text(self, text: str) -> None:
+        """Send a plain one-line text message to the operator's notify chat.
+
+        Used by harvest to report a completed run that surfaced ZERO new cards
+        (otherwise silence is ambiguous). Mirrors the other notify_* methods:
+        ``_ensure`` lazily builds the Bot, then send to ``cfg.notify_chat_id``
+        with the link preview disabled. Carries no keyboard and writes no state.
+        """
+        self._ensure()
+        await self._bot.send_message(
+            self.cfg.notify_chat_id,
+            text,
+            disable_web_page_preview=True,
+        )
+
     async def notify_surfaced(self, item_id: int) -> None:
         """Send a surfaced job with approve/backlog/skip buttons."""
         self._ensure()
