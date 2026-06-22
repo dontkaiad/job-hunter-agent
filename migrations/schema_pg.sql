@@ -61,3 +61,17 @@ CREATE TABLE IF NOT EXISTS channel_state (
     last_post_at TEXT,
     updated_at   TEXT NOT NULL
 );
+
+-- Ops observability heartbeat (NOT pipeline state). A single row per named
+-- liveness signal; the harvest writes name='harvest' at the END of a completed
+-- run (run.harvest -> store.set_last_harvest_at). The staleness watchdog reads
+-- it once a day and alerts if it is older than the threshold. This table is
+-- SEPARATE from work_items and does NOT participate in the state machine, so
+-- writing it does NOT violate the advance()-is-sole-writer rule for work_items.
+-- last_at / updated_at are UTC ISO-8601 strings, matching the schema's
+-- datetime convention (TEXT, not timestamptz).
+CREATE TABLE IF NOT EXISTS ops_heartbeat (
+    name       TEXT PRIMARY KEY,
+    last_at    TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);

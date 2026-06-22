@@ -343,3 +343,60 @@ def set_channel_watermark(
     )
     if commit:
         conn.commit()
+
+
+# --- Ops observability heartbeat (ops_heartbeat) ----------------------------
+#
+# Additive, OBSERVABILITY-ONLY helpers. They write the SEPARATE ops_heartbeat
+# table, never work_items — so they do NOT violate the rule that pipeline.advance
+# is the sole writer of work_items state. Mirrors the channel_state watermark
+# patterns above (parameterized %s, UTC ISO-8601 TEXT, tz-aware parse on read).
+
+_HARVEST_HEARTBEAT_NAME = "harvest"
+
+
+def set_last_harvest_at(
+    conn: psycopg.Connection, dt: datetime, commit: bool = True
+) -> None:
+    """UPSERT the harvest heartbeat (name='harvest') to ``dt``.
+
+    ``dt`` must be timezone-aware; it is stored as a UTC ISO-8601 string in the
+    OPS heartbeat table (NOT work_items). ``updated_at`` records when the row was
+    touched. Observability write only; advance() remains the sole work_items
+    writer.
+    """
+    last_iso = dt.astimezone(timezone.utc).isoformat()
+    ts = now_iso()
+    conn.execute(
+        """
+        INSERT INTO ops_heartbeat (name, last_at, updated_at)
+        VALUES (%s, %s, %s)
+        ON CONFLICT(name) DO UPDATE SET
+            last_at = excluded.last_at,
+            updated_at = excluded.updated_at
+        """,
+        (_HARVEST_HEARTBEAT_NAME, last_iso, ts),
+    )
+    if commit:
+        conn.commit()
+
+
+def get_last_harvest_at(conn: psycopg.Connection) -> Optional[datetime]:
+    """Return the last completed-harvest datetime (UTC, tz-aware), or None.
+
+    None means no harvest has completed yet (no heartbeat row) — the staleness
+    watchdog treats that as "no baseline" and does NOT alert.
+    """
+    row = conn.execute(
+        "SELECT last_at FROM ops_heartbeat WHERE name = %s",
+        (_HARVEST_HEARTBEAT_NAME,),
+    ).fetchone()
+    if row is None or row["last_at"] is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(row["last_at"])
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)

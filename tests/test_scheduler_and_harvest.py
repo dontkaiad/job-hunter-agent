@@ -219,6 +219,13 @@ class _FakeScheduler:
     def __init__(self):
         self.started = False
         self.shut = False
+        self.added_jobs = []
+
+    def add_job(self, func, *args, **kwargs):
+        # serve._amain adds the staleness watchdog as a SECOND job via
+        # serve.add_staleness_job(scheduler, ...). Record it so tests can assert
+        # the wiring without a real APScheduler.
+        self.added_jobs.append((func, kwargs.get("id")))
 
     def start(self):
         self.started = True

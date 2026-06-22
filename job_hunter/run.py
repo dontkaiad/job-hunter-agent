@@ -24,7 +24,7 @@ from typing import List
 
 from dotenv import load_dotenv
 
-from . import ingest_telegram, ingest_web, pipeline, store
+from . import clock, ingest_telegram, ingest_web, obs, pipeline, store
 from .bot import JobHunterBot, build_deps, notify
 from .config import Config, load_config
 from .states import SURFACED
@@ -103,6 +103,13 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
         await bot.notify_text(
             f"🟢 Harvest done — 0 new vacancies (ingested {len(new_ids)})."
         )
+
+    # Observability heartbeat: record that a harvest COMPLETED, at the very end
+    # (after ingest->score->notify). The staleness watchdog in serve reads this
+    # once a day and alerts if it goes stale. This is an ADDITIVE write to the
+    # SEPARATE ops_heartbeat table — NOT work_items — so advance() remains the
+    # sole writer of pipeline state. It does not alter the harvest flow above.
+    store.set_last_harvest_at(conn, clock.now_utc())
     return sent
 
 
@@ -126,6 +133,10 @@ async def _amain() -> None:
     deps = build_deps(cfg)
 
     bot = JobHunterBot(cfg, conn, deps)
+    # Observability: surface silent warnings ("coroutine never awaited") and
+    # unhandled loop exceptions to the ops channel during manual one-shot runs
+    # too. Installed inside the running coroutine so the running loop is valid.
+    obs.install_all(asyncio.get_running_loop())
     try:
         # The one-shot harvest is the SAME callable the scheduler fires.
         await harvest(cfg, conn, bot, deps)

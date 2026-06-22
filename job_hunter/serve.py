@@ -61,6 +61,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+from . import obs
 from . import run as run_mod
 from . import store
 from .bot import JobHunterBot, build_deps
@@ -69,6 +70,11 @@ from .config import Config, load_config
 # Daily harvest time (LOCAL to the resolved schedule timezone).
 HARVEST_HOUR = 10
 HARVEST_MINUTE = 0
+
+# Harvest staleness watchdog runs the hour AFTER the harvest (11:00 local), once
+# a day, so it sends AT MOST ONE alert per day (no spam, no extra dedup state).
+STALENESS_CHECK_HOUR = HARVEST_HOUR + 1
+STALENESS_CHECK_MINUTE = 0
 
 # --- Heartbeat healthcheck (Part C) -----------------------------------------
 # A background task writes the current epoch to HEARTBEAT_PATH every
@@ -179,6 +185,36 @@ def build_scheduler(harvest_coro_func, tz):
     return scheduler
 
 
+def add_staleness_job(scheduler, staleness_coro_func, tz):
+    """Add the once-daily harvest-staleness watchdog job to ``scheduler``.
+
+    Registered as a SECOND job (id='harvest_staleness') on the SAME scheduler /
+    loop, a daily cron at STALENESS_CHECK_HOUR (11:00 local — the hour after the
+    harvest). Once-daily firing bounds it to AT MOST ONE alert per day, so no
+    extra dedup state is needed. The existing daily_harvest job is untouched
+    (its coalesce/max_instances/replace_existing are unchanged).
+
+    ``staleness_coro_func`` MUST be a coroutine function (``async def``) so
+    AsyncIOScheduler AWAITS it on the running loop — same discipline as the
+    harvest job.
+    """
+    from apscheduler.triggers.cron import CronTrigger
+
+    trigger = CronTrigger(
+        hour=STALENESS_CHECK_HOUR, minute=STALENESS_CHECK_MINUTE, timezone=tz
+    )
+    scheduler.add_job(
+        staleness_coro_func,
+        trigger=trigger,
+        id="harvest_staleness",
+        name="harvest_staleness",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    return scheduler
+
+
 async def _amain(cfg: Config | None = None) -> None:
     """Open resources, start the scheduler, start long-polling, tear down.
 
@@ -214,8 +250,16 @@ async def _amain(cfg: Config | None = None) -> None:
     async def _scheduled_harvest():
         await run_mod.harvest(cfg, conn, bot, deps)
 
+    # SECOND scheduled job (observability): once a day, the hour after the
+    # harvest, check whether the harvest heartbeat has gone stale and, if so,
+    # send a LOUD ops alert. Read-only against the ops heartbeat table; it never
+    # touches work_items, so advance() stays the sole pipeline-state writer.
+    async def _scheduled_staleness_check():
+        await obs.check_harvest_staleness(conn)
+
     tz = resolve_schedule_tz(os.environ.get("SCHEDULE_TZ"))
     scheduler = build_scheduler(_scheduled_harvest, tz)
+    add_staleness_job(scheduler, _scheduled_staleness_check, tz)
 
     print(
         f"[serve] long-polling started (db={cfg.database_url}); "
@@ -226,6 +270,15 @@ async def _amain(cfg: Config | None = None) -> None:
     # runs concurrently under the SAME asyncio.run; cancelled in the finally.
     hb_path = heartbeat_path()
     hb_task = asyncio.create_task(heartbeat_loop(hb_path))
+
+    # Observability hooks: promote silent Python warnings (notably the
+    # "coroutine '...' was never awaited" RuntimeWarning) and unhandled
+    # loop/task exceptions ("Task exception was never retrieved") to debounced
+    # ops-channel alerts. Installed HERE — inside the running coroutine — so
+    # ``asyncio.get_running_loop()`` is valid and the warning handler can hop
+    # back onto THIS loop (warnings can fire off-loop from GC finalization).
+    loop = asyncio.get_running_loop()
+    obs.install_all(loop)
 
     try:
         # Start the scheduler FIRST (non-blocking: it just arms the loop timer),
