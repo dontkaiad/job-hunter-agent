@@ -26,7 +26,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import httpx
 import psycopg
@@ -35,8 +36,19 @@ from . import store
 from .clock import now_utc
 from .config import Config, load_config
 from .ingest_telegram import IngestMessage, normalize_message, store_messages
+from .research_fetch import _is_telegram_host
 
 PUBLIC_BASE = "https://t.me/s/{channel}"
+
+# Channel "chrome" social-mirror / cross-post hosts that appear on EVERY
+# t.me/s/ post (the "в VK | в Max" links Telegram injects). These are never the
+# vacancy's apply/company target, so a captured anchor pointing at one of them
+# is dropped. Telegram permalink hosts are handled separately via the shared
+# ``_is_telegram_host`` helper from research_fetch. This list is intentionally
+# NARROW (telegram + vk.com + max.ru only) -- it is NOT the broader company-
+# anchor skip-list in research_fetch, which also drops hh.ru/github/etc. (those
+# ARE valid PRIMARY vacancy hosts we explicitly want to keep here).
+_CHROME_HOSTS = ("vk.com", "max.ru")
 
 # Block-level tags whose boundaries become newlines when flattening the
 # message text div (Telegram uses <br> and <p>-ish wrappers for line breaks).
@@ -48,6 +60,65 @@ _VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr",
 }
+
+
+def _is_chrome_host(host: Optional[str]) -> bool:
+    """True if ``host`` is a channel social-mirror / chrome host. PURE.
+
+    Case-insensitive, matches the exact host or any subdomain of ``vk.com`` /
+    ``max.ru`` (e.g. ``m.vk.com``). These are the "в VK | в Max" cross-post
+    links Telegram injects on every post and are never the apply target.
+    """
+    h = (host or "").strip().lower().rstrip(".")
+    if not h:
+        return False
+    for chrome in _CHROME_HOSTS:
+        if h == chrome or h.endswith("." + chrome):
+            return True
+    return False
+
+
+def _should_keep_href(href: Optional[str]) -> bool:
+    """True if a captured anchor href is a genuine apply/vacancy URL. PURE.
+
+    KEEP only when ALL hold:
+      - absolute http:// or https:// (drops relative ``?q=#...`` hashtag links
+        and any non-http scheme such as mailto:/tg:),
+      - host is NOT a telegram host (t.me / telegram.org / telegram.me, incl.
+        subdomains),
+      - host is NOT a channel social-mirror / chrome host (vk.com / max.ru),
+      - host looks like a real domain: contains a dot, has NO ``@`` in the
+        netloc, and contains no spaces/control chars (this drops the garbled
+        ``http://Контакты:job@selecty.ru/`` email-as-link).
+
+    hh.ru / career.* / job.goldapple.ru / getonbrd.com / application-form hosts
+    / company sites all pass -- those are exactly what we want. Never raises.
+    """
+    try:
+        raw = (href or "").strip()
+        if not raw:
+            return False
+        parsed = urlparse(raw)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        netloc = parsed.netloc or ""
+        # No userinfo / garbled email-as-link, and no whitespace/control chars
+        # anywhere in the authority. ``urlparse`` keeps userinfo in netloc, so
+        # an "@" here means a host like ``Контакты:job@selecty.ru``.
+        if "@" in netloc:
+            return False
+        if any(ch.isspace() or ord(ch) < 0x20 for ch in netloc):
+            return False
+        host = parsed.hostname
+        if not host or "." not in host:
+            return False
+        if _is_telegram_host(host):
+            return False
+        if _is_chrome_host(host):
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def _channel_path(channel: str) -> str:
@@ -74,7 +145,9 @@ class _MessageHTMLParser(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        # Collected results: list of (data_post, text, datetime_str).
+        # Collected results: list of (data_post, text, datetime_str, links)
+        # where links is a list of (href, anchor_text) captured inside the text
+        # div, in document order.
         self.messages: List[tuple] = []
 
         self._in_message = False
@@ -85,6 +158,14 @@ class _MessageHTMLParser(HTMLParser):
         self._in_text = False
         self._text_depth = 0  # tag depth inside the current text div
         self._text_parts: List[str] = []
+
+        # Anchor capture INSIDE the text div: ``_cur_href`` is set on an <a>
+        # starttag and cleared on </a>; visible text is accumulated from
+        # handle_data so each link carries its anchor text. ``_links`` holds the
+        # per-message (href, anchor_text) pairs in document order.
+        self._links: List[Tuple[Optional[str], List[str]]] = []
+        self._cur_href: Optional[str] = None
+        self._cur_anchor_text: List[str] = []
 
     @staticmethod
     def _classes(attrs) -> set:
@@ -134,10 +215,18 @@ class _MessageHTMLParser(HTMLParser):
                 self._in_text = True
                 self._text_depth = 0
                 self._text_parts = []
+                self._links = []
+                self._cur_href = None
+                self._cur_anchor_text = []
                 return
 
             if self._in_text:
                 self._text_depth += 1
+                # Capture the apply/vacancy href off the anchor starttag. The
+                # visible text follows in handle_data and is attached on </a>.
+                if tag == "a":
+                    self._cur_href = self._attr(attrs, "href")
+                    self._cur_anchor_text = []
 
     def handle_startendtag(self, tag, attrs):
         # Self-closing <br/> inside the text div.
@@ -147,10 +236,18 @@ class _MessageHTMLParser(HTMLParser):
     def handle_data(self, data):
         if self._in_text:
             self._text_parts.append(data)
+            if self._cur_href is not None:
+                self._cur_anchor_text.append(data)
 
     def handle_endtag(self, tag):
         if not self._in_message or tag in _VOID_TAGS:
             return
+
+        if self._in_text and tag == "a" and self._cur_href is not None:
+            # Close the current anchor: record (href, accumulated anchor text).
+            self._links.append((self._cur_href, self._cur_anchor_text))
+            self._cur_href = None
+            self._cur_anchor_text = []
 
         if self._in_text:
             if self._text_depth == 0:
@@ -165,11 +262,16 @@ class _MessageHTMLParser(HTMLParser):
         if self._message_depth == 0:
             # Closing the message wrapper -> flush this message.
             text = "".join(self._text_parts)
-            self.messages.append((self._data_post, text, self._datetime))
+            self.messages.append(
+                (self._data_post, text, self._datetime, self._links)
+            )
             self._in_message = False
             self._data_post = None
             self._datetime = None
             self._text_parts = []
+            self._links = []
+            self._cur_href = None
+            self._cur_anchor_text = []
         else:
             self._message_depth -= 1
 
@@ -189,6 +291,46 @@ def _clean_text(text: str) -> str:
     while out and out[-1] == "":
         out.pop()
     return "\n".join(out).strip()
+
+
+def _append_links(text: str, links: List[Tuple[Optional[str], List[str]]]) -> str:
+    """Append kept apply/vacancy hrefs to the cleaned post text. PURE.
+
+    For each captured (href, anchor_text) inside the message text div, keep the
+    href only if ``_should_keep_href`` passes (real apply/company URL, not
+    telegram/vk/max chrome, not a relative hashtag link, not a garbled email).
+    DEDUPE by URL preserving DOCUMENT ORDER, so the first kept link is the real
+    apply URL (the getonbrd post repeats the same href several times -> once).
+
+    Each kept link is appended on its own line as ``"<anchor_text>: <url>"``
+    (falling back to the bare URL when the anchor had no visible text), so the
+    URL becomes reachable by ``research_fetch.select_primary_url`` (which scans
+    raw_text for the first non-telegram http(s) URL).
+
+    CRITICAL: when there are NO kept links, the returned text is BYTE-IDENTICAL
+    to ``text`` -- no trailing separator, no empty section -- so no-link posts
+    are unchanged versus today.
+    """
+    seen = set()
+    lines: List[str] = []
+    for href, anchor_parts in links:
+        if not _should_keep_href(href):
+            continue
+        url = unescape((href or "").strip())
+        if url in seen:
+            continue
+        seen.add(url)
+        anchor = _clean_text("".join(anchor_parts or []))
+        # Avoid a redundant "url: url" when the visible text WAS the URL.
+        if anchor and anchor != url:
+            lines.append(f"{anchor}: {url}")
+        else:
+            lines.append(url)
+
+    if not lines:
+        return text
+    suffix = "\n".join(lines)
+    return f"{text}\n{suffix}" if text else suffix
 
 
 def _message_id_from_data_post(data_post: Optional[str]) -> Optional[int]:
@@ -236,11 +378,15 @@ def parse_channel_html(html: str, channel: str) -> List[IngestMessage]:
     parser.close()
 
     out: List[IngestMessage] = []
-    for data_post, raw, dt_str in parser.messages:
+    for data_post, raw, dt_str, links in parser.messages:
         message_id = _message_id_from_data_post(data_post)
         if message_id is None:
             continue
         text = _clean_text(raw)
+        # Append genuine apply/vacancy hrefs that the visible-text-only parse
+        # would otherwise drop, so they become selector-reachable. No-link posts
+        # are left byte-identical (see ``_append_links``).
+        text = _append_links(text, links)
         posted_at = parse_post_datetime(dt_str)
         norm = normalize_message(channel, message_id, text, posted_at=posted_at)
         if norm is not None:

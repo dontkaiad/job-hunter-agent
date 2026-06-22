@@ -273,3 +273,361 @@ def test_ingest_returns_empty_on_http_error(conn):
     reader = web.WebReader(http_get=error_get)
     ids = web.ingest(cfg, conn, reader=reader)
     assert ids == []
+
+
+# --------------------------------------------------------------------------
+# Hidden hyperlink TARGET (href) capture into raw_text
+# --------------------------------------------------------------------------
+
+from job_hunter import research_fetch as rf
+
+
+class _Extracted:
+    """Stand-in for the extracted record with no link contact set."""
+    contact = None
+    contact_type = None
+
+
+def test_apply_href_captured_and_chrome_dropped_end_to_end():
+    """The real ai_rabota/1137 case: <a href=career.avito.com>Откликнуться</a>
+    plus в VK (vk.com), в Max (max.ru), a t.me link and a ?q=#hashtag link.
+
+    raw_text must CONTAIN the avito apply URL and NOT the vk/max/t.me/?q= ones,
+    and the unchanged select_primary_url must then return the avito URL."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ai_rabota/1137">'
+        '<div class="tgme_widget_message_text js-message_text" dir="auto">'
+        'Data Scientist в Avito<br>'
+        '<a href="https://career.avito.com/vacancies/data-science/19566/">Откликнуться</a> '
+        '<a href="https://t.me/ai_rabota/1137">в Telegram</a> '
+        '<a href="https://vk.com/ai_rabota">в VK</a> '
+        '<a href="https://max.ru/ai_rabota">в Max</a> '
+        '<a href="?q=%23senior">#senior</a>'
+        '</div>'
+        '<a class="tgme_widget_message_date" href="https://t.me/ai_rabota/1137">'
+        '<time datetime="2026-06-20T10:00:00+00:00">10:00</time></a>'
+        '</div>'
+    )
+    msgs = web.parse_channel_html(html, "@ai_rabota")
+    assert len(msgs) == 1
+    raw = msgs[0].raw_text
+
+    assert "https://career.avito.com/vacancies/data-science/19566/" in raw
+    # Chrome / mirror / telegram / relative links are NOT appended.
+    assert "vk.com" not in raw
+    assert "max.ru" not in raw
+    assert "t.me" not in raw
+    assert "?q=" not in raw
+    # Visible body text is preserved.
+    assert "Data Scientist в Avito" in raw
+    assert "Откликнуться" in raw
+
+    # End-to-end: ingest -> EXISTING selector picks the apply URL.
+    picked = rf.select_primary_url(_Extracted(), raw)
+    assert picked == "https://career.avito.com/vacancies/data-science/19566/"
+
+
+def test_visible_text_url_anchor_not_double_printed():
+    """ai_rabota/1136 case: the visible anchor text IS the URL (goldapple).
+    The link still lands in raw_text and is selector-reachable, without an
+    ugly 'url: url' duplication."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ai_rabota/1136">'
+        '<div class="tgme_widget_message_text js-message_text">'
+        'Frontend at Gold Apple<br>'
+        '<a href="https://job.goldapple.ru/vacancy/12345">https://job.goldapple.ru/vacancy/12345</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ai_rabota")
+    raw = msgs[0].raw_text
+    assert "https://job.goldapple.ru/vacancy/12345" in raw
+    assert "https://job.goldapple.ru/vacancy/12345: https://job.goldapple.ru/vacancy/12345" not in raw
+    assert rf.select_primary_url(_Extracted(), raw) == "https://job.goldapple.ru/vacancy/12345"
+
+
+def test_repeated_anchor_deduped_once():
+    """The remote_ai_jobs getonbrd case: the same href repeated across several
+    👉/👈 anchors must appear exactly ONCE in raw_text (deduped by URL)."""
+    url = "https://www.getonbrd.com/empleos/ml-engineer-acme"
+    anchors = "".join(
+        f'<a href="{url}">( Job Description &amp; Apply )</a> ' for _ in range(5)
+    )
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="remote_ai_jobs/55">'
+        '<div class="tgme_widget_message_text js-message_text">'
+        'ML Engineer at Acme<br>' + anchors +
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@remote_ai_jobs")
+    raw = msgs[0].raw_text
+    assert raw.count(url) == 1
+    assert rf.select_primary_url(_Extracted(), raw) == url
+
+
+def test_garbled_email_as_link_not_appended():
+    """The garbled 'http://Контакты:job@selecty.ru/' email-as-link has an '@'
+    in the netloc and must NOT be appended."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/77">'
+        '<div class="tgme_widget_message_text js-message_text">'
+        'HR contact<br>'
+        '<a href="http://Контакты:job@selecty.ru/">Контакты: job@selecty.ru</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    raw = msgs[0].raw_text
+    # Visible anchor text stays; the LINK TARGET (an http URL) is NOT appended.
+    assert raw == "HR contact\nКонтакты: job@selecty.ru"
+    assert "http://" not in raw
+    # No real apply URL -> selector returns None -> desk fallback.
+    assert rf.select_primary_url(_Extracted(), raw) is None
+
+
+def test_no_link_post_is_byte_identical():
+    """A post with NO keepable links must yield raw_text byte-identical to the
+    pre-change (visible-text-only) output: no trailing separator, no section."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/88">'
+        '<div class="tgme_widget_message_text js-message_text">'
+        'Plain job post.<br>Salary 200000 RUB.<br>No links here.'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    raw = msgs[0].raw_text
+    # This is exactly what _clean_text(flattened visible text) produces today.
+    assert raw == "Plain job post.\nSalary 200000 RUB.\nNo links here."
+
+
+def test_chrome_only_post_no_url_appended_falls_back():
+    """A post whose ONLY links are chrome (t.me/vk/max) must append nothing and
+    the selector must return None (-> desk_fallback, the correct behavior)."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/99">'
+        '<div class="tgme_widget_message_text js-message_text">'
+        'Generic announcement.<br>'
+        '<a href="https://t.me/somechan">в Telegram</a> '
+        '<a href="https://vk.com/somechan">в VK</a> '
+        '<a href="https://max.ru/somechan">в Max</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    raw = msgs[0].raw_text
+    # Inline space-separated anchors stay on one visible line; NO link section
+    # is appended (all targets are chrome).
+    assert raw == "Generic announcement.\nв Telegram в VK в Max"
+    assert "t.me" not in raw and "vk.com" not in raw and "max.ru" not in raw
+    assert rf.select_primary_url(_Extracted(), raw) is None
+
+
+def test_multiple_real_links_document_order_preserved():
+    """When a post has several keepable links, document order is preserved so
+    the FIRST kept link is the real apply URL the selector returns."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/100">'
+        '<div class="tgme_widget_message_text js-message_text">'
+        'Backend role.<br>'
+        '<a href="https://hh.ru/vacancy/111">Откликнуться на hh</a> '
+        '<a href="https://acme-corp.com/careers/42">Сайт компании</a> '
+        '<a href="https://vk.com/acme">в VK</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    raw = msgs[0].raw_text
+    hh_pos = raw.index("https://hh.ru/vacancy/111")
+    acme_pos = raw.index("https://acme-corp.com/careers/42")
+    assert hh_pos < acme_pos  # document order preserved
+    assert "vk.com" not in raw
+    assert rf.select_primary_url(_Extracted(), raw) == "https://hh.ru/vacancy/111"
+
+
+def test_select_primary_url_prefers_link_contact_unchanged():
+    """select_primary_url is UNCHANGED: an extracted contact of type 'link'
+    still wins over the in-body URL once the href is present in raw_text."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/101">'
+        '<div class="tgme_widget_message_text js-message_text">'
+        'Role.<br><a href="https://career.avito.com/v/1">Откликнуться</a>'
+        '</div></div>'
+    )
+    raw = web.parse_channel_html(html, "@ch")[0].raw_text
+
+    class WithLink:
+        contact = "https://apply.example.com/form"
+        contact_type = "link"
+
+    assert rf.select_primary_url(WithLink(), raw) == "https://apply.example.com/form"
+
+
+# --------------------------------------------------------------------------
+# Tester-added tests: gaps from adversarial validation pass
+# --------------------------------------------------------------------------
+
+# --- Point 5 (extended): non-http schemes and structural rejects dropped ----
+
+import pytest
+
+
+@pytest.mark.parametrize("href,description", [
+    ("mailto:hr@co.com", "mailto: scheme dropped"),
+    ("tg://resolve?domain=somebot", "tg:// (Telegram custom scheme) dropped"),
+    ("javascript:void(0)", "javascript: scheme dropped"),
+    ("//evil.com/path", "scheme-relative URL dropped (no scheme)"),
+    ("http://localhost/internal", "localhost has no dot -> dropped"),
+    ("http://localhost:8080/x", "localhost with port -> dropped"),
+])
+def test_should_keep_href_non_http_schemes_and_no_dot_dropped(href, description):
+    """_should_keep_href must drop non-http(s) schemes, scheme-relative URLs, and
+    hosts without a dot (localhost). None of these are valid apply targets."""
+    result = web._should_keep_href(href)
+    assert result is False, (
+        f"_should_keep_href({href!r}) returned True but should be False: {description}"
+    )
+
+
+def test_non_http_scheme_in_anchor_not_appended_no_crash():
+    """A post containing mailto/tg/javascript anchors must not append them and must
+    not raise. The only URL that appears must be the one real apply URL."""
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/200">'
+        '<div class="tgme_widget_message_text">'
+        'Contact us.<br>'
+        '<a href="mailto:hr@company.com">Email HR</a> '
+        '<a href="tg://resolve?domain=hrbot">Telegram bot</a> '
+        '<a href="javascript:void(0)">JS link</a> '
+        '<a href="//evil.com/path">Scheme-relative</a> '
+        '<a href="http://localhost/">Localhost</a> '
+        '<a href="https://apply.real-company.com/v/1">Apply</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    assert len(msgs) == 1
+    raw = msgs[0].raw_text
+    # Non-http links must NOT appear as captured URLs.
+    assert "mailto:" not in raw
+    assert "tg://" not in raw
+    assert "javascript:" not in raw
+    assert "//evil.com" not in raw
+    assert "localhost" not in raw
+    # The real apply URL must be captured.
+    assert "https://apply.real-company.com/v/1" in raw
+    # Selector picks the real URL.
+    assert rf.select_primary_url(_Extracted(), raw) == "https://apply.real-company.com/v/1"
+
+
+# --- Point 6: hh.ru and github.com are explicitly KEPT -----------------------
+
+def test_hh_ru_href_kept_and_selector_picks_it():
+    """hh.ru must be kept by _should_keep_href (it is NOT in the chrome list).
+    This was only in research_fetch's company-anchor skip-list, not here."""
+    assert web._should_keep_href("https://hh.ru/vacancy/12345") is True
+
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/201">'
+        '<div class="tgme_widget_message_text">'
+        'Python role.<br>'
+        '<a href="https://hh.ru/vacancy/12345">Откликнуться на hh.ru</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    raw = msgs[0].raw_text
+    assert "https://hh.ru/vacancy/12345" in raw
+    assert rf.select_primary_url(_Extracted(), raw) == "https://hh.ru/vacancy/12345"
+
+
+def test_github_com_href_kept_and_selector_picks_it():
+    """github.com must be kept by _should_keep_href (it is NOT in the chrome list).
+    Only research_fetch's company-anchor heuristic skips github -- the capture
+    keep-list does not."""
+    assert web._should_keep_href("https://github.com/company/jobs") is True
+
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/202">'
+        '<div class="tgme_widget_message_text">'
+        'Open source role.<br>'
+        '<a href="https://github.com/company/jobs">Apply on GitHub</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    raw = msgs[0].raw_text
+    assert "https://github.com/company/jobs" in raw
+    assert rf.select_primary_url(_Extracted(), raw) == "https://github.com/company/jobs"
+
+
+# --- Point 7: telegram/chrome exact-suffix semantics + *.t.me.evil.com concern ---
+
+@pytest.mark.parametrize("host,should_keep,description", [
+    # Lookalike domains: NOT wrongly excluded (suffix check, not substring)
+    ("start.me", True, "start.me is a real service, NOT a t.me subdomain -> kept"),
+    ("nott.me", True, "nott.me ends with t.me in chars but no dot separator -> kept"),
+    # Exact t.me / subdomains: excluded
+    ("t.me", False, "exact t.me -> excluded"),
+    ("www.t.me", False, "www.t.me -> telegram subdomain -> excluded"),
+    # Attacker-controlled domain embedding 't.me' as a label
+    ("t.me.evil.com", True, "t.me.evil.com is NOT a subdomain of t.me -> KEPT (see note)"),
+    # Chrome hosts
+    ("vk.com", False, "vk.com exact -> chrome host -> excluded"),
+    ("evil.vk.com", False, "evil.vk.com -> vk.com subdomain -> excluded"),
+    ("vk.com.evil.com", True, "vk.com.evil.com is NOT a subdomain of vk.com -> KEPT"),
+])
+def test_should_keep_href_exact_suffix_semantics(host, should_keep, description):
+    """The keep/drop rule uses exact-or-subdomain matching for both the telegram
+    and chrome lists. This test documents the exact semantics including the
+    t.me.evil.com / vk.com.evil.com edge cases.
+
+    Note on t.me.evil.com and vk.com.evil.com: they ARE captured because they
+    are not subdomains of the excluded hosts. This is the correct behavior for
+    the KEEP filter (avoiding false exclusions). Security is handled by the
+    downstream SSRF guard in research_fetch._url_is_safe, which validates the
+    resolved IP before any fetch.
+    """
+    href = f"https://{host}/path"
+    result = web._should_keep_href(href)
+    assert result is should_keep, (
+        f"_should_keep_href({href!r}): expected {should_keep}, got {result}. {description}"
+    )
+
+
+# --- Point 9: SSRF guard still blocks a captured URL that resolves to a private IP ---
+
+def test_ssrf_guard_blocks_captured_href_resolving_to_private_ip(monkeypatch):
+    """After href capture, select_primary_url picks the URL, but fetch_research_context
+    must still block it if the host resolves to a private IP (SSRF guard).
+    The href capture path does NOT bypass the SSRF guard.
+    """
+    from job_hunter import research_fetch as _rf
+
+    # Simulate DNS resolving the apply host to an internal RFC-1918 address.
+    monkeypatch.setattr(
+        _rf, "_resolve_ips",
+        lambda host: ["10.0.0.5"] if "evil-apply" in host else ["93.184.216.34"],
+    )
+
+    html = (
+        '<div class="tgme_widget_message js-widget_message" data-post="ch/300">'
+        '<div class="tgme_widget_message_text">'
+        'Apply here.<br>'
+        '<a href="https://evil-apply.internal.example.com/v/1">Apply</a>'
+        '</div></div>'
+    )
+    msgs = web.parse_channel_html(html, "@ch")
+    raw = msgs[0].raw_text
+
+    # The URL was captured into raw_text.
+    assert "https://evil-apply.internal.example.com/v/1" in raw
+
+    # select_primary_url picks it (it passed the ingest-time filter).
+    picked = _rf.select_primary_url(_Extracted(), raw)
+    assert picked == "https://evil-apply.internal.example.com/v/1"
+
+    # fetch_research_context MUST block it (resolves to private IP).
+    called = []
+
+    def fake_get(u, *, timeout, max_redirects):
+        called.append(u)
+        raise AssertionError("should not have been called")
+
+    result = _rf.fetch_research_context(picked, "Acme", get=fake_get)
+    assert result == {"pages": [], "urls": []}, (
+        "SSRF guard must block a captured URL that resolves to a private IP"
+    )
+    assert called == [], "HTTP GET must not have been attempted for a private-IP URL"
