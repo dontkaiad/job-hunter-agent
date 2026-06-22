@@ -44,6 +44,91 @@ _MIN_USABLE_CHARS = 200
 # is discarded — we only know how to strip HTML.
 _HTML_CONTENT_TYPES = ("text/html", "application/xhtml", "text/plain")
 
+# Telegram permalink hosts. ``source_link`` is ALWAYS the t.me post permalink,
+# which returns only a ~181-char embed-widget shell (discarded by the 200-char
+# threshold) and is never the real apply/company target. This NARROW skip-list
+# is used ONLY by ``select_primary_url`` to pick the in-body apply/company URL.
+# It is deliberately NOT the broader ``_company_url_from_anchors`` skip-list,
+# which also drops hh.ru/github/etc. — those ARE valid PRIMARY vacancy hosts.
+# Match is on the resolved hostname (case-insensitive), including subdomains
+# (e.g. ``www.t.me``).
+_TELEGRAM_HOSTS = ("t.me", "telegram.org", "telegram.me")
+
+# Matches http(s) URLs embedded in free-form post text. Trailing punctuation is
+# trimmed by ``_strip_url_trailing`` so a URL followed by a comma/period/paren
+# in prose doesn't carry the punctuation into the fetch.
+_URL_RE = re.compile(r"https?://[^\s<>\"')\]}]+", re.IGNORECASE)
+
+
+def _is_telegram_host(host: Optional[str]) -> bool:
+    """True if ``host`` is a Telegram permalink host (or a subdomain). PURE.
+
+    Case-insensitive. Matches the exact host or any subdomain of a telegram
+    host (``t.me``, ``telegram.org``, ``telegram.me``), e.g. ``www.t.me``.
+    Never raises.
+    """
+    try:
+        h = (host or "").strip().lower().rstrip(".")
+        if not h:
+            return False
+        for tg in _TELEGRAM_HOSTS:
+            if h == tg or h.endswith("." + tg):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _strip_url_trailing(url: str) -> str:
+    """Trim trailing prose punctuation from a URL scraped from free text. PURE."""
+    return (url or "").rstrip(".,;:!?)]}>\"'")
+
+
+def select_primary_url(extracted: Any, raw_text: Optional[str]) -> Optional[str]:
+    """Pick the PRIMARY apply/company URL to research. PURE, never raises.
+
+    The Telegram ``source_link`` is always the post permalink (a t.me embed
+    shell), never the real target, so we choose the in-body apply/company URL
+    instead. Precedence:
+
+      1. ``extracted.contact`` when ``extracted.contact_type == "link"`` AND it
+         is a valid http(s) URL whose host is NOT a Telegram host.
+      2. Otherwise the FIRST http(s) URL found in ``raw_text`` whose host is NOT
+         a Telegram host. hh.ru / career.* / application-form hosts / company
+         sites are ALL valid primary targets and are NOT excluded here (only
+         the telegram permalink hosts are skipped).
+      3. Otherwise ``None`` (no usable in-body link -> caller passes None ->
+         empty pages -> desk_fallback, today's correct behavior).
+
+    The returned URL still passes through ``_url_is_safe`` (SSRF guard) inside
+    ``fetch_research_context`` before any fetch. Returns None on ANY error.
+    """
+    try:
+        # 1) Prefer the contact when it is explicitly a link.
+        contact_type = getattr(extracted, "contact_type", None)
+        contact = getattr(extracted, "contact", None)
+        if contact_type == "link" and contact:
+            cand = _strip_url_trailing(str(contact).strip())
+            parsed = urlparse(cand)
+            if parsed.scheme in ("http", "https") and parsed.hostname:
+                if not _is_telegram_host(parsed.hostname):
+                    return cand
+
+        # 2) First non-telegram http(s) URL embedded in the raw post text.
+        for match in _URL_RE.finditer(str(raw_text or "")):
+            cand = _strip_url_trailing(match.group(0))
+            parsed = urlparse(cand)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                continue
+            if _is_telegram_host(parsed.hostname):
+                continue
+            return cand
+
+        # 3) Nothing usable.
+        return None
+    except Exception:
+        return None
+
 
 # --- SSRF GUARD -------------------------------------------------------------
 #

@@ -486,7 +486,11 @@ def test_success_enrichment_fetched_label_in_prompt(monkeypatch, fake_llm):
 
     monkeypatch.setattr(research_fetch, "fetch_research_context", _good_fetch)
 
-    out = agents.research(fake, _extract(), "raw post", model="claude-haiku-4-5")
+    # The apply URL lives in the post body (#20); select_primary_url picks it.
+    out = agents.research(
+        fake, _extract(), "raw post. Apply at https://jobs.test/v/1",
+        model="claude-haiku-4-5",
+    )
 
     assert out["research_source"] == "web"
     assert "https://jobs.test/v/1" in out["fetched_urls"]

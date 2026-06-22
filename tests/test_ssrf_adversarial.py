@@ -533,9 +533,14 @@ def test_public_url_yields_web_research_source(monkeypatch):
         title="AI Engineer",
         company="Acme",
         source_channel="@channel",
-        source_link="https://jobs.example.com/vacancy/1",
+        source_link="https://t.me/channel/55",
     )
-    result = agents.research(FakeLLMForResearch(), extracted, "raw text")
+    # The real apply URL lives in the post body (#20): source_link is the t.me
+    # permalink; select_primary_url picks the in-body vacancy URL to fetch.
+    result = agents.research(
+        FakeLLMForResearch(), extracted,
+        "Apply at https://jobs.example.com/vacancy/1",
+    )
 
     assert result["research_source"] == "web", (
         "Public URL must produce research_source='web', not desk_fallback"

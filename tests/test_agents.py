@@ -9,13 +9,19 @@ from job_hunter import agents, llm, research_fetch
 from job_hunter.schema_extract import ExtractResult
 
 
+# source_link is the t.me permalink (as in production). The REAL apply URL
+# lives in the post body and is what the fetcher must target (#20).
+_BODY_URL = "https://jobs.test/v/1"
+_RAW = f"raw post body. Apply at {_BODY_URL}"
+
+
 def _extract():
     return ExtractResult(
         title="AI Engineer",
         company="Acme",
         stack=["python", "llm"],
         source_channel="@chan",
-        source_link="https://jobs.test/v/1",
+        source_link="https://t.me/chan/777",
     )
 
 
@@ -38,7 +44,12 @@ def test_research_web_success_text_reaches_prompt(monkeypatch, fake_llm):
     fake = fake_llm
     fake.set_for("research a company/role", _research_resp(["Acme builds RAG tools."]))
 
+    seen = {}
+
     def fake_fetch(source_link, company=None, **kw):
+        # The fetcher must be called with the IN-BODY apply URL (#20), NOT the
+        # t.me permalink that lives in extracted.source_link.
+        seen["url"] = source_link
         return {
             "pages": [{"url": source_link, "text": "Acme builds RAG tools for banks."}],
             "urls": [source_link],
@@ -46,10 +57,11 @@ def test_research_web_success_text_reaches_prompt(monkeypatch, fake_llm):
 
     monkeypatch.setattr(research_fetch, "fetch_research_context", fake_fetch)
 
-    out = agents.research(fake, _extract(), "raw post body", model="claude-haiku-4-5")
+    out = agents.research(fake, _extract(), _RAW, model="claude-haiku-4-5")
 
+    assert seen["url"] == _BODY_URL  # selected the in-body URL, not t.me
     assert out["research_source"] == "web"
-    assert out["fetched_urls"] == ["https://jobs.test/v/1"]
+    assert out["fetched_urls"] == [_BODY_URL]
     assert out["sourced_facts"] == ["Acme builds RAG tools."]
     # The real fetched page text reached the prompt sent to the LLM.
     rc = [c for c in fake.calls if "research a company/role" in c["system"]][-1]
@@ -59,6 +71,65 @@ def test_research_web_success_text_reaches_prompt(monkeypatch, fake_llm):
     # research runs on Haiku at max_tokens 900.
     assert rc["model"] == "claude-haiku-4-5"
     assert rc["max_tokens"] == 900
+
+
+# --- #20: contact-as-link is preferred as the primary target ----------------
+
+def test_research_contact_as_link_preferred_over_body(monkeypatch, fake_llm):
+    fake = fake_llm
+    fake.set_for("research a company/role", _research_resp(["Acme hires remote."]))
+
+    seen = {}
+
+    def fake_fetch(source_link, company=None, **kw):
+        seen["url"] = source_link
+        return {
+            "pages": [{"url": source_link, "text": "Acme careers page, remote-first."}],
+            "urls": [source_link],
+        }
+
+    monkeypatch.setattr(research_fetch, "fetch_research_context", fake_fetch)
+
+    ex = ExtractResult(
+        title="AI Engineer", company="Acme", source_channel="@chan",
+        source_link="https://t.me/chan/777",
+        contact_type="link", contact="https://company.example/jobs",
+    )
+    # raw_text ALSO has a different URL, but the contact-as-link wins.
+    out = agents.research(fake, ex, f"see {_BODY_URL}", model="claude-haiku-4-5")
+
+    assert seen["url"] == "https://company.example/jobs"
+    assert out["research_source"] == "web"
+    assert out["fetched_urls"] == ["https://company.example/jobs"]
+    assert out["sourced_facts"] == ["Acme hires remote."]
+
+
+# --- #20: only a t.me permalink, no in-body URL -> desk_fallback ------------
+
+def test_research_telegram_only_desk_fallback(monkeypatch, fake_llm):
+    fake = fake_llm
+    fake.set_for("research a company/role", _research_resp([{"fact": "invented"}]))
+
+    seen = {}
+
+    def fake_fetch(source_link, company=None, **kw):
+        # select_primary_url found nothing usable -> None is passed through.
+        seen["url"] = source_link
+        return {"pages": [], "urls": []}
+
+    monkeypatch.setattr(research_fetch, "fetch_research_context", fake_fetch)
+
+    ex = ExtractResult(
+        title="AI Engineer", company="Acme", source_channel="@chan",
+        source_link="https://t.me/chan/777",
+    )
+    out = agents.research(fake, ex, "Откликнуться в личку, без ссылок",
+                          model="claude-haiku-4-5")
+
+    assert seen["url"] is None  # no usable in-body URL selected
+    assert out["research_source"] == "desk_fallback"
+    assert out["fetched_urls"] == []
+    assert out["sourced_facts"] == []  # honesty: invented facts cleared
 
 
 # --- FETCH FAILURE: no raise, desk_fallback, prompt == today's desk prompt ---

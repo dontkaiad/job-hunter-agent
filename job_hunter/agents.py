@@ -69,9 +69,12 @@ def research(
 ) -> Dict[str, Any]:
     """Gather company/role context for T10. Returns a research dict.
 
-    Phase 1: BEFORE asking the LLM, attempt a direct-URL fetch of the vacancy
-    permalink (and, best-effort, one company page) via ``research_fetch``. When
-    usable page text is retrieved it is fed to the LLM as clearly-labeled real
+    Phase 1.5 (#20): BEFORE asking the LLM, select the IN-BODY apply/company
+    URL (``research_fetch.select_primary_url`` — the contact-as-link, else the
+    first non-telegram URL in the post; NOT the t.me permalink) and attempt a
+    direct-URL fetch of it (and, best-effort, one company page) via
+    ``research_fetch``. When usable page text is retrieved it is fed to the LLM
+    as clearly-labeled real
     page text and ``research_source`` is "web"; otherwise we fall back to the
     desk-only research that has always run here (``research_source`` =
     "desk_fallback"), giving exactly today's behavior.
@@ -84,8 +87,14 @@ def research(
     """
     fetched: Dict[str, Any] = {"pages": [], "urls": []}
     try:
+        # Phase 1.5 (#20): the Telegram ``source_link`` is ALWAYS the post
+        # permalink (a t.me embed shell, ~181 chars -> discarded), never the
+        # real apply/company target. Select the IN-BODY apply/company URL (the
+        # contact-as-link, else the first non-telegram URL in the post) and
+        # fetch THAT. None -> empty pages -> desk_fallback (today's behavior).
+        primary_url = research_fetch.select_primary_url(extracted, raw_text)
         fetched = research_fetch.fetch_research_context(
-            extracted.source_link, extracted.company
+            primary_url, extracted.company
         )
     except Exception:
         fetched = {"pages": [], "urls": []}

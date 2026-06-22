@@ -14,9 +14,20 @@ from job_hunter import research_fetch
 from job_hunter.research_fetch import (
     fetch_research_context,
     html_to_text,
+    select_primary_url,
     _ip_blocked,
     _url_is_safe,
 )
+from job_hunter.schema_extract import ExtractResult
+
+
+def _ex(**kw):
+    base = dict(title="Engineer", source_channel="@chan")
+    base.update(kw)
+    return ExtractResult(**base)
+
+
+_TG = "https://t.me/somechan/1234"
 
 
 class FakeResp:
@@ -252,6 +263,85 @@ def test_default_get_uses_httpx_with_caps(monkeypatch):
     # client itself must NOT auto-follow.
     assert captured["follow_redirects"] is False
     assert "User-Agent" in captured["headers"]
+
+
+# --- select_primary_url (PURE, Phase 1.5 / #20) =============================
+
+def test_select_prefers_contact_when_link():
+    ex = _ex(contact_type="link", contact="https://company.example/jobs",
+             source_link=_TG)
+    # contact-as-link beats any raw_text URL.
+    raw = "Apply here https://hh.ru/vacancy/123 or DM us"
+    assert select_primary_url(ex, raw) == "https://company.example/jobs"
+
+
+def test_select_contact_link_telegram_falls_through_to_body():
+    # A t.me contact-as-link is NOT a valid primary -> fall to raw_text scan.
+    ex = _ex(contact_type="link", contact="https://t.me/recruiter", source_link=_TG)
+    raw = "More at https://career.avito.com/vacancies/dev/19566/"
+    assert select_primary_url(ex, raw) == "https://career.avito.com/vacancies/dev/19566/"
+
+
+def test_select_inbody_hh_url_over_telegram_source_link():
+    ex = _ex(source_link=_TG)  # contact_type != link
+    raw = "Подробности и отклик: https://hh.ru/vacancy/123"
+    assert select_primary_url(ex, raw) == "https://hh.ru/vacancy/123"
+
+
+def test_select_inbody_career_url():
+    ex = _ex(source_link=_TG)
+    raw = "career.avito link: https://career.avito.com/vacancies/development/19566/ "
+    assert select_primary_url(ex, raw) == "https://career.avito.com/vacancies/development/19566/"
+
+
+def test_select_hh_and_github_not_excluded_from_primary():
+    # hh.ru / github are only in the company-ANCHOR skip-list, NOT here.
+    assert select_primary_url(_ex(source_link=_TG), "see https://hh.ru/vacancy/9") \
+        == "https://hh.ru/vacancy/9"
+    assert select_primary_url(_ex(source_link=_TG), "repo https://github.com/acme/x") \
+        == "https://github.com/acme/x"
+
+
+def test_select_returns_none_when_only_telegram_permalink():
+    # No contact link, no other http URL in the body -> None -> desk_fallback.
+    ex = _ex(source_link=_TG)
+    assert select_primary_url(ex, "Откликнуться в личку, без ссылок") is None
+    # Even a t.me URL appearing in the body is not a valid primary.
+    assert select_primary_url(ex, f"Канал: {_TG}") is None
+
+
+@pytest.mark.parametrize(
+    "tg_url",
+    [
+        "https://t.me/chan/1",
+        "https://www.t.me/chan/2",
+        "https://telegram.org/foo",
+        "https://telegram.me/chan/3",
+        "http://T.ME/CHAN/4",
+    ],
+)
+def test_select_telegram_variants_never_selected(tg_url):
+    ex = _ex(source_link=_TG)
+    assert select_primary_url(ex, f"link {tg_url}") is None
+
+
+def test_select_first_non_telegram_url_when_mixed():
+    # Body has a t.me link FIRST then an hh.ru link -> t.me skipped, hh.ru chosen.
+    ex = _ex(source_link=_TG)
+    raw = f"Channel {_TG} then apply https://hh.ru/vacancy/55"
+    assert select_primary_url(ex, raw) == "https://hh.ru/vacancy/55"
+
+
+def test_select_trims_trailing_punctuation():
+    ex = _ex(source_link=_TG)
+    assert select_primary_url(ex, "Apply: (https://hh.ru/vacancy/7).") \
+        == "https://hh.ru/vacancy/7"
+
+
+def test_select_never_raises_on_garbage():
+    assert select_primary_url(None, None) is None
+    assert select_primary_url(_ex(source_link=_TG), None) is None
+    assert select_primary_url(object(), "https://hh.ru/v/1") == "https://hh.ru/v/1"
 
 
 # --- SSRF GUARD =============================================================
@@ -495,8 +585,15 @@ def test_agents_research_desk_fallback_on_blocked(monkeypatch):
     from job_hunter import agents
     from job_hunter.extract import ExtractResult
 
-    # source_link resolves to cloud-metadata IP -> blocked -> empty pages.
-    monkeypatch.setattr(research_fetch, "_resolve_ips", lambda h: ["169.254.169.254"])
+    # The IN-BODY apply URL resolves to a cloud-metadata IP -> SSRF guard blocks
+    # the fetch -> empty pages -> desk_fallback. Proves the SSRF guard applies
+    # to the selected in-body URL (#20), not just the old source_link.
+    def resolve(host):
+        if host == "evil.example":
+            return ["169.254.169.254"]
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(research_fetch, "_resolve_ips", resolve)
 
     class FakeLLMClient:
         pass
@@ -513,10 +610,13 @@ def test_agents_research_desk_fallback_on_blocked(monkeypatch):
         title="Engineer",
         source_channel="@somechan",
         company="Acme",
-        source_link="http://169.254.169.254/latest/meta-data/",
+        source_link="https://t.me/somechan/1234",
     )
 
-    data = agents.research(FakeLLMClient(), extracted, "raw post text")
+    data = agents.research(
+        FakeLLMClient(), extracted,
+        "Откликнуться: http://evil.example/latest/meta-data/",
+    )
     assert data["research_source"] == "desk_fallback"
     assert data["fetched_urls"] == []
     assert data["sourced_facts"] == []  # honesty: no grounding -> no facts
