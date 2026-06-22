@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from . import llm
+from . import llm, research_fetch
 from .llm import LLMClient
 from .profile import Profile, example_profile
 from .schema_extract import ExtractResult
@@ -67,8 +67,60 @@ def research(
     raw_text: str,
     model: str = llm.CHEAP_MODEL,
 ) -> Dict[str, Any]:
-    """Gather company/role context via the LLM (T10). Returns a research dict."""
-    return llm.llm_research(client, extracted, raw_text, model=model)
+    """Gather company/role context for T10. Returns a research dict.
+
+    Phase 1: BEFORE asking the LLM, attempt a direct-URL fetch of the vacancy
+    permalink (and, best-effort, one company page) via ``research_fetch``. When
+    usable page text is retrieved it is fed to the LLM as clearly-labeled real
+    page text and ``research_source`` is "web"; otherwise we fall back to the
+    desk-only research that has always run here (``research_source`` =
+    "desk_fallback"), giving exactly today's behavior.
+
+    The fetch NEVER raises (it's wrapped defensively), and the whole fetch/
+    decision is guarded so research NEVER raises out of this function — any
+    unexpected error degrades to desk research. ``research_source`` and
+    ``fetched_urls`` are set AUTHORITATIVELY here (not trusting the model). The
+    boundary, signature, and the dict the draft consumes are unchanged.
+    """
+    fetched: Dict[str, Any] = {"pages": [], "urls": []}
+    try:
+        fetched = research_fetch.fetch_research_context(
+            extracted.source_link, extracted.company
+        )
+    except Exception:
+        fetched = {"pages": [], "urls": []}
+
+    pages = fetched.get("pages") or []
+    if pages:
+        research_source = "web"
+        fetched_context = fetched
+        fetched_urls = list(fetched.get("urls") or [])
+    else:
+        research_source = "desk_fallback"
+        fetched_context = None
+        fetched_urls = []
+
+    try:
+        data = llm.llm_research(
+            client, extracted, raw_text, model=model, fetched_context=fetched_context
+        )
+    except Exception:
+        # research must NEVER raise out of here: an LLM-layer failure (timeout,
+        # rate limit, un-parseable output) would propagate through _do_research
+        # into advance() and stall the item in APPROVED. Degrade to an empty
+        # research blob — the draft falls back to the post text.
+        data = {"summary": "", "talking_points": [], "questions": [], "sourced_facts": []}
+    if not isinstance(data, dict):
+        data = {"summary": "", "talking_points": [], "questions": [], "sourced_facts": []}
+    # Authoritative provenance — never trust the model for these.
+    data["research_source"] = research_source
+    data["fetched_urls"] = fetched_urls
+    # Honesty: with no fetched page there is NO grounding, so there can be no
+    # page-sourced facts — clear anything the model may have invented so
+    # fabricated "facts" never reach the draft as if they were real.
+    if research_source == "desk_fallback":
+        data["sourced_facts"] = []
+    return data
 
 
 def draft(

@@ -453,20 +453,73 @@ def parse_score_response(text: str) -> Dict[str, Any]:
 RESEARCH_SYSTEM = (
     "You research a company/role for a job applicant. Be concise and factual. "
     "If you are unsure, say so. Output ONLY JSON: "
-    '{"summary": "...", "talking_points": ["..."], "questions": ["..."]}.'
+    '{"summary": "...", "talking_points": ["..."], "questions": ["..."], '
+    '"sourced_facts": ["..."]}.\n'
+    "HONESTY (CRITICAL — never fabricate company facts):\n"
+    "- The prompt may contain a section labeled 'FETCHED PAGE TEXT (real, from "
+    "<url>)'. ONLY statements you can ground in that fetched page text are "
+    "confirmed company facts — put EACH such fact (verbatim or faithfully "
+    "paraphrased) into the dedicated `sourced_facts` list.\n"
+    "- Everything NOT grounded in the fetched page text is your own inference. "
+    "It may appear in `summary` / `talking_points` / `questions`, but you MUST "
+    "NOT state it as a confirmed company fact, and it MUST NOT go in "
+    "`sourced_facts`.\n"
+    "- The 'ORIGINAL POST' section is candidate-relevant context but is NOT "
+    "verified company information — do not treat it as a sourced fact.\n"
+    "- If there is NO fetched page text, or it contains no real company "
+    "information, set `sourced_facts: []` and say so explicitly in the summary "
+    "(include the note «информация о компании со страницы недоступна») rather "
+    "than inventing anything.\n"
+    "- NEVER invent company facts, funding, headcount, products, or clients."
 )
 
 
-def build_research_prompt(extracted: ExtractResult, raw_text: str) -> str:
+def build_research_prompt(
+    extracted: ExtractResult,
+    raw_text: str,
+    fetched_context: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Build the research user prompt. PURE.
+
+    When ``fetched_context`` carries usable page text, lay out two CLEARLY
+    LABELED sections: the real FETCHED PAGE TEXT (the only confirmed-fact
+    source) and the candidate-relevant ORIGINAL POST. When there is no fetched
+    context, the output is BYTE-IDENTICAL to the desk-only prompt (so the
+    fallback path behaves exactly like before).
+    """
     payload = {
         "title": extracted.title,
         "company": extracted.company,
         "stack": extracted.stack,
         "location": extracted.location,
     }
-    return (
+    desk = (
         "Job context:\n" + json.dumps(payload, ensure_ascii=False)
         + "\n\nOriginal post:\n" + raw_text
+    )
+
+    pages = (fetched_context or {}).get("pages") if fetched_context else None
+    if not pages:
+        return desk
+
+    blocks: List[str] = []
+    for page in pages:
+        url = page.get("url", "")
+        ptext = page.get("text", "")
+        if not ptext:
+            continue
+        blocks.append(
+            f"FETCHED PAGE TEXT (real, from {url}) — only facts here are "
+            f"confirmed company facts:\n{ptext}"
+        )
+    if not blocks:
+        return desk
+
+    return (
+        "Job context:\n" + json.dumps(payload, ensure_ascii=False)
+        + "\n\n" + "\n\n".join(blocks)
+        + "\n\nORIGINAL POST (candidate-relevant, not necessarily verified):\n"
+        + raw_text
     )
 
 
@@ -476,6 +529,7 @@ def parse_research_response(text: str) -> Dict[str, Any]:
         "summary": str(data.get("summary", "")),
         "talking_points": list(data.get("talking_points", []) or []),
         "questions": list(data.get("questions", []) or []),
+        "sourced_facts": list(data.get("sourced_facts", []) or []),
     }
 
 
@@ -690,12 +744,24 @@ def llm_score(
 
 
 def llm_research(
-    client: LLMClient, extracted: ExtractResult, raw_text: str, model: str = CHEAP_MODEL
+    client: LLMClient,
+    extracted: ExtractResult,
+    raw_text: str,
+    model: str = CHEAP_MODEL,
+    fetched_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """Research the company/role (T10) on the cheap (Haiku) model.
+
+    When ``fetched_context`` carries real fetched page text it is added to the
+    prompt in a clearly-labeled section so the model can ground `sourced_facts`
+    in it. With no fetched context the prompt is byte-identical to before
+    (desk-only fallback). ``max_tokens`` is 900 to leave room for
+    `sourced_facts` alongside the existing fields.
+    """
     text = client.complete(
         RESEARCH_SYSTEM,
-        build_research_prompt(extracted, raw_text),
-        max_tokens=600,
+        build_research_prompt(extracted, raw_text, fetched_context),
+        max_tokens=900,
         model=model,
         cache_system=should_cache_system(RESEARCH_SYSTEM, model),
     )
