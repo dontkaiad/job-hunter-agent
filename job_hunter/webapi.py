@@ -338,6 +338,10 @@ def get_pipeline(
     min_score: Optional[float] = Query(
         default=None, description="relevance_score >= min_score (NULL scores excluded)"
     ),
+    max_score: Optional[float] = Query(
+        default=None,
+        description="relevance_score < max_score (half-open upper bound; NULL scores excluded)",
+    ),
     remote: Optional[bool] = Query(default=None, description="Filter on extracted remote flag"),
     processed: Optional[bool] = Query(
         default=None,
@@ -351,14 +355,17 @@ def get_pipeline(
 ) -> List[PipelineItem]:
     """Flat pipeline list for the dashboard table/lanes. READ-ONLY.
 
-    Column-backed filters (status / min_score / processed) are applied in SQL by
-    ``store.list_pipeline``. blob-backed filters (remote / q) are applied here in
-    Python after parsing extracted_json (it is TEXT, not jsonb).
+    Column-backed filters (status / min_score / max_score / processed) are
+    applied in SQL by ``store.list_pipeline``; min_score/max_score compose into
+    the half-open band [min_score, max_score). blob-backed filters (remote / q)
+    are applied here in Python after parsing extracted_json (it is TEXT, not
+    jsonb).
     """
     items = store.list_pipeline(
         conn,
         status=status,
         min_score=min_score,
+        max_score=max_score,
         processed=processed,
         limit=_PIPELINE_LIMIT,
     )

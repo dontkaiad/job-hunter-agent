@@ -863,3 +863,142 @@ def test_notify_draft_does_not_use_html_parse_mode(conn, deps):
     assert call.get("parse_mode") is None, (
         f"notify_draft must NOT set parse_mode; got {call.get('parse_mode')!r}"
     )
+
+
+# --- /borderline READ-ONLY command -----------------------------------------
+
+
+from job_hunter.states import REJECTED  # noqa: E402
+
+
+class FakeAnswerMessage:
+    """A fake aiogram Message whose .answer captures the reply (no network)."""
+
+    def __init__(self, user_id=ALLOWED_UID):
+        self.from_user = FakeUser(user_id)
+        self.replies = []
+
+    async def answer(self, text, **kwargs):
+        self.replies.append({"text": text, **kwargs})
+
+
+def _seed_borderline(conn, *, score, msg_id, state=REJECTED, company="Acme",
+                     title="Backend", link="https://t.me/jobs/1"):
+    """Insert an item, set extracted_json + score, move to ``state``."""
+    item_id = store.insert_item(
+        conn, raw_text="x", source_channel="@c",
+        source_message_id=str(msg_id), source_link=link,
+    )
+    ex = json.dumps({"company": company, "title": title}, ensure_ascii=False)
+    store.update_state(conn, item_id, "extracted", from_state="discovered",
+                       kind="deterministic", actor="system",
+                       extracted_json=ex, relevance_score=score)
+    if state != "extracted":
+        store.update_state(conn, item_id, state, from_state="extracted",
+                           kind="deterministic", actor="system")
+    return item_id
+
+
+def test_render_borderline_pure_compact_list():
+    class _It:
+        def __init__(self, score, company, title, link):
+            self.relevance_score = score
+            self.extracted_json = json.dumps({"company": company, "title": title})
+            self.source_link = link
+    items = [
+        _It(59.0, "Acme", "Backend", "https://t.me/a/1"),
+        _It(50.0, "Globex", "Frontend", "https://t.me/g/2"),
+    ]
+    out = bot.render_borderline(items)
+    lines = out.splitlines()
+    assert lines[0] == "59 — Acme · Backend https://t.me/a/1"
+    assert lines[1] == "50 — Globex · Frontend https://t.me/g/2"
+
+
+def test_render_borderline_empty_one_liner():
+    assert bot.render_borderline([]) == "нет пограничных вакансий (50-59)"
+    assert bot.render_borderline([]) == bot.BORDERLINE_EMPTY
+
+
+def test_handle_borderline_lists_band_only(conn, deps):
+    # In band [50,60): 50, 55, 59.  Out of band: 49, 60, 80, NULL.
+    _seed_borderline(conn, score=49.0, msg_id=1, company="Low", title="LowRole")
+    _seed_borderline(conn, score=50.0, msg_id=2, company="Fifty", title="R50")
+    _seed_borderline(conn, score=55.0, msg_id=3, company="FiftyFive", title="R55")
+    _seed_borderline(conn, score=59.0, msg_id=4, company="FiftyNine", title="R59")
+    _seed_borderline(conn, score=60.0, msg_id=5, company="Sixty", title="R60",
+                     state=SURFACED)
+    _seed_borderline(conn, score=80.0, msg_id=6, company="High", title="RHigh",
+                     state=SURFACED)
+    # NULL-score discovered item.
+    store.insert_item(conn, raw_text="x", source_channel="@c", source_message_id="7")
+
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    msg = FakeAnswerMessage()
+    asyncio.run(b.handle_borderline(msg))
+
+    assert len(msg.replies) == 1
+    text = msg.replies[0]["text"]
+    lines = text.splitlines()
+    # Exactly the three band items, highest-first.
+    assert len(lines) == 3
+    assert lines[0].startswith("59 — FiftyNine · R59")
+    assert lines[1].startswith("55 — FiftyFive · R55")
+    assert lines[2].startswith("50 — Fifty · R50")
+    # Out-of-band companies never appear.
+    for bad in ("Low", "Sixty", "High"):
+        assert bad not in text
+    # Link preview disabled, like the other sends.
+    lpo = msg.replies[0].get("link_preview_options")
+    assert lpo is not None and lpo.is_disabled is True
+
+
+def test_handle_borderline_empty_band_one_liner(conn, deps):
+    # Only out-of-band items.
+    _seed_borderline(conn, score=49.0, msg_id=1)
+    _seed_borderline(conn, score=70.0, msg_id=2, state=SURFACED)
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    msg = FakeAnswerMessage()
+    asyncio.run(b.handle_borderline(msg))
+    assert msg.replies[0]["text"] == "нет пограничных вакансий (50-59)"
+
+
+def test_handle_borderline_is_read_only(conn, deps, monkeypatch):
+    # Seed a mix; snapshot ALL states before, assert unchanged after.
+    ids = [
+        _seed_borderline(conn, score=55.0, msg_id=1, state=REJECTED),
+        _seed_borderline(conn, score=58.0, msg_id=2, state=REJECTED),
+        _seed_borderline(conn, score=80.0, msg_id=3, state=SURFACED),
+    ]
+    before = {i: store.get_item(conn, i).state for i in ids}
+
+    # advance / update_state must NOT be called by the handler.
+    calls = {"advance": 0, "advance_by_id": 0, "update_state": 0, "run_to_gate": 0}
+    monkeypatch.setattr(pipeline, "advance_by_id",
+                        lambda *a, **k: calls.__setitem__("advance_by_id", 1))
+    monkeypatch.setattr(pipeline, "run_to_gate",
+                        lambda *a, **k: calls.__setitem__("run_to_gate", 1))
+    monkeypatch.setattr(store, "update_state",
+                        lambda *a, **k: calls.__setitem__("update_state", 1))
+
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    msg = FakeAnswerMessage()
+    asyncio.run(b.handle_borderline(msg))
+
+    after = {i: store.get_item(conn, i).state for i in ids}
+    assert after == before
+    assert calls == {"advance": 0, "advance_by_id": 0, "update_state": 0, "run_to_gate": 0}
+
+
+def test_borderline_command_gated_by_middleware(conn, deps):
+    # The /borderline message handler is a MESSAGE handler -> covered by the
+    # existing access_gate outer middleware. A non-allowlisted sender is dropped
+    # before the handler runs (handler never invoked => no reply, no write).
+    b = bot.JobHunterBot(_cfg(allowed={ALLOWED_UID}), conn, deps)
+    msg = FakeAiogramMessage(user_id=999)
+    ran, result = _run_gate(b, msg)
+    assert ran is False and result is None
+    # And an allowlisted sender passes the gate.
+    ok_msg = FakeAiogramMessage(user_id=ALLOWED_UID)
+    ran_ok, _ = _run_gate(b, ok_msg)
+    assert ran_ok is True

@@ -90,3 +90,69 @@ def test_check_constraint_rejects_bad_state(conn):
     with pytest.raises(psycopg.errors.CheckViolation):
         store.update_state(conn, item_id, "bogus_state", from_state=DISCOVERED,
                            kind=KIND_DETERMINISTIC, actor="system")
+
+
+# --- borderline band: list_pipeline max_score / half-open [min, max) --------
+
+
+def _seed_scored(conn, score, msg_id):
+    """Insert an item and set its relevance_score (NULL when score is None).
+
+    State is left at DISCOVERED — the band query is state-agnostic, which is the
+    point of the borderline feature (those cards usually sit in 'rejected').
+    """
+    item_id = store.insert_item(
+        conn, raw_text="x", source_channel="@c", source_message_id=str(msg_id)
+    )
+    if score is not None:
+        conn.execute(
+            "UPDATE work_items SET relevance_score = %s WHERE id = %s", (score, item_id)
+        )
+        conn.commit()
+    return item_id
+
+
+def test_list_pipeline_borderline_band_half_open(conn):
+    # Seed boundary + interior + NULL scores.
+    _seed_scored(conn, 49, 1)
+    _seed_scored(conn, 50, 2)
+    _seed_scored(conn, 55, 3)
+    _seed_scored(conn, 59, 4)
+    _seed_scored(conn, 60, 5)
+    _seed_scored(conn, 61, 6)
+    _seed_scored(conn, None, 7)  # NULL score
+
+    items = store.list_pipeline(conn, min_score=50, max_score=60)
+    scores = [it.relevance_score for it in items]
+    # EXACTLY {50, 55, 59}; 49/60/61/NULL excluded. min INCLUSIVE, max EXCLUSIVE.
+    assert set(scores) == {50.0, 55.0, 59.0}
+    # Ordered highest-first.
+    assert scores == [59.0, 55.0, 50.0]
+
+
+def test_list_pipeline_max_score_alone(conn):
+    _seed_scored(conn, 40, 1)
+    _seed_scored(conn, 60, 2)
+    _seed_scored(conn, 80, 3)
+    _seed_scored(conn, None, 4)  # NULL excluded by a max_score ceiling
+    items = store.list_pipeline(conn, max_score=60)
+    # < 60 only (60 excluded), NULL excluded.
+    assert {it.relevance_score for it in items} == {40.0}
+
+
+def test_list_pipeline_min_score_alone_unchanged(conn):
+    # Regression: min_score-only behavior is identical (NULL excluded, >= floor).
+    _seed_scored(conn, 40, 1)
+    _seed_scored(conn, 50, 2)
+    _seed_scored(conn, 90, 3)
+    _seed_scored(conn, None, 4)
+    items = store.list_pipeline(conn, min_score=50)
+    assert {it.relevance_score for it in items} == {50.0, 90.0}
+
+
+def test_list_pipeline_no_scores_unchanged_when_band_none(conn):
+    # No score bounds -> NULL-score rows are INCLUDED (existing behavior).
+    _seed_scored(conn, 55, 1)
+    _seed_scored(conn, None, 2)
+    items = store.list_pipeline(conn)
+    assert len(items) == 2

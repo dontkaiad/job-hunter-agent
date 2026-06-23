@@ -258,6 +258,65 @@ def test_filters_combine(client, conn):
     assert data[0]["status"] == SURFACED and data[0]["score"] == 90.0
 
 
+# --- filters: max_score / borderline band [min, max) ------------------------
+
+
+def test_filter_max_score_excludes_high_and_null(client, conn):
+    _seed(conn, state=SURFACED, score=40.0, extracted=_extracted())
+    _seed(conn, state=SURFACED, score=60.0, extracted=_extracted())  # excluded (< is strict)
+    _seed(conn, state=SURFACED, score=90.0, extracted=_extracted())
+    _seed(conn, state=DISCOVERED, score=None, extracted=_extracted())  # null excluded
+    data = client.get("/api/pipeline", params={"max_score": 60}).json()
+    assert [x["score"] for x in data] == [40.0]
+
+
+def test_filter_borderline_band_50_to_60(client, conn):
+    # The exact future frontend query: /api/pipeline?min_score=50&max_score=60.
+    _seed(conn, state=REJECTED, score=49.0, extracted=_extracted())
+    _seed(conn, state=REJECTED, score=50.0, extracted=_extracted())
+    _seed(conn, state=REJECTED, score=55.0, extracted=_extracted())
+    _seed(conn, state=REJECTED, score=59.0, extracted=_extracted())
+    _seed(conn, state=SURFACED, score=60.0, extracted=_extracted())
+    _seed(conn, state=SURFACED, score=80.0, extracted=_extracted())
+    _seed(conn, state=DISCOVERED, score=None, extracted=_extracted())
+    data = client.get(
+        "/api/pipeline", params={"min_score": 50, "max_score": 60}
+    ).json()
+    # EXACTLY {50,55,59}; half-open, highest-first.
+    assert [x["score"] for x in data] == [59.0, 55.0, 50.0]
+
+
+def test_filter_band_combines_with_status_and_remote(client, conn):
+    _seed(conn, state=REJECTED, score=55.0, extracted=_extracted(remote=True))
+    _seed(conn, state=REJECTED, score=55.0, extracted=_extracted(remote=False))
+    _seed(conn, state=SURFACED, score=55.0, extracted=_extracted(remote=True))
+    data = client.get(
+        "/api/pipeline",
+        params={"min_score": 50, "max_score": 60, "status": REJECTED, "remote": "true"},
+    ).json()
+    assert len(data) == 1
+    assert data[0]["status"] == REJECTED and data[0]["remote"] is True
+
+
+def test_band_query_is_read_only(client, conn):
+    iid = _seed(conn, state=REJECTED, score=55.0, extracted=_extracted())
+    before = store.get_item(conn, iid).state
+    client.get("/api/pipeline", params={"min_score": 50, "max_score": 60})
+    assert store.get_item(conn, iid).state == before == REJECTED
+
+
+def test_band_query_requires_auth(conn, auth_conn):
+    # No session cookie -> 401 (same gate as the other /api routes).
+    app = webapi.create_app()
+    app.dependency_overrides[webapi.get_conn] = lambda: conn
+    app.dependency_overrides[webapi.get_fx] = lambda: FakeFx()
+    apply_auth_overrides(app, auth_conn)
+    with TestClient(app) as c:
+        resp = c.get("/api/pipeline", params={"min_score": 50, "max_score": 60})
+    app.dependency_overrides.clear()
+    assert resp.status_code == 401
+
+
 # --- salary.display ---------------------------------------------------------
 
 

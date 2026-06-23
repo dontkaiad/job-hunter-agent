@@ -283,6 +283,63 @@ def render_surfaced(item: store.WorkItem, salary_rub: Optional[float] = None) ->
     return "\n".join(lines)
 
 
+# Empty-band reply for /borderline (exact one-line string, Russian).
+BORDERLINE_EMPTY = "нет пограничных вакансий (50-59)"
+# Keep the /borderline reply safely under Telegram's 4096-char message limit;
+# beyond this the renderer stops and notes the remainder ("…и ещё N").
+_BORDERLINE_CHAR_BUDGET = 3900
+
+
+def _borderline_company_title(item: store.WorkItem) -> Tuple[str, str]:
+    """Parse (company, title) out of an item's extracted_json. PURE.
+
+    Tolerant of missing/garbage JSON (returns ("", "") components missing) so a
+    half-extracted borderline row never breaks the list. Reuses schema_extract.
+    """
+    try:
+        ex = from_dict(json.loads(item.extracted_json or "{}"))
+    except Exception:
+        ex = from_dict({})
+    return (ex.company or ""), (ex.title or "")
+
+
+def render_borderline(items: List[store.WorkItem]) -> str:
+    """Render the COMPACT /borderline list. PURE.
+
+    READ-ONLY browse view of cards scoring in [50, 60). One line per item:
+    ``<score> — <company> · <title> <link>``. Items arrive already ordered by
+    the store (relevance_score DESC NULLS LAST, created_at DESC), i.e.
+    highest-score-first then newest. No action buttons (browse, maybe act
+    later). Empty band -> the exact one-liner ``BORDERLINE_EMPTY``.
+
+    No HTML markup is used (plain text), so values are NOT escaped — the message
+    is sent without parse_mode and with link previews disabled.
+    """
+    if not items:
+        return BORDERLINE_EMPTY
+
+    lines: List[str] = []
+    total = 0
+    for idx, item in enumerate(items):
+        company, title = _borderline_company_title(item)
+        score = item.relevance_score
+        # TRUNCATE (not round): a 59.x borderline item must read "59", never
+        # "60" — it would otherwise look like it cleared SURFACE_THRESHOLD.
+        score_str = f"{int(score)}" if score is not None else "?"
+        facts = " · ".join(p for p in (company, title) if p)
+        head = f"{score_str} — {facts}" if facts else score_str
+        link = item.source_link or ""
+        line = f"{head} {link}".rstrip()
+        # Bound the message under Telegram's 4096-char limit: stop before the
+        # budget and note the remainder rather than letting the send fail.
+        if lines and total + len(line) + 1 > _BORDERLINE_CHAR_BUDGET:
+            lines.append(f"…и ещё {len(items) - idx} (открой дашборд)")
+            break
+        lines.append(line)
+        total += len(line) + 1
+    return "\n".join(lines)
+
+
 def render_draft(item: store.WorkItem) -> str:
     """Render a drafted item (with the generated message) for review. PURE."""
     try:
@@ -464,7 +521,8 @@ class JobHunterBot:
 
     def _register(self) -> None:
         from aiogram import F
-        from aiogram.types import CallbackQuery
+        from aiogram.filters import Command
+        from aiogram.types import CallbackQuery, Message
 
         # Centralized access-control gate. Registered as an OUTER middleware on
         # both the message and callback_query observers so it runs before ANY
@@ -477,6 +535,15 @@ class JobHunterBot:
         @self._dp.callback_query(F.data.startswith(CALLBACK_PREFIX + ":"))
         async def on_callback(cb: CallbackQuery) -> None:  # noqa: ANN001
             await self.handle_callback(cb)
+
+        # READ-ONLY /borderline command. Registered on the MESSAGE observer, so
+        # the existing access_gate OUTER middleware (already attached to
+        # self._dp.message above) auto-gates it to the allowlist — non-allowlisted
+        # senders are dropped BEFORE this handler runs. The handler only SELECTs
+        # and sends text; it never advances/updates state.
+        @self._dp.message(Command("borderline"))
+        async def on_borderline(message: Message) -> None:  # noqa: ANN001
+            await self.handle_borderline(message)
 
         # --- Ops-channel plumbing (Part B) -------------------------------
         # Wire the ops startup ping + global error handler onto THIS existing
@@ -555,6 +622,33 @@ class JobHunterBot:
             self.cfg.notify_chat_id,
             text,
             disable_web_page_preview=True,
+        )
+
+    # Half-open borderline band [BORDERLINE_MIN, BORDERLINE_MAX): 50..59.
+    BORDERLINE_MIN = 50.0
+    BORDERLINE_MAX = 60.0  # exclusive -> 60 is SURFACE_THRESHOLD, stays surfaced
+
+    async def handle_borderline(self, message) -> None:  # noqa: ANN001
+        """READ-ONLY /borderline: list cards scoring [50, 60), highest-first.
+
+        Queries ``work_items`` for relevance_score in the half-open band
+        [50, 60) REGARDLESS of state (borderline cards usually sit in
+        'rejected'), renders the COMPACT list, and replies to the requesting
+        chat with link previews disabled. It NEVER advances, updates state,
+        surfaces, drafts, or sends a card — it only SELECTs and answers text.
+
+        The allowlist is enforced by the existing access_gate OUTER middleware on
+        self._dp.message; non-allowlisted senders are dropped before this runs.
+        """
+        items = store.list_pipeline(
+            self.conn,
+            min_score=self.BORDERLINE_MIN,
+            max_score=self.BORDERLINE_MAX,
+        )
+        text = render_borderline(items)
+        await message.answer(
+            text,
+            link_preview_options=_no_preview(),
         )
 
     async def notify_surfaced(self, item_id: int) -> None:

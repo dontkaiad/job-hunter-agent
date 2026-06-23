@@ -245,6 +245,7 @@ def list_pipeline(
     *,
     status: Optional[str] = None,
     min_score: Optional[float] = None,
+    max_score: Optional[float] = None,
     processed: Optional[bool] = None,
     limit: int = 1000,
 ) -> List[WorkItem]:
@@ -255,7 +256,15 @@ def list_pipeline(
       - ``min_score``: ``relevance_score >= %s``. Rows with a NULL score are
         EXCLUDED when ``min_score`` is set (a NULL score cannot satisfy a
         numeric floor).
+      - ``max_score``: ``relevance_score < %s`` — a HALF-OPEN upper bound (the
+        max itself is EXCLUDED). Rows with a NULL score are EXCLUDED when
+        ``max_score`` is set (a NULL score cannot satisfy a numeric ceiling).
       - ``processed``: partition over ``state`` (see ``_UNPROCESSED_STATES``).
+
+    ``min_score`` and ``max_score`` compose into the half-open band
+    ``[min_score, max_score)`` (score >= min AND score < max). Each is fully
+    optional and independent; passing only one applies just that bound, and
+    passing neither leaves behavior identical to before this param existed.
 
     remote / free-text ``q`` filtering is intentionally NOT done here (they need
     the parsed extracted_json blob) — the API layer applies them in Python.
@@ -273,6 +282,10 @@ def list_pipeline(
     if min_score is not None:
         clauses.append("relevance_score IS NOT NULL AND relevance_score >= %s")
         params.append(float(min_score))
+
+    if max_score is not None:
+        clauses.append("relevance_score IS NOT NULL AND relevance_score < %s")
+        params.append(float(max_score))
 
     if processed is not None:
         placeholders = ", ".join(["%s"] * len(_UNPROCESSED_STATES))
