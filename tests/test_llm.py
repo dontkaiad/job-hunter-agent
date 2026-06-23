@@ -230,6 +230,58 @@ def test_score_system_constrains_verdict_plus_bullets_reasoning():
     assert "do not consider salary" in low
 
 
+def test_score_system_classifies_hard_vs_soft_requirements():
+    """REQUIREMENT SEVERITY: the SCORE prompt must tell the model to classify
+    each requirement HARD vs SOFT by the post's OWN wording, penalize SOFT
+    misses only lightly (never a ⚠️ rejection-risk flag), keep HARD misses as
+    today, and DEFAULT TO SOFT when wording is ambiguous."""
+    s = llm.SCORE_SYSTEM
+    low = s.lower()
+    # The classification rule is present and named.
+    assert "REQUIREMENT SEVERITY" in s
+    assert "hard" in low and "soft" in low
+    # HARD trigger words (post wording).
+    assert "обязательно" in low and "mandatory" in low and "required" in low
+    assert "необходимо" in low and "строго" in low
+    # SOFT trigger words (post wording).
+    assert "будет плюсом" in low and "preferred" in low
+    assert "nice to have" in low and "приветствуется" in low
+    assert "желательно" in low
+    # SOFT miss -> small reduction, NOT a ⚠️ hard flag / rejection risk.
+    assert "small score reduction" in low
+    assert "must not be a ⚠️" in low or "must not be a ⚠" in low
+    assert "risk of rejection" in low or "rejection risk" in low
+    # Ambiguous wording defaults to SOFT.
+    assert "default to soft" in low
+    assert "ambiguous" in low
+    # HARD miss keeps current weight/flag behavior.
+    assert "hard requirement the candidate misses" in low
+
+
+def test_score_system_degree_line_conditioned_on_hard_wording():
+    """The degree example must now be EXPLICITLY conditioned on HARD (mandatory)
+    wording — a merely 'preferred / будет плюсом' degree is SOFT and must not be
+    treated as a hard flag."""
+    # Normalize whitespace so wrapped phrases match regardless of line breaks.
+    low = " ".join(llm.SCORE_SYSTEM.split()).lower()
+    # The degree line references HARD / mandatory wording explicitly.
+    assert "hard requirement for a technical degree (mandatory wording)" in low
+    # Conditioned ONLY on HARD wording.
+    assert "this applies only when the post words the degree as hard" in low
+    # And spells out that a 'preferred / будет плюсом' degree is SOFT, no flag.
+    assert "preferred / будет плюсом" in low or "будет плюсом" in low
+    assert "soft and gets only a light deduction" in low
+
+
+def test_score_system_reserves_warning_for_hard_misses():
+    """OUTPUT FORMAT: ⚠️ bullets are RESERVED for genuine HARD misses / real
+    risks; SOFT gaps use softer, non-⚠️ language. Format otherwise unchanged."""
+    s = llm.SCORE_SYSTEM
+    low = s.lower()
+    assert "⚠️ is reserved for genuine hard misses" in low
+    assert "softer, non-⚠️ language" in low or "non-⚠️ language" in low
+
+
 def test_extract_system_scans_whole_post_for_contact():
     """FIX 3: the extract prompt must tell the model to scan the WHOLE post
     (including the bottom) for the contact and never use the source channel."""
@@ -570,6 +622,58 @@ def test_parse_score_verbose_cyrillic_rationale_parses_and_clamps():
     assert out["score"] == 100  # clamped from 120
     assert out["reasoning"] == block
     assert "✅" in out["reasoning"] and "⚠️" in out["reasoning"]
+
+
+# --- SAMPLE re-score illustration: SOFT vs HARD requirement via FakeLLM -------
+
+
+def test_soft_requirement_scores_without_warning_flag(fake_llm):
+    """Illustration (judgment is the model's; here a FakeLLM follows the new
+    rubric): a vacancy where a degree is only «высшее будет плюсом» (SOFT) and
+    the candidate lacks it -> «Обоснование» notes it WITHOUT a ⚠️ rejection
+    risk, in softer language, with only a light deduction. The wiring +
+    parse/format are what we verify; the prompt carries the SEVERITY rule."""
+    soft_block = (
+        "Хороший фит по роли — 78/100\n"
+        "✅ Роль про внедрение LLM (RAG, промпт-инжиниринг), что совпадает с её "
+        "хендз-он опытом.\n"
+        "✅ Высшее образование здесь лишь «будет плюсом», поэтому его отсутствие "
+        "несущественно и снижает оценку лишь немного."
+    )
+    raw = '{"relevance_score": 78, "Обоснование": ' + json.dumps(
+        soft_block, ensure_ascii=False
+    ) + "}"
+    fake_llm.set_for("hiring-fit JUDGE", raw)
+    ex = ExtractResult(title="AI Engineer", source_channel="@c")
+    out = llm.llm_score(fake_llm, ex, "Высшее будет плюсом. Внедрение LLM.")
+    assert out["score"] == 78
+    # SOFT miss is mentioned, but NOT as a ⚠️ rejection-risk flag.
+    assert "будет плюсом" in out["reasoning"]
+    assert "⚠️" not in out["reasoning"]
+    # The score routed to the JUDGE model and used the severity-aware prompt.
+    assert fake_llm.calls[0]["model"] == llm.JUDGE_MODEL
+    assert "REQUIREMENT SEVERITY" in fake_llm.calls[0]["system"]
+
+
+def test_hard_requirement_retains_warning_flag(fake_llm):
+    """Counterpart: when the SAME degree is worded «высшее образование
+    обязательно» (HARD) and the candidate lacks it, the ⚠️ hard flag is
+    retained and the score is lower — current behavior preserved."""
+    hard_block = (
+        "Слабый фит по роли — 48/100\n"
+        "✅ Стек по LLM пересекается с её хендз-он опытом.\n"
+        "⚠️ Высшее образование указано как обязательное, которого у неё нет — "
+        "это жёсткий блокер и риск отказа."
+    )
+    raw = '{"relevance_score": 48, "Обоснование": ' + json.dumps(
+        hard_block, ensure_ascii=False
+    ) + "}"
+    fake_llm.set_for("hiring-fit JUDGE", raw)
+    ex = ExtractResult(title="AI Engineer", source_channel="@c")
+    out = llm.llm_score(fake_llm, ex, "Высшее образование обязательно. Внедрение LLM.")
+    assert out["score"] == 48
+    assert "⚠️" in out["reasoning"]  # HARD miss keeps the warning flag
+    assert out["score"] < 78  # lower than the SOFT-worded counterpart
 
 
 # --- extract: fenced regression + unchanged normal parsing -------------------
