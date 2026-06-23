@@ -2,6 +2,7 @@ import React from "react";
 import { NavLink } from "react-router-dom";
 import Filters from "./Filters.jsx";
 import { useFilters } from "../state/FiltersContext.jsx";
+import avatar from "../assets/karina-avatar.png";
 
 // LEFT SIDEBAR: profile block, nav, and the pipeline filters. The filters live
 // in a shared context so the PipelineView refetches when they change. The
@@ -14,10 +15,19 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <section className="profile">
-        <div className="profile-name">Карина Ларк</div>
-        <div className="profile-role">AI/LLM Engineer</div>
-        {/* PLACEHOLDER: market-salary widget is a later pass. */}
-        <div className="profile-salary">Зп по рынку: — (скоро)</div>
+        <div className="profile-avatar">
+          <img
+            className="profile-avatar-img"
+            src={avatar}
+            alt="Карина Ларк"
+          />
+        </div>
+        <div className="profile-id">
+          <div className="profile-name">Карина Ларк</div>
+          <div className="profile-role">AI/LLM Engineer</div>
+          {/* PLACEHOLDER: market-salary widget is a later pass. */}
+          <div className="profile-salary">Зп по рынку: — (скоро)</div>
+        </div>
       </section>
 
       <nav className="nav">

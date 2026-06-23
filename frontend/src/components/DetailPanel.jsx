@@ -149,6 +149,7 @@ function Actions({ status, busy, notice, onAction }) {
           key={a.action}
           type="button"
           className="btn btn-action"
+          data-action={a.action}
           disabled={busy}
           onClick={() => onAction(a.action)}
         >

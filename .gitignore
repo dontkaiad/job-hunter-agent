@@ -235,3 +235,6 @@ data/
 config/profile.local.yaml
 
 .claude/settings.local.json
+
+# macOS
+.DS_Store
