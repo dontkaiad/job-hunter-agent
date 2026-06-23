@@ -43,7 +43,13 @@ from typing import Iterator, List, Optional, Set
 
 import psycopg
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+)
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -785,6 +791,68 @@ def logout(settings: AuthSettings = Depends(get_auth_settings)):
     return response
 
 
+# --- SPA static serving (issue #6 part 2): the React dashboard bundle ---------
+#
+# ADDITIVE and GUARDED. When the built frontend exists on disk (env
+# DASHBOARD_STATIC_DIR, default /app/static — produced by the Dockerfile's
+# node build stage), serve it:
+#   - /assets/*  -> the hashed JS/CSS (StaticFiles mount).
+#   - everything else that is NOT /api/* and was not matched by an earlier
+#     (auth) route -> index.html, so the client-side router (React Router) owns
+#     deep links like /borderline or /item/123 on a hard refresh.
+#
+# It is a NO-OP when the dir is absent (the dev/pytest case where create_app is
+# called with no /app/static): no mount, no catch-all, so the existing API +
+# auth behaviour is byte-for-byte unchanged. The /api routers are registered
+# BEFORE the catch-all, so real /api paths (and the auth /login, /auth/callback,
+# /logout) win; only unmatched SPA paths fall through to index.html. The
+# catch-all additionally raises 404 for any leftover api/* so the API — not the
+# SPA — owns the /api namespace even for unknown /api paths.
+
+DEFAULT_STATIC_DIR = "/app/static"
+
+
+def _resolve_static_dir() -> Optional[str]:
+    """Return the SPA static dir if it exists with an index.html, else None.
+
+    Read from env DASHBOARD_STATIC_DIR (default /app/static). Returns None when
+    the dir or its index.html is missing, which makes the SPA mount a pure no-op
+    (existing tests call create_app with no build present)."""
+    static_dir = os.environ.get("DASHBOARD_STATIC_DIR", DEFAULT_STATIC_DIR)
+    index_path = os.path.join(static_dir, "index.html")
+    if os.path.isdir(static_dir) and os.path.isfile(index_path):
+        return static_dir
+    return None
+
+
+def _mount_spa(app: FastAPI, static_dir: str) -> None:
+    """Mount the built React bundle onto ``app`` (registered LAST).
+
+    Mounts /assets for the hashed bundle and adds a catch-all that returns
+    index.html for client-side routes. MUST be called after the API + auth
+    routers are included so those win the path match first."""
+    index_path = os.path.join(static_dir, "index.html")
+    assets_dir = os.path.join(static_dir, "assets")
+    # The hashed JS/CSS Vite emits under dist/assets. Guard existence so a build
+    # with no assets dir (unlikely) does not crash the mount.
+    if os.path.isdir(assets_dir):
+        app.mount(
+            "/assets", StaticFiles(directory=assets_dir), name="assets"
+        )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_catch_all(full_path: str):  # noqa: ANN202 - FastAPI route
+        """Serve index.html for SPA client-side routes.
+
+        The /api routers and the auth routes are registered earlier, so they
+        match first. Anything reaching here is an unmatched path: if it is an
+        /api path (no API route matched it) we 404 in JSON so the API owns the
+        /api namespace; everything else is a client-side route -> index.html."""
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(index_path)
+
+
 # --- App factory ------------------------------------------------------------
 
 
@@ -794,11 +862,22 @@ def create_app() -> FastAPI:
     Issue #5: every /api route (the read ``router`` and the action
     ``writer_router``) is gated by ``require_auth(app="jobhunter")``. The public
     login flow (``auth_router``: /login, /auth/callback, /logout) is NOT gated.
+
+    Issue #6: when a built SPA bundle is present (DASHBOARD_STATIC_DIR), it is
+    served via StaticFiles + a catch-all index.html route registered LAST. This
+    is guarded by dir existence so create_app is a byte-for-byte no-op for the
+    API/auth tests that run without a build.
     """
     app = FastAPI(title="Job Hunter Dashboard API", version="1.0.0")
     app.include_router(auth_router)  # public login flow (NOT gated)
     app.include_router(router)  # read routes (issue #3), now gated
     app.include_router(writer_router)  # write/action routes (issue #4), now gated
+
+    # SPA static serving — registered LAST so /api + auth routes win the match.
+    static_dir = _resolve_static_dir()
+    if static_dir is not None:
+        _mount_spa(app, static_dir)
+
     return app
 
 

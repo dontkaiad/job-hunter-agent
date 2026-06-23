@@ -25,3 +25,11 @@ __pycache__/
 .ruff_cache/
 tests/
 .claude/
+
+# Frontend (issue #6): SHIP the frontend/ SOURCE to the build context so the
+# node build stage can `npm ci` + `npm run build` it. EXCLUDE node_modules
+# (installed fresh inside the node stage) and dist (built in-stage and copied
+# from the node stage, never from the host) so they neither bloat the context
+# nor clobber the in-stage build.
+frontend/node_modules/
+frontend/dist/

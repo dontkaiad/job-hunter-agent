@@ -1,3 +1,18 @@
+# --- Frontend build stage (issue #6 part 2): the React dashboard bundle -------
+# Node is needed ONLY to build the static SPA; it does NOT ship in the runtime
+# image (the final image stays python:3.9-slim). We build frontend/ ->
+# /frontend/dist here and COPY that dist into the python stage's /app/static
+# below. `npm ci` uses the committed package-lock for a reproducible install.
+# The build context ships frontend/ SOURCE but EXCLUDES frontend/node_modules
+# and frontend/dist (see .dockerignore): node_modules is installed fresh here
+# and dist is produced in-stage.
+FROM node:20-alpine AS frontend
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 # Lean image for the long-running serve process (polling + daily 10:00 harvest).
 # Base is python:3.9-slim to match the pinned aiogram 3.13.x / interpreter 3.9.
 FROM python:3.9-slim
@@ -33,6 +48,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # with narrow per-file COPYs that could silently drop tg_logger.py and trigger a
 # ModuleNotFoundError crash-loop at startup.
 COPY . .
+
+# Copy the built SPA from the frontend stage into /app/static. Placed AFTER the
+# wholesale `COPY . .` so it is NOT clobbered by it (and so .dockerignore's
+# exclusion of frontend/dist in the build context is irrelevant — this dist is
+# the freshly-built one from the node stage). webapi.create_app() serves this
+# dir via StaticFiles + an SPA catch-all when DASHBOARD_STATIC_DIR (default
+# /app/static) exists. This image is shared with the bot (job-hunter:latest);
+# the extra static dir is harmless to the bot, which runs serve (not uvicorn).
+COPY --from=frontend /frontend/dist /app/static
 
 # Privilege-drop entrypoint: starts as root, then drops to appuser (uid 10001)
 # before exec'ing the CMD. See the script. (No data-dir chown is needed anymore:

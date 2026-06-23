@@ -1,0 +1,5 @@
+# Frontend build artifacts and deps — never committed. node_modules is restored
+# by `npm ci`; dist is produced by `npm run build` (and built fresh in the
+# Docker node stage). The committed source + package-lock.json are enough.
+node_modules/
+dist/

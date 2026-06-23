@@ -1,8 +1,12 @@
 name: Deploy
 
-# Auto-deploy on every push to main: SSH into the VPS, pull, and rebuild the
-# job-hunter container. GIT_SHA is set inline so the ops startup ping keeps the
-# deployed commit hash (see Dockerfile ARG GIT_SHA / job_hunter/tg_logger.py).
+# Auto-deploy on every push to main: SSH into the VPS, pull, and rebuild BOTH
+# the bot (job-hunter) and the dashboard (dashboard) containers. They are
+# SEPARATE compose services sharing one image; `up -d --build` rebuilds the
+# image once (incl. the React static bundle) and recreates each service
+# independently, so recreating the dashboard does not disturb the running bot.
+# GIT_SHA is set inline so the ops startup ping keeps the deployed commit hash
+# (see Dockerfile ARG GIT_SHA / job_hunter/tg_logger.py).
 on:
   push:
     branches: [main]
@@ -20,5 +24,5 @@ jobs:
           script: |
             cd ~/heylark/job-hunter-agent
             git pull
-            GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build job-hunter
+            GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build job-hunter dashboard
             docker compose ps

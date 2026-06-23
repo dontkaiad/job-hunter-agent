@@ -1,0 +1,275 @@
+/* PLAIN structural CSS only. No design system, no theming — a later Claude
+   Design pass polishes this. The only semantically important bit is the score
+   band colours, where the 50-59 borderline (orange) is deliberately distinct
+   from the 60-74 amber/yellow. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: #111;
+}
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  flex: 0 0 260px;
+  border-right: 1px solid #ccc;
+  padding: 12px;
+}
+
+.profile {
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+.profile-name {
+  font-weight: bold;
+}
+.profile-role {
+  color: #555;
+}
+.profile-salary {
+  color: #888;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.nav-link {
+  text-decoration: none;
+  color: #06c;
+  padding: 4px 6px;
+}
+.nav-link.active {
+  font-weight: bold;
+  background: #eef;
+}
+.nav-disabled {
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* Filters */
+.filters-title {
+  font-size: 13px;
+  margin: 8px 0 4px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 6px;
+}
+.field span {
+  font-size: 12px;
+  color: #555;
+}
+.field input,
+.field select {
+  padding: 3px;
+}
+.field-row {
+  display: flex;
+  gap: 6px;
+}
+.field-row .field {
+  flex: 1;
+}
+
+/* Main / views */
+.main {
+  flex: 1;
+  padding: 16px;
+  overflow: auto;
+}
+.view {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.view-list {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Lanes + table */
+.lane {
+  margin-bottom: 20px;
+}
+.lane-title {
+  font-size: 15px;
+  border-bottom: 2px solid #333;
+  padding-bottom: 2px;
+}
+.lane-count {
+  color: #888;
+  font-weight: normal;
+}
+
+.pipeline-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.pipeline-table th,
+.pipeline-table td {
+  text-align: left;
+  border-bottom: 1px solid #eee;
+  padding: 4px 6px;
+  vertical-align: top;
+}
+.pipeline-table tbody tr {
+  cursor: pointer;
+}
+.pipeline-table tbody tr:hover {
+  background: #f6f6f6;
+}
+.row-selected {
+  background: #eef !important;
+}
+.cell-stack {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Score band dots */
+.score-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.score-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.score-green {
+  background: #2e7d32;
+}
+.score-amber {
+  background: #f6c700;
+} /* 60-74 yellow */
+.score-borderline {
+  background: #ef6c00;
+} /* 50-59 distinct orange */
+.score-red {
+  background: #c62828;
+}
+.score-none {
+  background: #bbb;
+}
+
+/* Detail panel */
+.detail-panel {
+  width: 420px;
+  flex: 0 0 420px;
+  border-left: 1px solid #ccc;
+  padding: 12px;
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow: auto;
+}
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.detail-status {
+  margin: 8px 0;
+  padding: 4px;
+  background: #f3f3f3;
+}
+.detail-field {
+  display: flex;
+  gap: 8px;
+  margin: 2px 0;
+}
+.detail-label {
+  flex: 0 0 90px;
+  color: #666;
+  font-size: 12px;
+}
+
+.actions {
+  margin: 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.btn {
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.btn-action {
+  background: #06c;
+  color: #fff;
+  border: none;
+}
+.btn-action:disabled {
+  background: #99b;
+  cursor: default;
+}
+.notice {
+  color: #c62828;
+  width: 100%;
+  font-size: 13px;
+}
+
+.block {
+  margin-top: 12px;
+}
+.block h4 {
+  margin: 4px 0;
+}
+.text-block {
+  white-space: pre-wrap;
+  background: #f7f7f7;
+  padding: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow-x: auto;
+}
+.history {
+  list-style: none;
+  padding: 0;
+  font-size: 12px;
+}
+.hist-states {
+  font-weight: bold;
+}
+.hist-meta {
+  color: #666;
+  margin-left: 6px;
+}
+
+.muted {
+  color: #888;
+}
+.empty {
+  color: #999;
+  padding: 6px;
+}
+.loading {
+  color: #555;
+}
+.error {
+  color: #c62828;
+}
