@@ -17,9 +17,9 @@
   --inset: #070a0d;
 
   /* hairlines */
-  --line: rgba(120, 168, 162, 0.13);
-  --line-2: rgba(120, 168, 162, 0.22);
-  --hair: rgba(120, 168, 162, 0.07);
+  --line: rgba(120, 168, 162, 0.30);
+  --line-2: rgba(120, 168, 162, 0.42);
+  --hair: rgba(120, 168, 162, 0.17);
 
   /* teal — the signal colour */
   --teal: #54c7b6;
@@ -189,8 +189,8 @@ h1::before {
 
 /* ============================ SIDEBAR ==================================== */
 .sidebar {
-  width: 260px;
-  flex: 0 0 260px;
+  width: 300px;
+  flex: 0 0 300px;
   border-right: 1px solid var(--line);
   padding: 18px 16px;
   background: linear-gradient(180deg, var(--panel) 0%, var(--bg) 100%);
@@ -275,9 +275,9 @@ h1::before {
 .profile-avatar-img {
   position: relative;
   z-index: 1;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
   object-fit: cover;
   object-position: 50% 36%;
 }
@@ -394,6 +394,7 @@ h1::before {
 }
 .field input,
 .field select {
+  width: 100%;
   font-family: var(--mono);
   font-size: 13px;
   color: var(--ink);
@@ -430,6 +431,7 @@ h1::before {
 }
 .field-row .field {
   flex: 1;
+  min-width: 0;
 }
 
 /* ============================ MAIN / VIEWS ============================== */
@@ -801,16 +803,18 @@ h1::before {
 }
 .text-block {
   white-space: pre-wrap;
-  background: var(--inset);
-  color: var(--ink-2);
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--teal-dim);
+  background: linear-gradient(180deg, var(--panel-2), var(--inset));
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--teal-dim);
   border-radius: var(--radius);
-  padding: 11px 13px;
+  padding: 13px 15px;
   font-family: var(--mono);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.65;
   overflow-x: auto;
+  box-shadow: inset 0 1px 0 rgba(146, 236, 220, 0.06),
+    0 6px 18px -14px rgba(0, 0, 0, 0.7);
 }
 
 /* history */
@@ -820,6 +824,8 @@ h1::before {
   margin: 0;
   font-family: var(--mono);
   font-size: 11.5px;
+  /* secondary technical section — pushed back, not a focal point */
+  opacity: 0.78;
 }
 .history li {
   padding: 6px 0;
@@ -828,14 +834,14 @@ h1::before {
 }
 .hist-states {
   font-weight: 600;
-  color: var(--teal);
+  color: var(--teal-dim);
 }
 .hist-meta {
-  color: var(--ink-3);
+  color: var(--ink-4);
   margin-left: 8px;
 }
 .hist-reason {
-  color: var(--khaki);
+  color: var(--khaki-dim);
 }
 
 /* ============================ STATES =================================== */
