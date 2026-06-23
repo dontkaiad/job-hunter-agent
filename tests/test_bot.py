@@ -900,6 +900,8 @@ def _seed_borderline(conn, *, score, msg_id, state=REJECTED, company="Acme",
 
 
 def test_render_borderline_pure_compact_list():
+    # Multi-line card blocks: header line + indented link line per card. No ⚠️
+    # reason line here because these fixtures carry no stored «Обоснование».
     class _It:
         def __init__(self, score, company, title, link):
             self.relevance_score = score
@@ -911,8 +913,139 @@ def test_render_borderline_pure_compact_list():
     ]
     out = bot.render_borderline(items)
     lines = out.splitlines()
-    assert lines[0] == "59 — Acme · Backend https://t.me/a/1"
-    assert lines[1] == "50 — Globex · Frontend https://t.me/g/2"
+    assert lines[0] == "59 — Acme · Backend"
+    assert lines[1] == "   https://t.me/a/1"
+    assert lines[2] == "50 — Globex · Frontend"
+    assert lines[3] == "   https://t.me/g/2"
+    # No reason line: the fixtures have no stored «Обоснование».
+    assert "⚠️" not in out
+
+
+def test_render_borderline_two_warning_bullets():
+    """A card whose «Обоснование» has a verdict line + a ✅ + TWO ⚠️ bullets:
+    the reason line keeps BOTH concerns joined with ' · ', drops the ✅ and the
+    verdict, and stays within the ~120-char total cap."""
+    reasoning = (
+        "Слабоватый фит (52)\n"
+        "✅ релевантный стек Python/LLM\n"
+        "⚠️ требуется senior-грейд\n"
+        "⚠️ обязательный диплom по CS"
+    )
+
+    class _It:
+        relevance_score = 52.0
+        extracted_json = json.dumps(
+            {"company": "Bell Integrator", "title": "AI/LLM Инженер",
+             "Обоснование": reasoning},
+            ensure_ascii=False,
+        )
+        source_link = "https://t.me/x/1"
+
+    out = bot.render_borderline([_It()])
+    lines = out.splitlines()
+    assert lines[0] == "52 — Bell Integrator · AI/LLM Инженер"
+    reason_line = lines[1]
+    assert reason_line.startswith("   ⚠️ ")
+    reason = reason_line[len("   ⚠️ "):]
+    # Both concerns present, joined with ' · '.
+    assert "senior-грейд" in reason
+    assert "обязательный диплom" in reason
+    assert " · " in reason
+    # Verdict line and the ✅ positive are dropped.
+    assert "Слабоватый" not in out
+    assert "✅" not in out
+    assert "релевантный стек" not in out
+    # Total reason within the ~120-char cap.
+    assert len(reason) <= 120
+    assert lines[2] == "   https://t.me/x/1"
+
+
+def test_render_borderline_no_warning_bullets_omits_reason():
+    """A card with only ✅ positives (no ⚠️) emits NO reason line and no crash."""
+    class _It:
+        relevance_score = 55.0
+        extracted_json = json.dumps(
+            {"company": "Acme", "title": "Dev",
+             "Обоснование": "Хороший фит (55)\n✅ стек совпадает\n✅ удалёнка"},
+            ensure_ascii=False,
+        )
+        source_link = "https://t.me/x/2"
+
+    out = bot.render_borderline([_It()])
+    lines = out.splitlines()
+    assert lines == ["55 — Acme · Dev", "   https://t.me/x/2"]
+    assert "⚠️" not in out
+    assert bot._borderline_reason(_It()) == ""
+
+
+def test_render_borderline_missing_or_garbage_reasoning_no_crash():
+    """Missing / garbage / empty «Обоснование» -> no reason line, no crash."""
+    class _Missing:
+        relevance_score = 53.0
+        extracted_json = json.dumps({"company": "C", "title": "T"})
+        source_link = None
+
+    class _Garbage:
+        relevance_score = 53.0
+        extracted_json = "{not valid json"
+        source_link = None
+
+    class _Empty:
+        relevance_score = 53.0
+        extracted_json = json.dumps({"company": "C", "title": "T",
+                                     "Обоснование": ""}, ensure_ascii=False)
+        source_link = None
+
+    for it in (_Missing(), _Garbage(), _Empty()):
+        assert bot._borderline_reason(it) == ""
+        out = bot.render_borderline([it])
+        assert "⚠️" not in out
+        assert "None" not in out
+
+
+def test_render_borderline_long_bullets_trimmed():
+    """Very long ⚠️ bullets: per-bullet ~60-char trim AND the ~120-char total
+    cap are both enforced (assert the '…' truncation)."""
+    long_a = "A" * 200
+    long_b = "B" * 200
+    reasoning = f"Verdict (51)\n⚠️ {long_a}\n⚠️ {long_b}"
+
+    class _It:
+        relevance_score = 51.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "Role", "Обоснование": reasoning},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    # Total cap enforced with ellipsis truncation.
+    assert len(reason) <= 120
+    assert reason.endswith("…")
+    # Per-bullet trim is applied before the join (no single 200-char run).
+    assert "A" * 61 not in reason
+
+
+def test_render_borderline_inline_bullets_parsed():
+    """Inline (non-newline-separated) ⚠️ bullets are still parsed — the split is
+    on the markers, not on newlines."""
+    reasoning = "Маргинально (54) ✅ есть опыт ⚠️ нет визы ⚠️ только офис"
+
+    class _It:
+        relevance_score = 54.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "Role", "Обоснование": reasoning},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert "нет визы" in reason
+    assert "только офис" in reason
+    assert " · " in reason
+    # The ✅ positive and verdict are dropped even when inline.
+    assert "есть опыт" not in reason
+    assert "Маргинально" not in reason
 
 
 def test_render_borderline_empty_one_liner():
@@ -939,12 +1072,14 @@ def test_handle_borderline_lists_band_only(conn, deps):
 
     assert len(msg.replies) == 1
     text = msg.replies[0]["text"]
-    lines = text.splitlines()
+    # Header lines only (multi-line card blocks: header + indented link line;
+    # no ⚠️ reason line since these fixtures carry no stored «Обоснование»).
+    headers = [ln for ln in text.splitlines() if not ln.startswith("   ")]
     # Exactly the three band items, highest-first.
-    assert len(lines) == 3
-    assert lines[0].startswith("59 — FiftyNine · R59")
-    assert lines[1].startswith("55 — FiftyFive · R55")
-    assert lines[2].startswith("50 — Fifty · R50")
+    assert len(headers) == 3
+    assert headers[0] == "59 — FiftyNine · R59"
+    assert headers[1] == "55 — FiftyFive · R55"
+    assert headers[2] == "50 — Fifty · R50"
     # Out-of-band companies never appear.
     for bad in ("Low", "Sixty", "High"):
         assert bad not in text
@@ -1002,3 +1137,675 @@ def test_borderline_command_gated_by_middleware(conn, deps):
     ok_msg = FakeAiogramMessage(user_id=ALLOWED_UID)
     ran_ok, _ = _run_gate(b, ok_msg)
     assert ran_ok is True
+
+
+# ---------------------------------------------------------------------------
+# Tester-added: Point 6 — Variation selector (U+FE0F) explicit probe
+# ---------------------------------------------------------------------------
+
+def test_borderline_reason_variation_selector_full_and_bare():
+    """Spec point 6: ⚠️ (U+26A0 U+FE0F) and bare ⚠ (U+26A0 only) must BOTH be
+    recognised as ⚠️ markers; no stray U+FE0F must leak into the rendered text;
+    ✅ (U+2705) must be dropped.
+
+    The regex is (⚠️?|✅) where the ? makes U+FE0F optional, so the FULL ⚠️ is
+    captured entirely as the marker (segment does NOT start with U+FE0F).
+    """
+    WARNING_FULL = "⚠️"   # U+26A0 + U+FE0F
+    WARNING_BARE = "⚠"   # U+26A0 only, no variation selector
+    CHECKMARK = "✅"            # U+2705
+
+    reasoning = (
+        f"Вердикт (52)\n"
+        f"{WARNING_FULL} full-selector concern text\n"
+        f"{WARNING_BARE} bare-selector concern text\n"
+        f"{CHECKMARK} positive text dropped"
+    )
+
+    class _It:
+        relevance_score = 52.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T", "Обоснование": reasoning},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+
+    # Both ⚠️ concerns must appear in the result.
+    assert "full-selector concern text" in reason, (
+        "Full ⚠️ (U+26A0+FE0F) concern not extracted"
+    )
+    assert "bare-selector concern text" in reason, (
+        "Bare ⚠ (U+26A0 only) concern not extracted"
+    )
+    # ✅ positive must be dropped.
+    assert "positive text dropped" not in reason, (
+        "✅ positive must be dropped from reason"
+    )
+    # Verdict line must be dropped.
+    assert "Вердикт" not in reason, "Verdict line must be dropped"
+    # No stray U+FE0F variation selector in the final result.
+    U_FE0F = "️"
+    assert U_FE0F not in reason, (
+        f"Stray U+FE0F found in reason {reason!r}"
+    )
+    # Joined with ' · '.
+    assert " · " in reason
+
+
+def test_borderline_reason_variation_selector_no_fe0f_leak_in_rendered_card():
+    """Spec point 6: when ⚠️ is present, the rendered card line must NOT contain
+    a stray U+FE0F byte (i.e. '️' variation selector) in the reason segment."""
+    WARNING_FULL = "⚠️"
+    reasoning = f"Score (55)\n{WARNING_FULL} concern with full selector"
+
+    class _It:
+        relevance_score = 55.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T", "Обоснование": reasoning},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    out = bot.render_borderline([_It()])
+    # The rendered '   ⚠️ {reason}' line: the ⚠️ in the prefix is fine.
+    # But the REASON TEXT segment must not contain a stray selector.
+    reason_line = [l for l in out.splitlines() if l.startswith("   ⚠️ ")]
+    assert len(reason_line) == 1, f"Expected exactly one reason line; got: {out.splitlines()}"
+    # Strip the known '   ⚠️ ' prefix (which legitimately contains FE0F as part
+    # of the ⚠️ emoji), then check the remainder.
+    prefix = "   ⚠️ "
+    reason_segment = reason_line[0][len(prefix):]
+    U_FE0F = "️"
+    assert U_FE0F not in reason_segment, (
+        f"Stray U+FE0F in rendered reason segment: {reason_segment!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tester-added: Point 4 extension — non-str Обоснование (int, list)
+# ---------------------------------------------------------------------------
+
+def test_borderline_reason_non_str_obosnovaniye_returns_empty():
+    """Spec point 4: when «Обоснование» is present but not a string (int, list,
+    dict) _borderline_reason must return '' without crashing."""
+    U_FE0F = "️"
+
+    for bad_value in (42, ["✅ good", "⚠️ bad"], {"score": 52}, True, 3.14):
+        class _It:
+            relevance_score = 52.0
+            extracted_json = json.dumps(
+                {"company": "C", "title": "T", "Обоснование": bad_value},
+                ensure_ascii=False,
+            )
+            source_link = None
+
+        result = bot._borderline_reason(_It())
+        assert result == "", (
+            f"Non-str Обоснование {bad_value!r} must yield '' from _borderline_reason; "
+            f"got {result!r}"
+        )
+        rendered = bot.render_borderline([_It()])
+        assert "⚠️" not in rendered, (
+            f"Non-str Обоснование {bad_value!r} must not produce a reason line"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tester-added: Point 5 exact measurement — per-bullet len <= _BORDERLINE_BULLET_MAX
+# ---------------------------------------------------------------------------
+
+def test_borderline_reason_per_bullet_trim_exact_measurement():
+    """Spec point 5: each ⚠️ bullet is individually word-trimmed to
+    _BORDERLINE_BULLET_MAX (60) chars BEFORE joining. Two SHORT bullets that
+    BOTH fit within _BORDERLINE_REASON_MAX (120) are both shown, each <= 60.
+
+    NOTE (revised contract): the OLD behaviour mid-bullet-truncated to pack the
+    line; the new STUB-AVOIDANCE rule only joins WHOLE bullets that fit. So this
+    test uses short bullets whose join stays <= 120 (both survive); the
+    can't-both-fit case is covered by
+    test_borderline_reason_two_full_bullets_only_first_kept below.
+    """
+    # Short distinct concerns; each well under 60, join under 120.
+    bullet_a = "нет рабочей визы и разрешения на работу в стране"   # < 60
+    bullet_b = "только офис, без удалённой работы вообще"             # < 60
+    reasoning = f"Verdict (58)\n⚠️ {bullet_a}\n⚠️ {bullet_b}"
+
+    class _It:
+        relevance_score = 58.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T", "Обоснование": reasoning},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+
+    # Total cap holds.
+    assert len(reason) <= bot._BORDERLINE_REASON_MAX, (
+        f"Total reason length {len(reason)} exceeds {bot._BORDERLINE_REASON_MAX}"
+    )
+    # Both short concerns are visible — neither ate the other's budget.
+    assert bullet_a in reason
+    assert bullet_b in reason
+    parts = reason.split(" · ")
+    assert len(parts) == 2, f"Expected two whole bullets joined by ' · '; got {parts!r}"
+    for p in parts:
+        assert len(p) <= bot._BORDERLINE_BULLET_MAX, (
+            f"Bullet {p!r} ({len(p)}) exceeds per-bullet limit "
+            f"{bot._BORDERLINE_BULLET_MAX}"
+        )
+
+
+def test_borderline_reason_two_full_bullets_only_first_kept():
+    """Revised contract (stub-avoidance): two ~60-char whole bullets cannot both
+    fit (60+3+60 > 120). Show ONLY the first whole bullet, never a fragment of
+    the second, and the first stays <= _BORDERLINE_BULLET_MAX."""
+    # Each oversized -> hard-cut packs ~59 chars; 59+3+59=121 > 120.
+    bullet_a = "CONCERN_A" + "a" * 200
+    bullet_b = "CONCERN_B" + "b" * 200
+    reasoning = f"Verdict (58)\n⚠️ {bullet_a}\n⚠️ {bullet_b}"
+
+    class _It:
+        relevance_score = 58.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T", "Обоснование": reasoning},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert len(reason) <= bot._BORDERLINE_REASON_MAX
+    assert len(reason) <= bot._BORDERLINE_BULLET_MAX  # single whole bullet
+    assert " · " not in reason, f"second bullet must not be fragmented in: {reason!r}"
+    assert reason.startswith("CONCERN_A")
+    assert "CONCERN_B" not in reason
+    assert reason.endswith("…")
+
+
+# ---------------------------------------------------------------------------
+# Tester-added: Point 7 — score TRUNCATION (not rounding): 59.x -> "59"
+# ---------------------------------------------------------------------------
+
+def test_render_borderline_score_truncation_not_rounding():
+    """Spec point 7: score must be TRUNCATED via int() — 59.9 must render as
+    '59' not '60'. This is critical: '60' would look like a threshold-cleared card.
+    Also: 50.0 -> '50', 52.7 -> '52', None -> '?'.
+    """
+    cases = [
+        (59.9, "59"),
+        (59.1, "59"),
+        (52.7, "52"),
+        (50.0, "50"),
+        (None, "?"),
+    ]
+    for score, expected_str in cases:
+        class _It:
+            relevance_score = score
+            extracted_json = json.dumps({"company": "Co", "title": "T"})
+            source_link = None
+
+        out = bot.render_borderline([_It()])
+        first_line = out.splitlines()[0]
+        score_token = first_line.split(" ")[0]
+        assert score_token == expected_str, (
+            f"Score {score!r} must render as {expected_str!r}, got {score_token!r} "
+            f"(full line: {first_line!r})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tester-added: Point 8 — overflow N correctness
+# ---------------------------------------------------------------------------
+
+def test_render_borderline_overflow_n_is_correct():
+    """Spec point 8: when the budget overflows, the '…и ещё N' line must report
+    the EXACT count of items NOT rendered (total - rendered_count).
+
+    Build items large enough to force overflow within 100 items, then verify
+    the reported N equals total_items - rendered_items.
+    """
+    long_link = "https://t.me/" + "x" * 60
+
+    class _LargeItem:
+        def __init__(self, n):
+            self.relevance_score = 50.0 + (n % 10)
+            self.extracted_json = json.dumps({
+                "company": "C" * 50,
+                "title": "T" * 50,
+                "Обоснование": f"V (5{n%10})\n⚠️ concern for item {n} with extra padding text here",
+            }, ensure_ascii=False)
+            self.source_link = long_link + f"/{n}"
+
+    items = [_LargeItem(n) for n in range(100)]
+    result = bot.render_borderline(items)
+
+    assert len(result) <= 4096, f"Output length {len(result)} exceeds Telegram limit"
+    assert "…и ещё" in result, "Expected overflow marker '…и ещё' in result"
+
+    lines = result.splitlines()
+    # Count rendered header lines (non-indented, non-overflow).
+    rendered = [l for l in lines if l and not l.startswith("   ") and "…и ещё" not in l]
+    overflow_lines = [l for l in lines if "…и ещё" in l]
+    assert len(overflow_lines) == 1, f"Expected exactly one overflow line; got {overflow_lines}"
+
+    import re as _re
+    m = _re.search(r"…и ещё (\d+)", overflow_lines[0])
+    assert m is not None, f"Could not parse N from overflow line: {overflow_lines[0]!r}"
+    n_reported = int(m.group(1))
+    n_expected = len(items) - len(rendered)
+    assert n_reported == n_expected, (
+        f"Overflow N={n_reported} but expected {n_expected} "
+        f"({len(items)} total - {len(rendered)} rendered)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# WORD-BOUNDARY _soft_trim + stub-avoidance _borderline_reason
+# ---------------------------------------------------------------------------
+
+def _seg(it):
+    """Build a single-item borderline card and return its reason segment text
+    (the part after the '   ⚠️ ' prefix), or None when no reason line emitted."""
+    out = bot.render_borderline([it])
+    prefix = "   ⚠️ "
+    for ln in out.splitlines():
+        if ln.startswith(prefix):
+            return ln[len(prefix):]
+    return None
+
+
+def test_soft_trim_cuts_on_word_boundary_not_mid_word():
+    """A long multi-word string is cut at a whole-word boundary: the body before
+    '…' is a prefix of the input ending exactly at a space (no partial word)."""
+    text = "требует 3–4 года опыта в разработке распределённых систем"
+    limit = 28
+    out = bot._soft_trim(text, limit)
+    assert len(out) <= limit
+    assert out.endswith("…")
+    body = out[:-1]
+    # The body must equal the input truncated at a space boundary: i.e. the input
+    # continues with a space right where the body ends (whole-word cut).
+    assert text.startswith(body), f"body {body!r} not a prefix of input"
+    assert text[len(body):len(body) + 1] == " ", (
+        f"body must end at a word boundary (next input char is a space); got {out!r}"
+    )
+    # Concretely: it must NOT cut mid-word into 'разрабо…'.
+    assert "разрабо…" not in out
+    assert out == "требует 3–4 года опыта в…"
+
+
+def test_soft_trim_strips_trailing_opening_quote_before_ellipsis():
+    """A cut landing just after an opening guillemet drops the '«' before '…':
+    '…без оговорки «желательно»' -> '…без оговорки…' not '…без оговорки «…'."""
+    text = "кандидат без оговорки «желательно» по визе и релокации"
+    # Choose a limit so the word-budget boundary falls right after '«'.
+    limit = 24
+    out = bot._soft_trim(text, limit)
+    assert len(out) <= limit
+    assert out.endswith("…")
+    assert "«" not in out, f"opening guillemet must be stripped before '…'; got {out!r}"
+    assert "«…" not in out
+    assert out == "кандидат без оговорки…"
+
+
+def test_soft_trim_strips_trailing_comma_or_dash_before_ellipsis():
+    """A trailing comma/dash at the cut point is stripped before '…'."""
+    out_comma = bot._soft_trim("первое слово, второе слово третье", 20)
+    assert out_comma.endswith("…") and "," not in out_comma
+    assert out_comma == "первое слово…"
+    out_dash = bot._soft_trim("первое слово — второе слово третье", 16)
+    assert out_dash.endswith("…")
+    # Neither the dash nor a trailing space remains before the ellipsis.
+    assert not out_dash[:-1].endswith(("—", " ", "–", "-"))
+
+
+def test_soft_trim_single_token_longer_than_limit_hard_cut_fallback():
+    """A single token with no space in the budget hard-cuts to limit-1 + '…',
+    still <= limit."""
+    text = "Х" * 200  # one unbroken token, no spaces
+    limit = 60
+    out = bot._soft_trim(text, limit)
+    assert len(out) == limit
+    assert len(out) <= limit
+    assert out.endswith("…")
+    assert out == "Х" * (limit - 1) + "…"
+
+
+def test_soft_trim_noop_when_within_limit():
+    """No '…' and no change when text already fits."""
+    assert bot._soft_trim("короткий текст", 60) == "короткий текст"
+
+
+def test_borderline_reason_stub_avoidance_two_bullets_only_first_shown():
+    """Two ~60-char bullets cannot both fit cleanly (60+3+60=123 > 120): show
+    ONLY the first whole bullet, with no second fragment."""
+    # Each word-trims to ~59 chars; 59+3+59=121 > 120 -> only the first fits.
+    a = "Роль заявлена как senior уровень и требует обязательно 3–4 полных года опыта в разработке"
+    b = "Обязателен профильный диплом и подтверждённый коммерческий опыт в крупном финтехе банке"
+
+    class _It:
+        relevance_score = 53.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T", "Обоснование": f"V (53)\n⚠️ {a}\n⚠️ {b}"},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert len(reason) <= bot._BORDERLINE_REASON_MAX
+    # Only ONE bullet -> no join separator present, no fragment of the second.
+    assert " · " not in reason, f"expected a single whole bullet, got {reason!r}"
+    assert reason.startswith("Роль заявлена как senior")
+    assert "Обязателен" not in reason, "second bullet must not be fragmented in"
+    # Ends on a whole word, never mid-word.
+    assert reason.endswith("…")
+    assert reason == "Роль заявлена как senior уровень и требует обязательно 3–4…"
+
+
+def test_borderline_reason_several_short_bullets_all_shown_joined():
+    """Several SHORT whole bullets that all fit are shown joined by ' · '."""
+    class _It:
+        relevance_score = 55.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T",
+             "Обоснование": "V (55)\n⚠️ нет визы\n⚠️ только офис\n⚠️低 зарплата"},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert len(reason) <= bot._BORDERLINE_REASON_MAX
+    assert reason == "нет визы · только офис · 低 зарплата"
+    assert reason.count(" · ") == 2
+
+
+def test_borderline_reason_first_bullet_alone_too_long_word_trimmed_to_cap():
+    """A first bullet that alone exceeds the reason cap is word-trimmed down to
+    the cap (whole word, ends '…', <= cap)."""
+    long_first = (
+        "Роль заявлена как senior и требует не менее трёх или четырёх лет "
+        "практического опыта в проектировании и разработке распределённых "
+        "отказоустойчивых высоконагруженных систем на нескольких языках"
+    )
+
+    class _It:
+        relevance_score = 51.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T", "Обоснование": f"V (51)\n⚠️ {long_first}"},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert len(reason) <= bot._BORDERLINE_REASON_MAX
+    assert reason.endswith("…")
+    # Word-boundary trim: body is a prefix of the (bullet-trimmed) source ending
+    # at a space, never mid-word.
+    body = reason[:-1]
+    assert long_first.startswith(body)
+    assert long_first[len(body):len(body) + 1] == " "
+    # Meaningful content well above the 15-char floor.
+    assert len(reason.rstrip("…")) >= bot._BORDERLINE_MIN_BULLET_CHARS
+
+
+def test_borderline_reason_min_bullet_floor_no_tiny_stub():
+    """Degenerate first bullet that would word-trim to a sub-15-char stub must
+    NOT be emitted as a tiny 'сло…'; the floor forces a fuller hard-cut."""
+    # First token is short, then one huge unbroken token: word-trim at the first
+    # space would yield just the short token. With a >cap whole bullet this only
+    # triggers the first-bullet branch when the bullet exceeds the reason cap.
+    huge = "ы" * 300
+    bullet = f"но {huge}"  # 'но' + space + 300-char token
+
+    class _It:
+        relevance_score = 52.0
+        extracted_json = json.dumps(
+            {"company": "Co", "title": "T", "Обоснование": f"V (52)\n⚠️ {bullet}"},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert len(reason) <= bot._BORDERLINE_REASON_MAX
+    assert reason.endswith("…")
+    # Must NOT be the tiny 'но…' stub; the >=15-char floor forces a fuller cut.
+    assert reason != "но…"
+    assert len(reason.rstrip("…")) >= bot._BORDERLINE_MIN_BULLET_CHARS
+
+
+def test_borderline_reason_rendered_sample_no_midword_and_quote_fixed():
+    """End-to-end render: the reason segment ends on a whole word (no 'разрабо…')
+    and any opening guillemet at a cut is stripped (no '«…')."""
+    a = "Роль заявлена как senior и требует 3–4 года опыта в разработке систем"
+
+    class _It:
+        relevance_score = 54.0
+        extracted_json = json.dumps(
+            {"company": "Bell", "title": "Engineer", "Обоснование": f"V (54)\n⚠️ {a}"},
+            ensure_ascii=False,
+        )
+        source_link = "https://t.me/x/1"
+
+    seg = _seg(_It())
+    assert seg is not None
+    assert seg.endswith("…")
+    assert "разрабо…" not in seg
+    assert "«" not in seg
+
+
+# ---------------------------------------------------------------------------
+# Tester-added (2nd pass): adversarial edge cases for _soft_trim and
+# _borderline_reason that the existing suite does NOT cover.
+# ---------------------------------------------------------------------------
+
+def test_soft_trim_double_ellipsis_bug_u2026_in_input():
+    """BUG (Developer must fix): when input already contains U+2026 ('…') at
+    a word boundary and _soft_trim cuts there, the body ends with '…' and
+    appending another '…' produces '……' (double ellipsis). The result must
+    never contain two consecutive ellipsis characters.
+
+    Root cause: U+2026 (HORIZONTAL ELLIPSIS) is not in _TRIM_TRAILING, so
+    rstrip() does not remove it from the body before appending '…'.
+    Fix: add chr(0x2026) to _TRIM_TRAILING in bot.py.
+    """
+    text = "слово с многоточием… тут продолжение"
+    limit = 22  # budget lands right after '…', before 'тут'
+    out = bot._soft_trim(text, limit)
+    assert len(out) <= limit
+    assert "……" not in out, (
+        f"Double ellipsis '……' produced when input contains U+2026 near boundary: "
+        f"{out!r}. Fix: add chr(0x2026) to _TRIM_TRAILING."
+    )
+
+
+def test_soft_trim_right_curly_quote_stripped_before_ellipsis():
+    """A word ending with a right curly double-quote '”' (") is stripped
+    from the tail before '…' is appended, so the result never shows '"…'."""
+    # The word '"needed"' has a closing curly quote. If the trim cuts after it,
+    # the trailing '"' must be removed.
+    text = 'текст с закрытой кавычкой” ещё слова тут дальше'
+    limit = 28  # lands just after the closing quote
+    out = bot._soft_trim(text, limit)
+    assert len(out) <= limit
+    assert out.endswith("…")
+    assert out[:-1].endswith("”") is False, (
+        f"Trailing right curly quote must be stripped before '…'; got {out!r}"
+    )
+
+
+def test_soft_trim_opening_bracket_stripped_before_ellipsis():
+    """An opening parenthesis '(' at the word boundary is stripped before '…'."""
+    text = "текст (какой-то скобочный блок здесь"
+    # The space is right before '(', so rfind puts body right after the previous word.
+    # body then may end with '(' after rstrip. Verify no '(' remains.
+    limit = 14
+    out = bot._soft_trim(text, limit)
+    assert len(out) <= limit
+    assert out.endswith("…")
+    assert "(…" not in out, (
+        f"Opening bracket must be stripped before '…'; got {out!r}"
+    )
+    assert not out[:-1].endswith("("), (
+        f"Body must not end with '(' before ellipsis; got {out!r}"
+    )
+
+
+def test_soft_trim_word_exactly_fills_budget_no_spurious_ellipsis():
+    """When a word exactly fills limit-1 chars (the full budget), the hard-cut
+    path returns that word + '…', NOT an extra '…'. No double ellipsis."""
+    # 'abcde' is 5 chars; with limit=6, budget=5 chars='abcde', no space ->
+    # hard-cut: 'abcde…' (6 chars). Result must be exactly 'abcde…'.
+    out = bot._soft_trim("abcde fghij", 6)
+    assert out == "abcde…", f"Expected 'abcde…', got {out!r}"
+    assert len(out) == 6
+    assert "……" not in out
+
+
+def test_soft_trim_word_exactly_at_rfind_boundary_inclusive():
+    """Off-by-one: a word whose last char is at position limit-2 (so the word
+    fits in budget[:cut] exactly). The word is kept whole; no '…' appended
+    when len(text) <= limit (direct return), and correct '…' when > limit."""
+    # 'helo' (4 chars) at limit=6: text='helo world' (10 chars), limit=6
+    # budget='helo w'[:5]='helo w'? No: budget=text[:limit-1]=text[:5]='helo '
+    # rfind(' ')=4, body=text[:4]='helo', rstrip->'helo', return 'helo…' (5 <=6)
+    out = bot._soft_trim("helo world", 6)
+    assert out == "helo…"
+    assert len(out) <= 6
+
+    # And when text fits exactly: len('helo w')=6 == limit=6 -> returned as-is
+    out_fit = bot._soft_trim("helo w", 6)
+    assert out_fit == "helo w"
+    assert "…" not in out_fit
+
+
+def test_soft_trim_consecutive_spaces_in_input_handled():
+    """Consecutive spaces in input do NOT cause issues: rfind(' ') still finds
+    the last space in the budget and body.rstrip cleans any trailing space."""
+    text = "слово   много   пробелов   тут"
+    # This text is fed through ' '.join(seg.split()) in _borderline_reason,
+    # so _soft_trim itself receives space-normalised text. But test it directly.
+    limit = 15
+    out = bot._soft_trim(text, limit)
+    assert len(out) <= limit
+    assert out.endswith("…") or len(text) <= limit
+    # Body must not end with trailing spaces
+    if out.endswith("…"):
+        assert not out[:-1].endswith(" "), f"Trailing space before '…': {out!r}"
+
+
+def test_borderline_reason_empty_first_bullet_second_is_shown():
+    """When the FIRST ⚠️ bullet is all whitespace (condensed to ''), it is
+    SKIPPED; the SECOND non-empty bullet is shown as the reason. No crash,
+    no empty reason when real concerns exist further in the list."""
+    class _It:
+        relevance_score = 52.0
+        extracted_json = __import__("json").dumps(
+            {"company": "C", "title": "T",
+             "Обоснование": "V (52)\n⚠️    \n⚠️ реальный повод для отказа"},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert reason == "реальный повод для отказа", (
+        f"Empty first bullet must be skipped; second bullet must appear; got {reason!r}"
+    )
+
+
+def test_borderline_reason_consecutive_spaces_collapsed():
+    """Consecutive spaces in a ⚠️ bullet segment are collapsed by
+    ' '.join(seg.split()), so the rendered reason has single spaces only."""
+    class _It:
+        relevance_score = 52.0
+        extracted_json = __import__("json").dumps(
+            {"company": "C", "title": "T",
+             "Обоснование": "V (52)\n⚠️ слово   много   пробелов   тут"},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert "  " not in reason, (
+        f"Consecutive spaces must be collapsed; got {reason!r}"
+    )
+    assert reason == "слово много пробелов тут"
+
+
+def test_soft_trim_hyphenated_token_no_mid_word():
+    """A hyphenated token like 'work-life-balance' must not be split mid-hyphen;
+    the trim cuts at the nearest SPACE boundary outside the token."""
+    text = "требует опыта work-life-balance подтверждённый стаж"
+    # 'work-life-balance' has no space inside; rfind(' ') will skip over it.
+    for limit in range(20, 45):
+        out = bot._soft_trim(text, limit)
+        if out.endswith("…"):
+            body = out[:-1]
+            next_char = text[len(body) : len(body) + 1]
+            assert next_char in (" ", ""), (
+                f"Mid-word cut at limit={limit}: body={body!r}, next_char={next_char!r}"
+            )
+
+
+def test_soft_trim_length_guarantee_at_bullet_and_reason_caps():
+    """Exhaustive length check: for all interesting limits (60 and 120) and
+    a range of Cyrillic + mixed inputs, result length is always <= limit."""
+    import random
+    rng = random.Random(42)
+    cyrillic = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+    for _ in range(500):
+        word_count = rng.randint(1, 15)
+        words = []
+        for _ in range(word_count):
+            length = rng.randint(2, 15)
+            words.append("".join(rng.choices(cyrillic, k=length)))
+        text = " ".join(words)
+        for limit in [bot._BORDERLINE_BULLET_MAX, bot._BORDERLINE_REASON_MAX]:
+            out = bot._soft_trim(text, limit)
+            assert len(out) <= limit, (
+                f"LENGTH VIOLATION: _soft_trim({text!r}, {limit}) -> "
+                f"len={len(out)} > {limit}"
+            )
+
+
+def test_soft_trim_en_dash_token_is_not_split():
+    """En-dash inside a token ('3–4') is NOT a space; it must not be treated as
+    a word boundary. The word-cut path (space found in budget) must produce a
+    body ending exactly at a space in the original input.
+
+    The hard-cut fallback (no space in budget) may cut mid-character by design;
+    this test only asserts on the word-cut path where rfind returns > 0.
+    """
+    text = "требует 3–4 года опыта в разработке плюс лидерские"
+    for limit in range(5, 55):
+        budget = text[: limit - 1]
+        cut = budget.rfind(" ")
+        if cut <= 0:
+            # Hard-cut fallback path: mid-char allowed; skip this limit.
+            continue
+        out = bot._soft_trim(text, limit)
+        if out.endswith("…"):
+            body = out[:-1]
+            next_char = text[len(body) : len(body) + 1]
+            assert next_char in (" ", ""), (
+                f"Mid-word at limit={limit}: body={body!r} next={next_char!r}"
+            )
+
+
+def test_borderline_reason_bullet_only_period_is_skipped():
+    """A ⚠️ bullet containing ONLY a period (condensed to '') is skipped;
+    the next non-empty bullet is used."""
+    class _It:
+        relevance_score = 52.0
+        extracted_json = __import__("json").dumps(
+            {"company": "C", "title": "T",
+             "Обоснование": "V (52)\n⚠️ .\n⚠️ реальная причина"},
+            ensure_ascii=False,
+        )
+        source_link = None
+
+    reason = bot._borderline_reason(_It())
+    assert reason == "реальная причина", (
+        f"Period-only bullet must be skipped; got {reason!r}"
+    )

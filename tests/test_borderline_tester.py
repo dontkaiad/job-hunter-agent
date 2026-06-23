@@ -172,11 +172,12 @@ def test_bot_borderline_float_boundary(conn, deps):
     asyncio.run(b.handle_borderline(msg))
 
     text = msg.replies[0]["text"]
-    lines = text.splitlines()
+    # Header lines only (multi-line card blocks now carry an indented link line).
+    headers = [ln for ln in text.splitlines() if not ln.startswith("   ")]
 
     # Exactly 2 items should be in the band (score 50.0 and 59.9)
-    assert len(lines) == 2, (
-        f"Expected 2 lines (scores 50.0 and 59.9); got {len(lines)}: {lines}"
+    assert len(headers) == 2, (
+        f"Expected 2 header lines (scores 50.0 and 59.9); got {len(headers)}: {headers}"
     )
 
     # Verify by source link which items are present
@@ -191,7 +192,7 @@ def test_bot_borderline_float_boundary(conn, deps):
 
     # FIXED: render_borderline TRUNCATES via int(score), so a 59.9 item reads
     # "59" (never "60"). A "60" would look like it cleared SURFACE_THRESHOLD.
-    score_strs = [ln.split(" ")[0] for ln in lines]
+    score_strs = [ln.split(" ")[0] for ln in headers]
     assert "59" in score_strs, "59.9 must render as '59' (truncated, not rounded to 60)"
     assert "50" in score_strs, "50.0 must render as '50'"
     assert "60" not in score_strs, "no borderline line may display '60'"
@@ -249,10 +250,12 @@ def test_bot_borderline_multi_state_all_returned(conn, deps):
     asyncio.run(b.handle_borderline(msg))
 
     text = msg.replies[0]["text"]
-    # All 4 in-band states should contribute lines; they all have score 55
-    lines = text.splitlines()
-    assert len(lines) == 4, (
-        f"Expected 4 lines (one per in-band item across 4 states); got {len(lines)}: {lines}"
+    # All 4 in-band states should contribute a header line; they all have score 55.
+    # (Multi-line card blocks add an indented link line per card; count headers.)
+    headers = [ln for ln in text.splitlines() if not ln.startswith("   ")]
+    assert len(headers) == 4, (
+        f"Expected 4 header lines (one per in-band item across 4 states); "
+        f"got {len(headers)}: {headers}"
     )
     # The out-of-band surfaced item (score 70) must not appear
     assert "HighCo" not in text, ">=60 surfaced item must not appear in borderline output"

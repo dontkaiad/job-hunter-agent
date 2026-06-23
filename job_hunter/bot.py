@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from typing import Any, List, Optional, Set, Tuple
 
 import psycopg
@@ -303,14 +304,161 @@ def _borderline_company_title(item: store.WorkItem) -> Tuple[str, str]:
     return (ex.company or ""), (ex.title or "")
 
 
+# Per-⚠️-bullet soft trim and the joined-reason hard cap (chars). The per-bullet
+# trim keeps multiple blockers visible; the total cap bounds the inline reason
+# line so a card block stays compact on the /borderline list.
+_BORDERLINE_BULLET_MAX = 60
+_BORDERLINE_REASON_MAX = 120
+# A word-trimmed bullet shorter than this carries no real signal (e.g. a 3-char
+# "сло…" stub). Used as an explicit floor when trimming a SINGLE bullet down to
+# the reason cap so we never emit a meaningless fragment.
+_BORDERLINE_MIN_BULLET_CHARS = 15
+# Characters stripped off the tail of a word-trimmed body BEFORE the ellipsis,
+# so a cut never leaves a dangling comma/dash or a lone opening quote/bracket
+# ("…без оговорки «" -> "…без оговорки…"). Includes whitespace, sentence
+# punctuation, dashes, both guillemets, straight/curly quotes, brackets, and a
+# pre-existing U+2026 ellipsis (so a bullet already ending in "…" never yields
+# a double "……" when we append our own ellipsis).
+_TRIM_TRAILING = " \t\n,.;:!?—–-«»\"'“”‘’()[]{}…"
+# Split the stored «Обоснование» on the rationale markers. ✅ flags a positive
+# (dropped); ⚠️ flags a concern/hard-flag (kept). The captured group lets us
+# track WHICH marker preceded each segment so only ⚠️ segments survive.
+# NOTE: ⚠️ is TWO codepoints (U+26A0 WARNING SIGN + U+FE0F VARIATION SELECTOR);
+# a bare character class would split off only U+26A0 and leave the selector on
+# the segment, so the markers are matched as whole sequences here (the trailing
+# selector is optional so a plain U+26A0 without it is still recognised).
+_REASON_MARKER_RE = re.compile("(⚠️?|✅)")
+
+
+def _soft_trim(text: str, limit: int, min_chars: int = 0) -> str:
+    """Truncate ``text`` to ``limit`` chars on a WORD boundary, appending '…'. PURE.
+
+    When ``text`` is longer than ``limit`` the ellipsis must fit too, so the body
+    budget is ``limit - 1`` chars. Within that budget we cut at the LAST whole
+    word (the last space), then strip any trailing punctuation / space / opening
+    or closing quote/bracket (see ``_TRIM_TRAILING``) before appending '…' — so
+    "…опыта в разработке…" trims to "…опыта в…" not "…в разрабо…", and
+    "…оговорки «желательно»" trims to "…оговорки…" not "…оговорки «…".
+
+    FALLBACK: if there is NO space inside the budget (a single token longer than
+    the limit), hard-cut to ``limit - 1`` chars + '…' so a giant unbroken token
+    still fits. ``min_chars`` (default 0) is a floor on the word-trimmed body: if
+    the whole-word cut would leave fewer than ``min_chars`` chars (a degenerate
+    "short word + giant token" case that would otherwise emit a 3-char "сло…"
+    stub) we instead hard-cut to fill the budget. The result length is always
+    <= ``limit``.
+    """
+    if len(text) <= limit:
+        return text
+    budget = text[: limit - 1]
+    hard = (budget.rstrip(_TRIM_TRAILING) or budget) + "…"
+    cut = budget.rfind(" ")
+    if cut <= 0:
+        # No usable space within the budget: a single oversized token. Hard-cut
+        # (strip a trailing dangling char first so we don't end on punctuation).
+        return hard
+    body = budget[:cut].rstrip(_TRIM_TRAILING)
+    if not body or len(body) < min_chars:
+        # Either everything before the cut was punctuation/quotes, OR the
+        # whole-word cut leaves too little signal: pack the budget via hard-cut.
+        return hard
+    return body + "…"
+
+
+def _borderline_reason(item: store.WorkItem) -> str:
+    """Build a compact one-line "why below threshold" from stored rationale. PURE.
+
+    Reads the ALREADY-STORED «Обоснование» (pipeline.REASONING_KEY) off the
+    item's extracted_json — NO LLM call, NO re-score. Keeps only the ⚠️ concern
+    bullets (the verdict line and all ✅ positives are dropped), condenses each
+    (whitespace collapsed, trailing period stripped, WORD-trimmed to
+    ~``_BORDERLINE_BULLET_MAX`` chars), then GREEDILY joins WHOLE bullets with
+    " · " while the running line stays <= ``_BORDERLINE_REASON_MAX`` — it STOPS
+    at the first bullet that would not fit rather than truncating one mid-way, so
+    the line reads as clean whole phrases (one full bullet is preferred over two
+    mangled fragments). A first bullet that alone exceeds the reason cap is
+    word-trimmed down to it. Returns "" when the rationale is missing/garbage OR
+    has no ⚠️ bullets — the renderer then OMITS the reason line (never invents a
+    blocker).
+
+    The rationale may be newline-separated OR have the bullets inline, so the
+    split is on the ✅/⚠️ MARKERS (not on newlines), tracking the marker that
+    preceded each segment.
+    """
+    # Same tolerant parse as _borderline_company_title: missing/garbage -> "".
+    try:
+        reasoning = json.loads(item.extracted_json or "{}").get(pipeline.REASONING_KEY)
+    except Exception:
+        return ""
+    if not reasoning or not isinstance(reasoning, str):
+        return ""
+
+    # Split on the markers; re.split with a capturing group yields alternating
+    # [pre-marker-text, marker, segment, marker, segment, ...]. The leading
+    # element (before the first marker) is the verdict line and is discarded.
+    parts = _REASON_MARKER_RE.split(reasoning)
+    concerns: List[str] = []
+    # Walk (marker, segment) pairs after the discarded leading verdict text.
+    for i in range(1, len(parts) - 1, 2):
+        marker = parts[i]
+        segment = parts[i + 1]
+        # Compare on the base codepoint: the warning marker may arrive as ⚠️
+        # (with the U+FE0F variation selector) or a bare ⚠ (U+26A0).
+        if not marker.startswith("⚠"):
+            continue  # ✅ positives (and anything not a ⚠️) are dropped
+        # Drop any leftover U+FE0F variation selector at the segment start, then
+        # condense: collapse internal whitespace/newlines, drop trailing period.
+        segment = segment.lstrip("️")
+        condensed = " ".join(segment.split()).rstrip(".").strip()
+        if not condensed:
+            continue
+        concerns.append(
+            _soft_trim(condensed, _BORDERLINE_BULLET_MAX,
+                       min_chars=_BORDERLINE_MIN_BULLET_CHARS)
+        )
+
+    if not concerns:
+        return ""
+
+    # STUB-AVOIDANCE: assemble WHOLE (already bullet-trimmed) bullets only, never
+    # a mid-bullet fragment. Greedily append " · <next>" while the running line
+    # stays <= _BORDERLINE_REASON_MAX; STOP at the first bullet that would not
+    # fit (do NOT add a fragment of it). Two ~60-char bullets (60+3+60=123 > 120)
+    # thus show only the first, cleanly; several short bullets show as many whole
+    # ones as fit.
+    line = concerns[0]
+    if len(line) > _BORDERLINE_REASON_MAX:
+        # First bullet alone overflows the reason cap: word-trim it down to the
+        # cap, with the ≥15-char floor so a degenerate cut packs the budget via
+        # hard-cut rather than emitting a 3-char "сло…" stub.
+        return _soft_trim(line, _BORDERLINE_REASON_MAX,
+                          min_chars=_BORDERLINE_MIN_BULLET_CHARS)
+    for nxt in concerns[1:]:
+        candidate = f"{line} · {nxt}"
+        if len(candidate) > _BORDERLINE_REASON_MAX:
+            break  # whole bullets only: drop this one rather than fragment it
+        line = candidate
+    return line
+
+
 def render_borderline(items: List[store.WorkItem]) -> str:
     """Render the COMPACT /borderline list. PURE.
 
-    READ-ONLY browse view of cards scoring in [50, 60). One line per item:
-    ``<score> — <company> · <title> <link>``. Items arrive already ordered by
-    the store (relevance_score DESC NULLS LAST, created_at DESC), i.e.
-    highest-score-first then newest. No action buttons (browse, maybe act
-    later). Empty band -> the exact one-liner ``BORDERLINE_EMPTY``.
+    READ-ONLY browse view of cards scoring in [50, 60). Multi-line card block:
+
+        52 — Bell Integrator · AI/LLM Инженер
+           ⚠️ senior-грейд · обязательный диплом
+           https://t.me/...
+
+    Per card: line 1 = ``<score> — <company> · <title>`` (score TRUNCATED via
+    int()); line 2 (ONLY when ``_borderline_reason`` is non-empty) = an indented
+    ``   ⚠️ <reason>`` condensed from the stored «Обоснование» concerns; line 3
+    (ONLY when a link is present) = the indented link. NO LLM call / no re-score
+    — the reason comes purely from already-stored data.
+
+    Items arrive already ordered by the store (relevance_score DESC NULLS LAST,
+    created_at DESC), i.e. highest-score-first then newest. No action buttons.
+    Empty band -> the exact one-liner ``BORDERLINE_EMPTY``.
 
     No HTML markup is used (plain text), so values are NOT escaped — the message
     is sent without parse_mode and with link previews disabled.
@@ -318,7 +466,7 @@ def render_borderline(items: List[store.WorkItem]) -> str:
     if not items:
         return BORDERLINE_EMPTY
 
-    lines: List[str] = []
+    blocks: List[str] = []
     total = 0
     for idx, item in enumerate(items):
         company, title = _borderline_company_title(item)
@@ -328,16 +476,25 @@ def render_borderline(items: List[store.WorkItem]) -> str:
         score_str = f"{int(score)}" if score is not None else "?"
         facts = " · ".join(p for p in (company, title) if p)
         head = f"{score_str} — {facts}" if facts else score_str
+
+        block_lines = [head]
+        reason = _borderline_reason(item)
+        if reason:
+            block_lines.append(f"   ⚠️ {reason}")
         link = item.source_link or ""
-        line = f"{head} {link}".rstrip()
+        if link:
+            block_lines.append(f"   {link}")
+        block = "\n".join(block_lines)
+
         # Bound the message under Telegram's 4096-char limit: stop before the
-        # budget and note the remainder rather than letting the send fail.
-        if lines and total + len(line) + 1 > _BORDERLINE_CHAR_BUDGET:
-            lines.append(f"…и ещё {len(items) - idx} (открой дашборд)")
+        # budget and note the remainder rather than letting the send fail. The
+        # budget is now BLOCK-aware (each card may span multiple lines).
+        if blocks and total + len(block) + 1 > _BORDERLINE_CHAR_BUDGET:
+            blocks.append(f"…и ещё {len(items) - idx} (открой дашборд)")
             break
-        lines.append(line)
-        total += len(line) + 1
-    return "\n".join(lines)
+        blocks.append(block)
+        total += len(block) + 1
+    return "\n".join(blocks)
 
 
 def render_draft(item: store.WorkItem) -> str:
