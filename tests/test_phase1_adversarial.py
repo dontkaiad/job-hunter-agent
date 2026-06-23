@@ -471,7 +471,7 @@ def test_success_enrichment_fetched_label_in_prompt(monkeypatch, fake_llm):
       - The actual fetched text is in the prompt.
       - research_source == 'web'.
       - fetched_urls is populated.
-      - Model is Haiku, max_tokens == 900.
+      - Model is Haiku, max_tokens == RESEARCH_MAX_TOKENS (raised to 2000).
     """
     fake = fake_llm
     fake.set_for("research a company/role", _research_resp(["Acme fact."]))
@@ -503,7 +503,7 @@ def test_success_enrichment_fetched_label_in_prompt(monkeypatch, fake_llm):
     assert page_text in call["user"]
     assert "ORIGINAL POST" in call["user"]
     assert call["model"] == "claude-haiku-4-5"
-    assert call["max_tokens"] == 900
+    assert call["max_tokens"] == llm.RESEARCH_MAX_TOKENS == 2000
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,37 @@ CHEAP_MODEL = "claude-haiku-4-5"      # bulk/cheap steps (extraction, research, 
 JUDGE_MODEL = "claude-sonnet-4-6"     # judgment/scoring step
 
 
+# --- Per-step max_tokens (response headroom; COST-CAP only, never alters a
+# normal response) ----------------------------------------------------------
+#
+# These cap the model's OUTPUT length. For a well-formed JSON response the model
+# emits the closing ``}`` and STOPS well before the cap, so raising a limit does
+# NOT change the bytes of a normal response — it only adds headroom so a long-
+# but-valid response is not truncated mid-JSON. Truncation is the confirmed #20
+# failure mode: a cut-off response has no closing ``}`` and cannot be parsed,
+# which then SILENTLY degrades the caller (extract->heuristic, score->fallback
+# score, research->empty). The limits below were chosen per step to remove that
+# risk for realistic worst-case outputs.
+#
+# extract: long stack + benefits + reasons arrays plus company/contact can
+#   approach the old 800; Cyrillic labels tokenize heavily. 1200 gives ~50%
+#   headroom so a rich post no longer truncates into the heuristic fallback
+#   (which also loses the contact-as-link URL #20 depends on).
+EXTRACT_MAX_TOKENS = 1200
+# score: the «Обоснование» is a verdict line + 2-4 FULL-sentence Cyrillic
+#   bullets; Cyrillic is token-heavy (~1.7 chars/token) so a verbose-but-valid
+#   rationale easily exceeded the old 400 -> truncation -> silent score
+#   degradation. 800 comfortably fits the verdict + four full sentences.
+SCORE_MAX_TOKENS = 800
+# research: with FETCHED PAGE TEXT grounding, summary + talking_points +
+#   questions + sourced_facts is large; the old 900 truncated mid-output (the
+#   confirmed #20 break, cut at ``"questions":``). 2000 fits the bounded
+#   contract (talking_points capped at <=6 in the prompt).
+RESEARCH_MAX_TOKENS = 2000
+# draft: free-text отклик, ~90-150 words; 500 is already ample. Unchanged.
+DRAFT_MAX_TOKENS = 500
+
+
 # --- Prompt-caching policy (COST-ONLY: never changes model output) ----------
 #
 # Anthropic prompt caching only ENGAGES when the cached prefix is at least the
@@ -163,15 +194,43 @@ class AnthropicClient:
 
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.S)
 
+# Leading code-fence marker: an optional ```/```json opener (possibly on its own
+# line) at the START of the response. Stripped as a PREPROCESS step so a fence is
+# removed even when the closing ``` is missing/truncated or sits on its own line.
+_LEADING_FENCE_RE = re.compile(r"^\s*```(?:json|JSON)?[ \t]*\r?\n?", re.S)
+# Trailing closing fence (when present). Optional — a truncated response may lack
+# it, in which case we simply leave the body unfenced.
+_TRAILING_FENCE_RE = re.compile(r"\r?\n?[ \t]*```\s*$", re.S)
+
 
 def _parse_json_object(text: str) -> Dict[str, Any]:
-    """Extract the first JSON object from a model response. PURE."""
+    """Extract the first JSON object from a model response. PURE.
+
+    Fence handling is a PREPROCESS step (defense-in-depth): we strip a LEADING
+    ```/```json marker (and any TRAILING ```), then run the same object
+    extraction on the cleaned text. This salvages fenced responses regardless of
+    fence placement and even when the closing fence was truncated away — yet an
+    already-unfenced response is byte-for-byte unchanged by the strip (the
+    leading/trailing regexes only match when fence markers are actually present),
+    so the common case parses identically to before.
+
+    A genuinely TRUNCATED object (no closing ``}``) still cannot be salvaged and
+    raises ValueError cleanly — that case is fixed upstream by adequate
+    ``max_tokens`` headroom, not by inventing the missing data here.
+    """
     text = text.strip()
-    # Strip ```json fences if present.
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
-    if fence:
-        return json.loads(fence.group(1))
-    m = _JSON_OBJ_RE.search(text)
+    # PREPROCESS: peel a leading fence marker, then a trailing one if present.
+    # This runs BEFORE object extraction so it works for partial / oddly-placed
+    # fences (missing close, marker on its own line). When no fence is present
+    # both subs are no-ops, preserving the unfenced behavior exactly.
+    cleaned = _LEADING_FENCE_RE.sub("", text)
+    if cleaned != text:
+        # Only strip a trailing close fence when we actually opened one above,
+        # so a stray ``` inside unfenced prose is never touched.
+        cleaned = _TRAILING_FENCE_RE.sub("", cleaned)
+    cleaned = cleaned.strip()
+
+    m = _JSON_OBJ_RE.search(cleaned)
     if not m:
         raise ValueError("no JSON object found in LLM response")
     return json.loads(m.group(0))
@@ -452,9 +511,13 @@ def parse_score_response(text: str) -> Dict[str, Any]:
 
 RESEARCH_SYSTEM = (
     "You research a company/role for a job applicant. Be concise and factual. "
-    "If you are unsure, say so. Output ONLY JSON: "
+    "If you are unsure, say so. Output ONLY a RAW JSON object — NO markdown, NO "
+    "code fence (do NOT wrap it in ```), nothing before or after the JSON. "
+    "Output ONLY JSON: "
     '{"summary": "...", "talking_points": ["..."], "questions": ["..."], '
     '"sourced_facts": ["..."]}.\n'
+    "Keep `talking_points` SHORT: AT MOST 6 items (prefer 3-5). Keep each item a "
+    "single concise sentence so the whole JSON stays compact.\n"
     "HONESTY (CRITICAL — never fabricate company facts):\n"
     "- The prompt may contain a section labeled 'FETCHED PAGE TEXT (real, from "
     "<url>)'. ONLY statements you can ground in that fetched page text are "
@@ -523,11 +586,18 @@ def build_research_prompt(
     )
 
 
+# Hard cap on talking_points so the research blob stays bounded even if a model
+# ignores the prompt's "<=6" instruction. Defense in depth; matches the prompt.
+RESEARCH_MAX_TALKING_POINTS = 6
+
+
 def parse_research_response(text: str) -> Dict[str, Any]:
     data = _parse_json_object(text)
     return {
         "summary": str(data.get("summary", "")),
-        "talking_points": list(data.get("talking_points", []) or []),
+        "talking_points": list(data.get("talking_points", []) or [])[
+            :RESEARCH_MAX_TALKING_POINTS
+        ],
         "questions": list(data.get("questions", []) or []),
         "sourced_facts": list(data.get("sourced_facts", []) or []),
     }
@@ -710,7 +780,7 @@ def llm_extract(
     text = client.complete(
         EXTRACT_SYSTEM,
         build_extract_prompt(raw_text, source_channel, source_link),
-        max_tokens=800,
+        max_tokens=EXTRACT_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(EXTRACT_SYSTEM, model),
     )
@@ -736,7 +806,7 @@ def llm_score(
     text = client.complete(
         system,
         build_score_prompt(extracted, raw_text),
-        max_tokens=400,
+        max_tokens=SCORE_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(system, model),
     )
@@ -755,13 +825,14 @@ def llm_research(
     When ``fetched_context`` carries real fetched page text it is added to the
     prompt in a clearly-labeled section so the model can ground `sourced_facts`
     in it. With no fetched context the prompt is byte-identical to before
-    (desk-only fallback). ``max_tokens`` is 900 to leave room for
-    `sourced_facts` alongside the existing fields.
+    (desk-only fallback). ``max_tokens`` is RESEARCH_MAX_TOKENS to leave room
+    for page-grounded `sourced_facts` and `talking_points` alongside the
+    existing fields without truncating the JSON (the confirmed #20 failure).
     """
     text = client.complete(
         RESEARCH_SYSTEM,
         build_research_prompt(extracted, raw_text, fetched_context),
-        max_tokens=900,
+        max_tokens=RESEARCH_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(RESEARCH_SYSTEM, model),
     )
@@ -783,7 +854,7 @@ def llm_draft(
     return client.complete(
         system,
         build_draft_prompt(extracted, raw_text, research),
-        max_tokens=500,
+        max_tokens=DRAFT_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(system, model),
     ).strip()

@@ -68,9 +68,9 @@ def test_research_web_success_text_reaches_prompt(monkeypatch, fake_llm):
     assert "FETCHED PAGE TEXT (real, from https://jobs.test/v/1)" in rc["user"]
     assert "Acme builds RAG tools for banks." in rc["user"]
     assert "ORIGINAL POST (candidate-relevant" in rc["user"]
-    # research runs on Haiku at max_tokens 900.
+    # research runs on Haiku at the (now-raised) research headroom.
     assert rc["model"] == "claude-haiku-4-5"
-    assert rc["max_tokens"] == 900
+    assert rc["max_tokens"] == llm.RESEARCH_MAX_TOKENS == 2000
 
 
 # --- #20: contact-as-link is preferred as the primary target ----------------
