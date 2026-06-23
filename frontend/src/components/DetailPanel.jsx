@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../api.js";
 import { actionsForStatus, salaryText } from "../lib.js";
 
@@ -13,6 +13,7 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
+  const panelRef = useRef(null);
 
   const load = useCallback(async (id) => {
     setLoading(true);
@@ -31,6 +32,15 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
   useEffect(() => {
     if (itemId != null) load(itemId);
   }, [itemId, load]);
+
+  // Bring the panel into view when a row is opened. The panel is position:sticky
+  // (stays visible while scrolling the list), but clicking a row far down would
+  // otherwise leave the freshly-opened panel above the viewport — scroll it in.
+  useEffect(() => {
+    if (itemId != null && panelRef.current) {
+      panelRef.current.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    }
+  }, [itemId]);
 
   async function runAction(action) {
     setBusy(true);
@@ -55,7 +65,7 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
   if (itemId == null) return null;
 
   return (
-    <aside className="detail-panel">
+    <aside className="detail-panel" ref={panelRef}>
       <div className="detail-head">
         <h2>Позиция #{itemId}</h2>
         <button type="button" className="btn" onClick={onClose}>

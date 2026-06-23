@@ -413,6 +413,17 @@ h1::before {
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   padding-right: 26px;
+  /* dark native popup (not white/system), teal accent on the highlight */
+  color-scheme: dark;
+  accent-color: var(--teal);
+}
+.field select option {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.field select option:checked {
+  background: var(--teal-deep);
+  color: var(--teal-bri);
 }
 .field input::placeholder {
   color: var(--ink-4);
@@ -440,6 +451,10 @@ h1::before {
   padding: 30px 32px;
   overflow: auto;
   min-width: 0;
+  /* lift the content area off the page background so the scroll area + section
+     edges read as a distinct surface (the body radar glow still shows lower). */
+  background: linear-gradient(180deg, rgba(19, 29, 36, 0.55), rgba(12, 18, 23, 0.26) 360px);
+  box-shadow: inset 1px 0 0 var(--line), inset 0 1px 0 rgba(146, 236, 220, 0.05);
 }
 .view {
   display: flex;
