@@ -68,9 +68,12 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
       2) Drive every discovered/extracted/scored item to its gate via
          ``pipeline.run_to_gate`` (the deterministic state machine; advance() is
          still the sole writer).
-      3) Notify the operator about freshly surfaced items. ``notify`` awaits
-         EVERY send to completion (asyncio.gather) before returning — no
-         fire-and-forget, nothing left in flight when control returns.
+      3) Notify the operator about ONLY the items freshly surfaced THIS run
+         (derived from the run_to_gate AdvanceResults — the standing surfaced
+         backlog is NOT re-pushed), then ALWAYS send one summary line.
+         ``notify`` awaits EVERY send to completion (asyncio.gather) before
+         returning — no fire-and-forget, nothing left in flight when control
+         returns.
 
     Returns the list of item ids that were successfully delivered.
     """
@@ -78,31 +81,52 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
     new_ids: List[int] = await ingest(cfg, conn)
     print(f"[harvest] ingested {len(new_ids)} new items (mode={cfg.ingest_mode})")
 
-    # 2) Drive every discovered/extracted/scored item to its gate.
+    # 2) Drive every discovered/extracted/scored item to its gate AND record
+    # which items were freshly surfaced THIS run. ``run_to_gate`` already
+    # returns the List[AdvanceResult] for every step it took; an item that
+    # crossed the scored->surfaced gate (T4) yields a result with
+    # ``to_state == SURFACED``. We collect exactly those ids.
+    #
+    # The to_process set is built from discovered/extracted/scored/approved/
+    # researched ONLY -- NEVER from the standing SURFACED backlog. So items that
+    # were already surfaced before this run are not iterated here, are not in
+    # ``newly_surfaced``, and are therefore not re-notified (the re-delivery
+    # bug). They remain in SURFACED in the DB (visible to the bot/dashboard);
+    # advance() remains the sole state writer. "Newly surfaced this run" is
+    # derived from these results, NOT persisted.
     to_process = set(new_ids)
     for st in ("discovered", "extracted", "scored", "approved", "researched"):
         for item in store.list_by_state(conn, st):
             to_process.add(item.id)
+    newly_surfaced: List[int] = []
     for item_id in sorted(to_process):
-        pipeline.run_to_gate(conn, item_id, deps=deps)
+        results = pipeline.run_to_gate(conn, item_id, deps=deps)
+        if any(r.to_state == SURFACED for r in results):
+            newly_surfaced.append(item_id)
 
-    # 3) Notify operator about freshly surfaced items. ``notify`` awaits
-    # EVERY send to completion (asyncio.gather) before returning -- no
-    # fire-and-forget, nothing left in flight when we reach teardown.
-    surfaced = store.list_by_state(conn, SURFACED)
-    print(f"[harvest] {len(surfaced)} surfaced; notifying operator")
-    sent = await notify(bot, [item.id for item in surfaced])
-    print(f"[harvest] {len(sent)}/{len(surfaced)} cards delivered")
+    # 3) Notify the operator about ONLY the items freshly surfaced THIS run.
+    # ``notify`` awaits EVERY send to completion (asyncio.gather) before
+    # returning -- no fire-and-forget, nothing left in flight at teardown.
+    print(f"[harvest] {len(newly_surfaced)} newly surfaced; notifying operator")
+    sent = await notify(bot, newly_surfaced)
+    print(f"[harvest] {len(sent)}/{len(newly_surfaced)} delivered")
 
-    # When the run surfaced/delivered ZERO cards, silence is ambiguous (did the
-    # harvest even run?). Send ONE concise line to the SAME operator chat so a
-    # completed-but-empty run is visible. When there ARE cards, the cards
-    # themselves are the notification — do NOT also send this line. This adds
-    # only a notification; advance() remains the sole state writer.
-    if not sent:
+    # ALWAYS send ONE concise summary line (scheduled AND manual), so a
+    # completed run is always visible -- even one that surfaced/delivered ZERO
+    # cards (silence would otherwise be ambiguous: did the harvest even run?).
+    # This replaces the old conditional "0 new vacancies" line; the cards
+    # themselves are still the per-item notification, this is the run summary.
+    # It adds only a notification; advance() remains the sole state writer.
+    # BEST-EFFORT: the summary is cosmetic — a failed send (Telegram hiccup) must
+    # NOT crash the harvest NOR skip the heartbeat below (otherwise the staleness
+    # watchdog would fire a spurious "harvest hasn't run" alert for a run that
+    # actually completed). Swallow + log; the harvest body already succeeded.
+    try:
         await bot.notify_text(
-            f"🟢 Harvest done — 0 new vacancies (ingested {len(new_ids)})."
+            f"🟢 Harvest: ingested {len(new_ids)} · surfaced {len(newly_surfaced)} · delivered {len(sent)}"
         )
+    except Exception as exc:  # noqa: BLE001 - summary is non-critical
+        print(f"[harvest] summary send failed (non-fatal): {exc!r}")
 
     # Observability heartbeat: record that a harvest COMPLETED, at the very end
     # (after ingest->score->notify). The staleness watchdog in serve reads this

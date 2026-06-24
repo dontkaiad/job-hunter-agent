@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 
 from job_hunter import run, store
+from job_hunter.pipeline import AdvanceResult
+from job_hunter.states import SCORED, SURFACED
 
 
 class FakeBot:
@@ -39,13 +41,28 @@ class FakeBot:
         self.completed += 1
         self.events.append(("send", item_id))
 
+    async def notify_text(self, text):
+        # The always-on harvest summary line. Recorded so the ordering check
+        # (all sends before close) still sees it inside the run, never after.
+        if self.closed:
+            raise AssertionError("summary sent after close")
+        self.events.append(("summary", text))
+
     async def aclose(self):
         self.close_calls += 1
         self.closed = True
         self.events.append(("close", None))
 
 
-def _seed_surfaced(conn, n):
+def _seed_scored(conn, n):
+    """Seed ``n`` SCORED items (the gate's INPUT state).
+
+    They are left in SCORED so that, when ``run_to_gate`` is driven over them
+    this run, the gate (mocked below) surfaces them -> they count as "newly
+    surfaced this run" and are the ids harvest must notify. We are NOT testing
+    the state machine here (run_to_gate is mocked); we only need the items to
+    sit in a state the loop iterates over (scored).
+    """
     import json
 
     ids = []
@@ -58,10 +75,9 @@ def _seed_surfaced(conn, n):
             kind="deterministic", actor="system",
             extracted_json=json.dumps({"title": f"job {i}"}), relevance_score=80.0,
         )
-        # surfaced is reached via the pipeline normally; here we set it directly
-        # for the lifecycle test (we are NOT testing the state machine).
-        store.update_state(conn, iid, "surfaced", from_state="extracted",
-                           kind="deterministic", actor="system")
+        store.update_state(conn, iid, "scored", from_state="extracted",
+                           kind="deterministic", actor="system",
+                           relevance_score=80.0)
         ids.append(iid)
     return ids
 
@@ -70,7 +86,7 @@ def test_amain_awaits_all_sends_then_closes_session(pg_dsn, monkeypatch):
     db_path = pg_dsn
     conn = store.connect(db_path)
     store.init_db(conn)
-    ids = _seed_surfaced(conn, 4)
+    ids = _seed_scored(conn, 4)
     conn.close()
 
     captured = {}
@@ -86,7 +102,13 @@ def test_amain_awaits_all_sends_then_closes_session(pg_dsn, monkeypatch):
         return []
 
     monkeypatch.setattr(run, "ingest", fake_ingest)
-    monkeypatch.setattr(run.pipeline, "run_to_gate", lambda *a, **k: None)
+
+    # The gate surfaces each SCORED item this run -> return a SCORED->SURFACED
+    # AdvanceResult so harvest counts it as newly surfaced and notifies it.
+    def fake_run_to_gate(conn, item_id, deps=None, **k):
+        return [AdvanceResult("moved", item_id, SCORED, SURFACED, "T4")]
+
+    monkeypatch.setattr(run.pipeline, "run_to_gate", fake_run_to_gate)
 
     def make_bot(cfg, conn, deps):
         captured["bot"] = FakeBot(cfg, conn, deps)

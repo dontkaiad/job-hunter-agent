@@ -26,6 +26,8 @@ import pytest
 from job_hunter import bot as bot_mod
 from job_hunter import run, serve, store
 from job_hunter.config import Config
+from job_hunter.pipeline import AdvanceResult
+from job_hunter.states import SCORED, SURFACED
 
 
 ALLOWED_UID = 777
@@ -120,31 +122,21 @@ def test_build_scheduler_default_local_tz_when_unset():
 
 
 def test_run_harvest_runs_ingest_score_notify(monkeypatch, pg_dsn):
-    """The shared run.harvest calls ingest, drives run_to_gate, and notifies the
-    surfaced items — all mocked, no real network."""
+    """The shared run.harvest calls ingest, drives run_to_gate over the
+    in-flight items, and notifies ONLY the items the gate surfaces THIS run —
+    all mocked, no real network."""
     db_path = pg_dsn
     conn = store.connect(db_path)
     store.init_db(conn)
 
     import json
 
-    # Seed two EXTRACTED items (so they enter the to_process set and run_to_gate
-    # is exercised) AND two SURFACED items (so notify has something to deliver).
-    # We are not testing the state machine here; run_to_gate is mocked.
-    extracted_ids = []
-    for i in range(2):
-        iid = store.insert_item(
-            conn, raw_text=f"pending {i}", source_channel="@c",
-            source_message_id=f"p{i}",
-        )
-        store.update_state(
-            conn, iid, "extracted", from_state="discovered",
-            kind="deterministic", actor="system",
-            extracted_json=json.dumps({"title": f"pending {i}"}), relevance_score=80.0,
-        )
-        extracted_ids.append(iid)
-
-    ids = []
+    # Seed two SCORED items: they sit in a state the harvest loop iterates over,
+    # so run_to_gate is driven for each. The mocked gate surfaces them this run
+    # (returns a SCORED->SURFACED AdvanceResult), so they are the ids harvest
+    # must notify. We are not testing the state machine here; run_to_gate is
+    # mocked.
+    scored_ids = []
     for i in range(2):
         iid = store.insert_item(
             conn, raw_text=f"job {i}", source_channel="@c", source_message_id=str(i)
@@ -154,22 +146,31 @@ def test_run_harvest_runs_ingest_score_notify(monkeypatch, pg_dsn):
             kind="deterministic", actor="system",
             extracted_json=json.dumps({"title": f"job {i}"}), relevance_score=80.0,
         )
-        store.update_state(conn, iid, "surfaced", from_state="extracted",
-                           kind="deterministic", actor="system")
-        ids.append(iid)
+        store.update_state(conn, iid, "scored", from_state="extracted",
+                           kind="deterministic", actor="system",
+                           relevance_score=80.0)
+        scored_ids.append(iid)
 
-    events = {"ingest": 0, "gate": 0, "notified": None}
+    events = {"ingest": 0, "gate": 0}
 
     async def fake_ingest(cfg, c):
         events["ingest"] += 1
         return []
 
     monkeypatch.setattr(run, "ingest", fake_ingest)
-    monkeypatch.setattr(run.pipeline, "run_to_gate",
-                        lambda *a, **k: events.__setitem__("gate", events["gate"] + 1))
+
+    def fake_run_to_gate(conn, item_id, deps=None, **k):
+        events["gate"] += 1
+        # The gate surfaces this scored item this run.
+        return [AdvanceResult("moved", item_id, SCORED, SURFACED, "T4")]
+
+    monkeypatch.setattr(run.pipeline, "run_to_gate", fake_run_to_gate)
 
     class FakeBot:
         async def notify_surfaced(self, item_id):
+            pass
+
+        async def notify_text(self, text):
             pass
 
     fake_bot = FakeBot()
@@ -179,9 +180,10 @@ def test_run_harvest_runs_ingest_score_notify(monkeypatch, pg_dsn):
     conn.close()
 
     assert events["ingest"] == 1
-    # run_to_gate driven for each pending (extracted) item.
-    assert events["gate"] >= len(extracted_ids)
-    assert sorted(sent) == sorted(ids)  # both surfaced cards delivered
+    # run_to_gate driven for each scored item.
+    assert events["gate"] >= len(scored_ids)
+    # Only the items surfaced THIS run are delivered.
+    assert sorted(sent) == sorted(scored_ids)
 
 
 def test_run_main_one_shot_uses_shared_harvest(monkeypatch, pg_dsn):
@@ -537,16 +539,17 @@ def test_build_scheduler_rejects_nothing_but_proves_await_via_real_scheduler(pg_
 
 
 # ---------------------------------------------------------------------------
-# "No new vacancies" notification (FIX 2)
+# Daily-harvest re-delivery fix: notify ONLY items newly surfaced THIS run, and
+# ALWAYS send one summary line (ingested N · surfaced M · delivered K).
 # ---------------------------------------------------------------------------
 
 
-def _seed_surfaced(conn, n):
-    """Seed ``n`` SURFACED items; return their ids."""
+def _seed_surfaced(conn, n, *, start=0):
+    """Seed ``n`` PRE-EXISTING SURFACED items (a standing backlog); return ids."""
     import json
 
     ids = []
-    for i in range(n):
+    for i in range(start, start + n):
         iid = store.insert_item(
             conn, raw_text=f"job {i}", source_channel="@c", source_message_id=f"s{i}"
         )
@@ -561,71 +564,190 @@ def _seed_surfaced(conn, n):
     return ids
 
 
-def test_harvest_zero_new_sends_single_no_new_line(monkeypatch, pg_dsn):
-    """ZERO-NEW path: ingest returns [] and nothing is surfaced -> exactly ONE
-    one-line 'no new' message is sent to cfg.notify_chat_id."""
+def _seed_scored(conn, n, *, start=100):
+    """Seed ``n`` SCORED items (the gate INPUT state); return ids."""
+    import json
+
+    ids = []
+    for i in range(start, start + n):
+        iid = store.insert_item(
+            conn, raw_text=f"cand {i}", source_channel="@c", source_message_id=f"c{i}"
+        )
+        store.update_state(
+            conn, iid, "extracted", from_state="discovered",
+            kind="deterministic", actor="system",
+            extracted_json=json.dumps({"title": f"cand {i}"}), relevance_score=80.0,
+        )
+        store.update_state(conn, iid, "scored", from_state="extracted",
+                           kind="deterministic", actor="system",
+                           relevance_score=80.0)
+        ids.append(iid)
+    return ids
+
+
+def test_harvest_notifies_only_newly_surfaced_not_backlog(monkeypatch, pg_dsn):
+    """NEWLY-SURFACED ONLY: a standing SURFACED backlog item PLUS scored items
+    where one surfaces this run and the other rejects.
+
+    Assert: notify_surfaced is called ONLY for the id surfaced THIS run, NOT the
+    pre-existing backlog id. The backlog item REMAINS in SURFACED in the DB
+    (visible to bot/dashboard) but was not re-delivered.
+    """
     conn = store.connect(pg_dsn)
     store.init_db(conn)
+
+    backlog_ids = _seed_surfaced(conn, 1)            # already surfaced before run
+    backlog_id = backlog_ids[0]
+    winner_id, loser_id = _seed_scored(conn, 2)      # scored, to be gated this run
 
     async def fake_ingest(cfg, c):
         return []
 
     monkeypatch.setattr(run, "ingest", fake_ingest)
-    monkeypatch.setattr(run.pipeline, "run_to_gate", lambda *a, **k: None)
 
-    texts = []
-    surfaced_calls = {"n": 0}
+    def fake_run_to_gate(conn_, item_id, deps=None, **k):
+        # The winner crosses T4 (scored -> surfaced); the loser rejects (T3).
+        if item_id == winner_id:
+            store.update_state(conn_, item_id, "surfaced", from_state="scored",
+                               kind="deterministic", actor="system")
+            return [AdvanceResult("moved", item_id, SCORED, SURFACED, "T4")]
+        store.update_state(conn_, item_id, "rejected", from_state="scored",
+                           kind="deterministic", actor="system")
+        return [AdvanceResult("moved", item_id, SCORED, "rejected", "T3")]
 
-    class FakeBot:
-        async def notify_text(self, text):
-            texts.append(text)
+    monkeypatch.setattr(run.pipeline, "run_to_gate", fake_run_to_gate)
 
-        async def notify_surfaced(self, item_id):
-            surfaced_calls["n"] += 1
-
-    cfg = _cfg(database_url=pg_dsn)
-    sent = asyncio.run(run.harvest(cfg, conn, FakeBot(), object()))
-    conn.close()
-
-    assert sent == []
-    assert surfaced_calls["n"] == 0
-    # Exactly one no-new line, single line, mentioning 0 new vacancies.
-    assert len(texts) == 1
-    assert "\n" not in texts[0]
-    assert "0 new vacancies" in texts[0]
-    assert "ingested 0" in texts[0]
-
-
-def test_harvest_nonzero_does_not_send_no_new_line(monkeypatch, pg_dsn):
-    """NON-zero path: with surfaced cards, the cards are sent and the 'no new'
-    line is NOT sent."""
-    conn = store.connect(pg_dsn)
-    store.init_db(conn)
-    ids = _seed_surfaced(conn, 2)
-
-    async def fake_ingest(cfg, c):
-        return []
-
-    monkeypatch.setattr(run, "ingest", fake_ingest)
-    monkeypatch.setattr(run.pipeline, "run_to_gate", lambda *a, **k: None)
-
-    texts = []
     surfaced = []
+    texts = []
 
     class FakeBot:
-        async def notify_text(self, text):
-            texts.append(text)
-
         async def notify_surfaced(self, item_id):
             surfaced.append(item_id)
 
+        async def notify_text(self, text):
+            texts.append(text)
+
+    cfg = _cfg(database_url=pg_dsn)
+    sent = asyncio.run(run.harvest(cfg, conn, FakeBot(), object()))
+
+    # ONLY the newly-surfaced winner is delivered; backlog id is NOT re-pushed.
+    assert surfaced == [winner_id]
+    assert backlog_id not in surfaced
+    assert sent == [winner_id]
+
+    # The backlog item is STILL in SURFACED (state unchanged, still visible).
+    surfaced_now = {it.id for it in store.list_by_state(conn, SURFACED)}
+    assert backlog_id in surfaced_now
+    assert winner_id in surfaced_now  # the one surfaced this run is there too
+
+    # Exactly one summary line: ingested 0 · surfaced 1 · delivered 1.
+    assert len(texts) == 1
+    assert texts[0] == "🟢 Harvest: ingested 0 · surfaced 1 · delivered 1"
+    conn.close()
+
+
+def test_harvest_zero_newly_surfaced_with_backlog_delivers_nothing_but_summarises(
+    monkeypatch, pg_dsn
+):
+    """ZERO NEWLY-SURFACED: a run where every gated item rejects, WHILE a
+    standing SURFACED backlog exists.
+
+    Assert: notify_surfaced is NEVER called (nothing delivered), the backlog
+    stays surfaced, and the summary line is STILL sent exactly once with
+    'ingested N · surfaced 0 · delivered 0'.
+    """
+    conn = store.connect(pg_dsn)
+    store.init_db(conn)
+
+    backlog_ids = _seed_surfaced(conn, 2)            # standing backlog
+    scored_ids = _seed_scored(conn, 2)               # all will reject this run
+
+    async def fake_ingest(cfg, c):
+        return []
+
+    monkeypatch.setattr(run, "ingest", fake_ingest)
+
+    def fake_run_to_gate(conn_, item_id, deps=None, **k):
+        store.update_state(conn_, item_id, "rejected", from_state="scored",
+                           kind="deterministic", actor="system")
+        return [AdvanceResult("moved", item_id, SCORED, "rejected", "T3")]
+
+    monkeypatch.setattr(run.pipeline, "run_to_gate", fake_run_to_gate)
+
+    surfaced = []
+    texts = []
+
+    class FakeBot:
+        async def notify_surfaced(self, item_id):
+            surfaced.append(item_id)
+
+        async def notify_text(self, text):
+            texts.append(text)
+
+    cfg = _cfg(database_url=pg_dsn)
+    sent = asyncio.run(run.harvest(cfg, conn, FakeBot(), object()))
+
+    # Nothing delivered: zero newly surfaced this run.
+    assert surfaced == []
+    assert sent == []
+    # The backlog stays surfaced (NOT re-delivered, NOT closed).
+    surfaced_now = {it.id for it in store.list_by_state(conn, SURFACED)}
+    assert set(backlog_ids) == surfaced_now
+    # The scored items rejected this run.
+    assert all(it not in surfaced_now for it in scored_ids)
+    # Summary STILL sent, exactly once, with surfaced 0 · delivered 0.
+    assert len(texts) == 1
+    assert texts[0] == "🟢 Harvest: ingested 0 · surfaced 0 · delivered 0"
+    conn.close()
+
+
+def test_harvest_summary_always_sent_once_with_correct_counts(monkeypatch, pg_dsn):
+    """SUMMARY ALWAYS + correct counts: ingest yields 3, two of three gated
+    items surface this run -> exactly ONE summary line with the exact
+    'ingested 3 · surfaced 2 · delivered 2' numbers and NO separate 0-new line.
+    """
+    conn = store.connect(pg_dsn)
+    store.init_db(conn)
+
+    scored_ids = _seed_scored(conn, 3)
+    winners = set(scored_ids[:2])
+
+    async def fake_ingest(cfg, c):
+        # 3 ingested ids (already exist as scored; counts only need len()).
+        return list(scored_ids)
+
+    monkeypatch.setattr(run, "ingest", fake_ingest)
+
+    def fake_run_to_gate(conn_, item_id, deps=None, **k):
+        if item_id in winners:
+            store.update_state(conn_, item_id, "surfaced", from_state="scored",
+                               kind="deterministic", actor="system")
+            return [AdvanceResult("moved", item_id, SCORED, SURFACED, "T4")]
+        store.update_state(conn_, item_id, "rejected", from_state="scored",
+                           kind="deterministic", actor="system")
+        return [AdvanceResult("moved", item_id, SCORED, "rejected", "T3")]
+
+    monkeypatch.setattr(run.pipeline, "run_to_gate", fake_run_to_gate)
+
+    surfaced = []
+    texts = []
+
+    class FakeBot:
+        async def notify_surfaced(self, item_id):
+            surfaced.append(item_id)
+
+        async def notify_text(self, text):
+            texts.append(text)
+
     cfg = _cfg(database_url=pg_dsn)
     sent = asyncio.run(run.harvest(cfg, conn, FakeBot(), object()))
     conn.close()
 
-    assert sorted(sent) == sorted(ids)
-    assert sorted(surfaced) == sorted(ids)  # cards delivered
-    assert texts == []  # NO no-new line when cards were sent
+    assert sorted(surfaced) == sorted(winners)
+    assert sorted(sent) == sorted(winners)
+    # Exactly ONE summary; no double-send / no separate "0 new" line.
+    assert len(texts) == 1
+    assert texts[0] == "🟢 Harvest: ingested 3 · surfaced 2 · delivered 2"
 
 
 def test_notify_text_sends_to_notify_chat_id_one_line(monkeypatch):
@@ -646,10 +768,11 @@ def test_notify_text_sends_to_notify_chat_id_one_line(monkeypatch):
     monkeypatch.setattr(bot, "_ensure", lambda: None)
     bot._bot = FakeTgBot()
 
-    asyncio.run(bot.notify_text("🟢 Harvest done — 0 new vacancies (ingested 0)."))
+    summary = "🟢 Harvest: ingested 0 · surfaced 0 · delivered 0"
+    asyncio.run(bot.notify_text(summary))
 
     assert sent["chat_id"] == cfg.notify_chat_id
-    assert sent["text"] == "🟢 Harvest done — 0 new vacancies (ingested 0)."
+    assert sent["text"] == summary
     assert sent["kwargs"].get("disable_web_page_preview") is True
 
 
