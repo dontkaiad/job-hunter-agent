@@ -11,6 +11,19 @@ WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# Build-time DISPLAY NAME for the dashboard profile. The repo is de-identified:
+# the real name is NOT tracked. Vite exposes VITE_-prefixed env vars to the
+# client bundle, so this ARG -> ENV is baked into the SPA by `npm run build`.
+# Unset -> Sidebar falls back to the generic "Кандидат" (a fresh clone stays
+# generic). The real value is supplied at deploy time by the VPS .env via
+# docker-compose build args (see docker-compose.yml) and is NEVER committed.
+# The AVATAR is supplied the same out-of-repo way: a gitignored
+# frontend/src/assets/avatar.local.png placed on the VPS is in the build context
+# (it is NOT excluded by .dockerignore) and import.meta.glob bundles it; absent
+# -> the initials placeholder renders. Declared right before the build so a name
+# change busts only this layer, not the cached `npm ci`.
+ARG VITE_PROFILE_NAME=""
+ENV VITE_PROFILE_NAME=${VITE_PROFILE_NAME}
 RUN npm run build
 
 # Lean image for the long-running serve process (polling + daily 10:00 harvest).

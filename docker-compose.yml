@@ -13,6 +13,13 @@ services:
       # Falls back to "unknown" if GIT_SHA is not exported.
       args:
         GIT_SHA: "${GIT_SHA:-unknown}"
+        # De-identified repo: the real dashboard display name is NOT tracked. It
+        # comes from the VPS .env (gitignored) — Compose interpolates ${...} from
+        # the project .env at build — and is baked into the SPA bundle by the
+        # frontend stage. Unset -> generic "Кандидат". Both services build the
+        # SHARED job-hunter:latest image, so the arg is set on BOTH to keep the
+        # baked bundle consistent regardless of which service triggers the build.
+        VITE_PROFILE_NAME: "${VITE_PROFILE_NAME:-}"
     image: job-hunter:latest
     container_name: job-hunter
     # Survive crashes and host reboots, but not an explicit `docker compose stop`.
@@ -82,6 +89,9 @@ services:
       context: .
       args:
         GIT_SHA: "${GIT_SHA:-unknown}"
+        # Same as the bot service: real display name from the VPS .env
+        # (gitignored), baked into the SPA at build. Unset -> generic "Кандидат".
+        VITE_PROFILE_NAME: "${VITE_PROFILE_NAME:-}"
     image: job-hunter:latest
     container_name: dashboard
     restart: unless-stopped
