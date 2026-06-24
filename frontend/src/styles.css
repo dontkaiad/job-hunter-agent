@@ -849,6 +849,50 @@ h1::before {
     0 6px 18px -14px rgba(0, 0, 0, 0.7);
 }
 
+/* full vacancy text — a collapsible <details>. The <summary> is styled like a
+   .block h4; the <pre> reuses .text-block and caps its height so a long post
+   scrolls internally instead of stretching the panel (open by default). */
+.vacancy {
+  margin-top: 20px;
+}
+.vacancy > .vacancy-summary {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--hair);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  list-style: none; /* hide the default disclosure triangle; custom marker below */
+}
+.vacancy > .vacancy-summary::-webkit-details-marker {
+  display: none;
+}
+.vacancy > .vacancy-summary::before {
+  content: "\25B8"; /* ▸ */
+  color: var(--teal);
+  font-size: 11px;
+  transition: transform 0.12s;
+}
+.vacancy[open] > .vacancy-summary::before {
+  transform: rotate(90deg);
+}
+.vacancy > .vacancy-summary:hover {
+  color: var(--ink);
+}
+.vacancy-text {
+  margin: 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
 /* history */
 .history {
   list-style: none;

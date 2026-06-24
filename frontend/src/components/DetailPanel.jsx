@@ -110,6 +110,8 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
             </div>
           )}
 
+          <VacancyText text={detail.raw_text} />
+
           <Actions
             status={detail.status}
             busy={busy}
@@ -192,6 +194,21 @@ function TextBlock({ label, value }) {
       <h4>{label}</h4>
       <pre className="text-block">{value}</pre>
     </div>
+  );
+}
+
+// Full ingested posting text (work_items.raw_text, already returned by the
+// detail API). Collapsible <details> so a long post never blows up the panel;
+// open by default since reading the posting is the point. The <pre> reuses
+// .text-block (theme + pre-wrap preserves the post's newlines) and caps its
+// height with an internal scroll, which also behaves inside the mobile sheet.
+function VacancyText({ text }) {
+  if (!text) return null;
+  return (
+    <details className="vacancy" open>
+      <summary className="vacancy-summary">Текст вакансии</summary>
+      <pre className="text-block vacancy-text">{text}</pre>
+    </details>
   );
 }
 
