@@ -254,6 +254,11 @@ class AuthSettings:
     login_bot_username: str
     cookie_domain: str
     auth_database_url: str
+    # Public https origin of the dashboard, used to render the Telegram widget's
+    # ABSOLUTE data-auth-url (required for mobile login). Empty => relative
+    # "/auth/callback" fallback (today's behavior). Defaulted so test helpers
+    # that build AuthSettings without it keep working.
+    dashboard_public_url: str = ""
 
 
 def get_auth_settings(config: Config = Depends(get_config)) -> AuthSettings:
@@ -266,6 +271,7 @@ def get_auth_settings(config: Config = Depends(get_config)) -> AuthSettings:
         login_bot_username=config.tg_login_bot_username or "",
         cookie_domain=config.cookie_domain,
         auth_database_url=config.auth_database_url,
+        dashboard_public_url=config.dashboard_public_url,
     )
 
 
@@ -731,13 +737,21 @@ def login_page(
 ) -> HTMLResponse:
     """Public login page rendering the Telegram Login Widget (uses the login
     bot's USERNAME) + a remember-me checkbox. Template lives in
-    job_hunter/templates/login.html."""
+    job_hunter/templates/login.html.
+
+    The widget's data-auth-url is rendered ABSOLUTE when DASHBOARD_PUBLIC_URL is
+    configured (required for the mobile oauth.telegram.org flow; behind a reverse
+    proxy the request host is unreliable so it must be explicit). When unset it
+    falls back to the relative "/auth/callback" (today's behavior; works on
+    desktop / local dev where the browser resolves it against the page origin)."""
+    base = settings.dashboard_public_url.rstrip("/")
+    callback_url = f"{base}/auth/callback" if base else "/auth/callback"
     return templates.TemplateResponse(
         "login.html",
         {
             "request": request,
             "bot_username": settings.login_bot_username,
-            "callback_url": "/auth/callback",
+            "callback_url": callback_url,
         },
     )
 

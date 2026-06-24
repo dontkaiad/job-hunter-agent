@@ -325,3 +325,40 @@ def test_login_page_is_public_no_auth(conn, auth_conn):
     with TestClient(app) as c:  # no cookie
         assert c.get("/login").status_code == 200
     app.dependency_overrides.clear()
+
+
+# --- data-auth-url: ABSOLUTE when DASHBOARD_PUBLIC_URL set (mobile fix) ------
+
+
+def test_login_page_absolute_auth_url_when_public_url_set(conn, auth_conn):
+    # With DASHBOARD_PUBLIC_URL configured the widget renders an ABSOLUTE
+    # data-auth-url — required for the mobile oauth.telegram.org flow.
+    app = _make_app(conn, auth_conn, dashboard_public_url="https://jobs.heylark.dev")
+    with TestClient(app) as c:
+        r = c.get("/login")
+        assert r.status_code == 200
+        assert 'data-auth-url="https://jobs.heylark.dev/auth/callback"' in r.text
+    app.dependency_overrides.clear()
+
+
+def test_login_page_absolute_auth_url_trailing_slash_no_double_slash(conn, auth_conn):
+    # A trailing slash on the configured base must NOT produce a double slash.
+    app = _make_app(conn, auth_conn, dashboard_public_url="https://jobs.heylark.dev/")
+    with TestClient(app) as c:
+        r = c.get("/login")
+        assert r.status_code == 200
+        assert 'data-auth-url="https://jobs.heylark.dev/auth/callback"' in r.text
+        assert "heylark.dev//auth/callback" not in r.text
+    app.dependency_overrides.clear()
+
+
+def test_login_page_relative_auth_url_when_public_url_unset(conn, auth_conn):
+    # Empty/unset DASHBOARD_PUBLIC_URL falls back to the relative callback
+    # (today's behavior; desktop resolves it against the page origin).
+    app = _make_app(conn, auth_conn, dashboard_public_url="")
+    with TestClient(app) as c:
+        r = c.get("/login")
+        assert r.status_code == 200
+        assert 'data-auth-url="/auth/callback"' in r.text
+        assert "https://" not in r.text.split('data-auth-url="', 1)[1].split('"', 1)[0]
+    app.dependency_overrides.clear()

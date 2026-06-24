@@ -94,6 +94,13 @@ class Config:
     # DSN of the SHARED auth Postgres holding the grants table. SEPARATE from
     # database_url (the pipeline DB). Required for authorization.
     auth_database_url: str = ""
+    # Public https origin of the dashboard (e.g. https://jobs.heylark.dev), used
+    # to render the Telegram Login Widget's ABSOLUTE data-auth-url. Required for
+    # mobile login (oauth.telegram.org needs an absolute callback). Behind a
+    # reverse proxy the request host is unreliable, so this is explicit. Empty =>
+    # the /login page falls back to the relative "/auth/callback" (today's
+    # behavior; works on desktop / local dev).
+    dashboard_public_url: str = ""
 
     # FX
     fx_provider: str = "frankfurter"
@@ -166,6 +173,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         cookie_domain=get("COOKIE_DOMAIN") or ".heylark.dev",
         superuser_tg_ids=_split_int_set(get("SUPERUSER_TG_IDS")),
         auth_database_url=get("AUTH_DATABASE_URL"),
+        dashboard_public_url=get("DASHBOARD_PUBLIC_URL"),
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,
         new_channel_lookback_days=_int_or_none(get("NEW_CHANNEL_LOOKBACK_DAYS")) or 14,
