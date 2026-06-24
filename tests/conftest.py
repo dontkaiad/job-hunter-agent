@@ -174,7 +174,7 @@ def fake_fx():
 TEST_SESSION_SECRET = "test-session-secret-do-not-use-in-prod"
 TEST_LOGIN_BOT_TOKEN = "123456:test-login-bot-token"
 TEST_LOGIN_BOT_USERNAME = "l4rk_test_bot"
-TEST_SUPERUSER_ID = 67686090
+TEST_SUPERUSER_ID = 111111111
 TEST_COOKIE_DOMAIN = ".heylark.dev"
 
 

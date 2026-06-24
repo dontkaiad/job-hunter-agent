@@ -15,6 +15,7 @@ import textwrap
 
 import pytest
 
+from _personal_needles import personal_needle, personal_needles
 from job_hunter import agents, llm, scoring
 from job_hunter.profile import (
     DraftSignature,
@@ -111,17 +112,6 @@ def test_parse_profile_bad_floor_falls_back():
 # ---------------------------------------------------------------------------
 
 
-# Forbidden personal-data fragments, assembled from pieces so this test SOURCE
-# stays free of any literal personal string (the Part-4 grep finds zero hits even
-# in the guards).
-_FORBIDDEN_FRAGMENTS = [
-    ("dont", "kaiad"), ("Blue", " Card"), ("Qd", "rant"), ("Lang", "fuse"),
-    ("Raspberry", " Pi"), ("25", "00"), ("рж", "ав"), ("дипл", "ом"),
-    ("Saint", " Petersburg"),
-]
-_FORBIDDEN = ["".join(p) for p in _FORBIDDEN_FRAGMENTS]
-
-
 def test_example_profile_is_generic():
     p = example_profile()
     assert p.salary_floor_eur == 1000.0  # generic placeholder, not personal
@@ -131,7 +121,7 @@ def test_example_profile_is_generic():
     # No personal specifics anywhere in the example profile values.
     blob = " ".join([p.role, p.target_grade, p.experience_note, p.languages,
                      *p.hands_on, *p.in_development, *p.stack, *p.location_priority])
-    for needle in _FORBIDDEN:
+    for needle in personal_needles():
         assert needle not in blob
 
 
@@ -172,7 +162,7 @@ def test_score_system_module_constant_renders_example_no_personal():
     profile and must contain ZERO personal data."""
     s = llm.SCORE_SYSTEM
     assert "EUR 1000" in s
-    for needle in _FORBIDDEN:
+    for needle in personal_needles():
         assert needle not in s
 
 
@@ -206,7 +196,7 @@ def test_build_draft_system_gender_rule(gender, needle):
 def test_draft_system_module_constant_no_personal_handle():
     s = llm.DRAFT_SYSTEM
     assert "github.com/example" in s
-    assert "github.com/" + "dont" + "kaiad" not in s
+    assert "github.com/" + personal_needle("github") not in s
     assert "WOMAN" not in s  # example gender is 'unspecified'
 
 
@@ -232,7 +222,7 @@ def test_append_signature_uses_profile():
 def test_agents_module_constants_are_generic_example():
     assert agents.GITHUB_LINK == "github.com/example"
     assert agents.RESUME_PLACEHOLDER == "[resume: link]"
-    assert ("dont" + "kaiad") not in agents._SIGNATURE_BLOCK
+    assert personal_needle("github") not in agents._SIGNATURE_BLOCK
 
 
 # ---------------------------------------------------------------------------
@@ -249,5 +239,7 @@ def test_scoring_source_has_no_personal_floor_literal():
     import inspect
 
     src = inspect.getsource(scoring)
-    personal_floor = "25" + "00"
-    assert personal_floor not in src, "personal salary figure must not appear in scoring.py"
+    personal_floor = personal_needle("salary_floor")
+    assert personal_floor not in src, (
+        "no specific personal salary figure must appear in scoring.py"
+    )

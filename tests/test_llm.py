@@ -2,6 +2,7 @@
 
 import json
 
+from _personal_needles import personal_needle
 from job_hunter import llm
 from job_hunter.schema_extract import ExtractResult
 
@@ -224,7 +225,7 @@ def test_score_system_constrains_verdict_plus_bullets_reasoning():
     assert "CANDIDATE PROFILE" in s
     assert "RUBRIC" in s
     assert "EUR 1000" in s  # example profile floor; no personal figure
-    assert "EUR " + "25" + "00" not in s
+    assert ("EUR " + personal_needle("salary_floor")) not in s
     assert "STRONG FIT" in s
     assert "LOCATION PRIORITY" in s
     assert "do not consider salary" in low
@@ -488,7 +489,7 @@ def test_draft_system_instructs_company_links_and_resume_placeholder():
     # GitHub link is injected from the (example) profile -> generic placeholder,
     # NOT a personal handle. It forbids fabricating a resume URL.
     assert "github.com/example" in s
-    assert "github.com/" + "dont" + "kaiad" not in s
+    assert ("github.com/" + personal_needle("github")) not in s
     assert "do not fabricate" in low or "do not invent" in low or "not invent" in low
     assert "резюме" in s
 

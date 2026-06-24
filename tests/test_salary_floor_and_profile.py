@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from _personal_needles import personal_needle, personal_needles
 from job_hunter import llm, pipeline, scoring, store
 from job_hunter.pipeline import Deps
 from job_hunter.profile import example_profile
@@ -159,10 +160,10 @@ def test_score_system_contains_candidate_profile():
     personal data). It must carry the profile scaffolding + the example values."""
     s = " ".join(llm.SCORE_SYSTEM.split())
     assert "CANDIDATE PROFILE" in s
-    # Example profile generic role text.
-    assert "Prompt Engineer" in s
-    assert "owns model behavior" in s
-    assert "MIDDLE" in s
+    # Example profile generic (fictional) role text.
+    assert "applied-LLM engineer" in s
+    assert "model-backed" in s
+    assert "seniority levels" in s
 
 
 def test_score_system_contains_eur_floor_junior_clause():
@@ -170,8 +171,8 @@ def test_score_system_contains_eur_floor_junior_clause():
     profile — the generic placeholder floor, not a personal salary figure."""
     s = " ".join(llm.SCORE_SYSTEM.split())
     assert "EUR 1000" in s  # example profile floor
-    # The personal floor figure must not appear (assert against the OTHER value).
-    assert "EUR %d" % (EXAMPLE_FLOOR_EUR * 2.5) not in s
+    # No specific personal salary figure must appear in the committed constant.
+    assert ("EUR " + personal_needle("salary_floor")) not in s
     assert "junior" in s.lower()
 
 
@@ -181,42 +182,24 @@ def test_score_system_contains_location_priority():
     assert "relocation" in s.lower()
     assert "remote" in s.lower()
     assert "hybrid" in s.lower()
-    # Generic relocation goal from the example profile (no personal specifics).
-    assert "relocation is a goal" in s.lower()
-
-
-# Forbidden personal-data fragments, assembled from pieces so the test SOURCE
-# itself stays free of any literal personal string (the Part-4 grep finds zero
-# hits even in this guard). Each tuple's parts join to a personal datum.
-_FORBIDDEN_FRAGMENTS = [
-    ("25", "00"),                 # personal salary floor figure
-    ("Blue", " Card"),           # EU visa-route specific
-    ("dont", "kaiad"),           # personal GitHub handle
-    ("Qd", "rant"),              # personal vector-DB stack item
-    ("Lang", "fuse"),            # personal observability stack item
-    ("Raspberry", " Pi"),        # personal hardware
-    ("Saint", " Petersburg"),    # personal location
-    ("рж", "ав"),                # personal "rusty English" note (stem)
-]
-
-
-def _forbidden_needles():
-    return ["".join(parts) for parts in _FORBIDDEN_FRAGMENTS]
+    # Generic relocation/work-abroad preference from the example profile.
+    assert "work abroad" in s.lower()
 
 
 def test_score_system_has_no_personal_data():
     """Hard guard: the rendered module prompt must contain ZERO personal data."""
     s = llm.SCORE_SYSTEM
-    for needle in _forbidden_needles():
+    for needle in personal_needles():
         assert needle not in s, "personal data leaked into SCORE_SYSTEM"
 
 
 def test_draft_system_has_no_personal_data():
     s = llm.DRAFT_SYSTEM
-    vector_db = "Qd" + "rant"  # public OSS name in the generic term allowlist
-    for needle in _forbidden_needles():
+    vector_db = personal_needle("vector_db")  # public OSS name, generic allowlist
+    for needle in personal_needles():
         # The vector-DB product name appears in the generic Cyrillic-term
-        # allowlist (a public OSS name, not personal); everything else absent.
+        # allowlist (a public OSS name, legitimately present in DRAFT_SYSTEM via
+        # job_hunter/llm.py); everything else must be absent.
         if needle == vector_db:
             continue
         assert needle not in s, "personal data leaked into DRAFT_SYSTEM"
@@ -258,7 +241,8 @@ def test_score_system_still_says_ignore_salary_and_json_contract():
 
 def test_score_system_evals_in_development_not_handson():
     s = " ".join(llm.SCORE_SYSTEM.split())
-    assert "evals" in s
+    # The example profile's in-development bullet (generic placeholder).
+    assert "example in-progress skill" in s
     assert "NOT hands-on yet" in s
 
 

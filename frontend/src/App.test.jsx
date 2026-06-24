@@ -19,7 +19,7 @@ describe("Sidebar smoke", () => {
         </FiltersProvider>
       </MemoryRouter>
     );
-    expect(screen.getByText("Карина Ларк")).toBeDefined();
+    expect(screen.getByText("Кандидат")).toBeDefined();
     expect(screen.getByText("Пайплайн")).toBeDefined();
     expect(screen.getByText("Пограничные (50-59)")).toBeDefined();
     expect(screen.getByText("Компетенции")).toBeDefined();

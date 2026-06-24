@@ -234,6 +234,14 @@ data/
 # The bot falls back to config/profile.example.yaml (committed, generic).
 config/profile.local.yaml
 
+# Local-only avatar image (maintainer's real photo). NEVER commit it; a fresh
+# clone / the Docker build renders the initials placeholder instead.
+frontend/src/assets/avatar.local.*
+
+# Local-only de-identification denylist (the maintainer's personal needles).
+# Loaded by tests/_personal_needles.py; NEVER commit it.
+tests/_personal_needles.local.py
+
 .claude/settings.local.json
 
 # macOS

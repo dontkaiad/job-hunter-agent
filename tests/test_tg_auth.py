@@ -163,8 +163,8 @@ def _seed_grant(conn, tg_id, app, status):
 
 def test_authorize_superuser_always_true_no_row(auth_conn):
     # No grant row at all, but the id is a superuser -> True for ANY app.
-    assert tg_auth.authorize(auth_conn, 67686090, "jobhunter", superuser_ids={67686090})
-    assert tg_auth.authorize(auth_conn, 67686090, "nexus", superuser_ids={67686090})
+    assert tg_auth.authorize(auth_conn, 111111111, "jobhunter", superuser_ids={111111111})
+    assert tg_auth.authorize(auth_conn, 111111111, "nexus", superuser_ids={111111111})
 
 
 def test_authorize_approved_grant_true(auth_conn):

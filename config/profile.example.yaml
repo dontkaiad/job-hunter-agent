@@ -16,62 +16,53 @@
 # ---------------------------------------------------------------------------
 
 # Short role headline — what the candidate owns / does.
+# FICTIONAL placeholder — replace with your own positioning in profile.local.yaml.
 role: >-
-  AI / Prompt Engineer who owns model behavior end-to-end (prompts, routing,
-  RAG, output control, cost-optimization). Not a mere "API bolt-on" developer
-  who just calls an LLM endpoint from a backend.
+  Example applied-LLM engineer who builds model-backed product features.
+  Fictional placeholder — replace with your own positioning in
+  profile.local.yaml.
 
 # Target seniority grade and the grade rules.
 target_grade: >-
-  Target MIDDLE. Thinking / architecture is above middle; hard skills are
-  filled in as they go. Does NOT take lead / management roles. A junior-titled
-  role is acceptable ONLY if the salary is at/above the salary floor below.
+  Example grade preference: open to a range of seniority levels; does NOT seek
+  lead / people-management. A junior-titled role is acceptable ONLY if the
+  salary is at/above the salary floor below.
 
 # Short note on years / proof of skill (kept generic).
 experience_note: >-
-  Several years in IT with some formal employment; proof of skill is the
-  GitHub / portfolio, NOT a formal employment record.
+  Example note: a few years building software; evaluated on a public portfolio.
 
 # HANDS-ON skills the candidate MAY claim as real, completed experience.
 hands_on:
-  - prompt engineering, few-shot, prompt regressions
-  - cost-aware routing + caching
-  - production RAG (vector DB, multi-collection, embedding migration)
-  - output control (validate -> retry -> fallback, JSON)
-  - speech / vision / image-gen integrations
-  - local LLM (open-weight models on small hardware)
-  - LLM monitoring / observability
-  - system design / specs / review (coordinates developers)
+  - prompt design and iteration
+  - retrieval-augmented generation over a vector store
+  - structured output (validate -> retry -> fallback)
+  - backend services exposing model-backed features
 
 # IN-DEVELOPMENT items — being learned / built toward, NOT yet hands-on.
 # These must NEVER be presented as completed experience in drafts.
 in_development:
-  - evals (designs them, learning to build them by hand)
+  - example in-progress skill (being learned, not yet hands-on)
 
-# Tech stack. Note caveats inline (e.g. reads/reviews vs writes-from-scratch).
+# Tech stack. Plain list of tools the candidate uses.
 stack:
-  - Python (reads / reviews / architects, does NOT write from scratch)
-  - major LLM APIs (Claude / OpenAI / Gemini / OpenRouter)
-  - vector DB
-  - LLM observability tooling
+  - Python
+  - an LLM API (Claude / OpenAI / Gemini)
+  - a vector database
   - FastAPI
-  - aiogram
   - SQL
   - Docker
-  - SSH / single-board computers
 
 # Languages note (free text; mention current speaking/writing level honestly).
 languages: >-
-  English at an intermediate working level on paper, currently a bit rusty
-  (recovers quickly).
+  Example languages note — e.g. English at a working level.
 
 # LOCATION PRIORITY ladder (highest -> lowest preference). Free-text lines.
 location_priority:
   - A company offering relocation / work abroad -> top.
   - Fully remote -> high.
   - Hybrid -> medium.
-  - Office in home country -> low.
-  - Abroad with relocation / visa sponsorship -> high (relocation is a goal).
+  - Office in home city -> low.
 
 # Grammatical gender used for first-person self-reference in drafts.
 # Allowed: "female" (feminine Russian forms), "male" (masculine forms),

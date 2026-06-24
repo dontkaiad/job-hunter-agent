@@ -281,6 +281,23 @@ h1::before {
   object-fit: cover;
   object-position: 50% 36%;
 }
+/* Neutral initials placeholder shown when no local avatar asset is present
+   (fresh clone / Docker build). Keeps the avatar slot's layout + ring. */
+.profile-avatar-fallback {
+  position: relative;
+  z-index: 1;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #92ecdc;
+  background: radial-gradient(circle at 50% 38%, #14322c, #070d0c 82%);
+  user-select: none;
+}
 .profile-id {
   min-width: 0;
   position: relative;

@@ -26,6 +26,7 @@ import textwrap
 
 import pytest
 
+from _personal_needles import personal_needle
 from job_hunter import llm, pipeline, store
 from job_hunter.pipeline import Deps
 from job_hunter.profile import (
@@ -166,7 +167,7 @@ def test_example_only_draft_signature_is_generic(conn, fake_llm, fake_fx):
         "example profile resume placeholder must appear in draft"
     )
     # No personal github handle in the example-only draft.
-    assert ("dont" + "kaiad") not in draft
+    assert personal_needle("github") not in draft
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +350,8 @@ def test_module_score_system_constant_uses_example_floor():
     """The module-level SCORE_SYSTEM constant (rendered at import time from
     the GENERIC example profile) must show EUR 1000, not any personal floor."""
     assert "EUR 1000" in llm.SCORE_SYSTEM
-    # Personal floor (2500) must not appear in the committed constant.
-    assert "EUR " + "25" + "00" not in llm.SCORE_SYSTEM
+    # No specific personal salary figure must appear in the committed constant.
+    assert ("EUR " + personal_needle("salary_floor")) not in llm.SCORE_SYSTEM
 
 
 # ---------------------------------------------------------------------------

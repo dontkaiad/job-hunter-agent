@@ -2,7 +2,17 @@ import React from "react";
 import { NavLink } from "react-router-dom";
 import Filters from "./Filters.jsx";
 import { useFilters } from "../state/FiltersContext.jsx";
-import avatar from "../assets/karina-avatar.png";
+
+// Avatar is an OPTIONAL local-only asset. import.meta.glob tolerates ZERO
+// matches at build time, so a fresh clone / the Docker build (which has no
+// avatar file) still builds — `avatar` is then null and we render the initials
+// placeholder. The maintainer's machine has avatar.local.png, so it shows.
+const _avatars = import.meta.glob("../assets/avatar.local.*", {
+  eager: true,
+  query: "?url",
+  import: "default",
+});
+const avatar = Object.values(_avatars)[0] ?? null;
 
 // LEFT SIDEBAR: profile block, nav, and the pipeline filters. The filters live
 // in a shared context so the PipelineView refetches when they change. The
@@ -12,19 +22,37 @@ import avatar from "../assets/karina-avatar.png";
 export default function Sidebar() {
   const { filters, setFilter, resetFilters } = useFilters();
 
+  // Profile name/role are env-driven (no real name baked into the repo). The
+  // defaults are generic placeholders.
+  const profileName = import.meta.env.VITE_PROFILE_NAME || "Кандидат";
+  const profileRole = import.meta.env.VITE_PROFILE_ROLE || "AI/LLM Engineer";
+  const initials = profileName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
   return (
     <aside className="sidebar">
       <section className="profile">
         <div className="profile-avatar">
-          <img
-            className="profile-avatar-img"
-            src={avatar}
-            alt="Карина Ларк"
-          />
+          {avatar ? (
+            <img
+              className="profile-avatar-img"
+              src={avatar}
+              alt={profileName}
+            />
+          ) : (
+            <div className="profile-avatar-fallback" aria-hidden="true">
+              {initials}
+            </div>
+          )}
         </div>
         <div className="profile-id">
-          <div className="profile-name">Карина Ларк</div>
-          <div className="profile-role">AI/LLM Engineer</div>
+          <div className="profile-name">{profileName}</div>
+          <div className="profile-role">{profileRole}</div>
           {/* PLACEHOLDER: market-salary widget is a later pass. */}
           <div className="profile-salary">Зп по рынку: — (скоро)</div>
         </div>

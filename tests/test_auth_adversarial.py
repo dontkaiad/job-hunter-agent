@@ -270,14 +270,14 @@ def test_authorize_sql_injection_tg_id_via_string_cast_denied(auth_conn):
 
 
 def test_authorize_superuser_ids_set_membership_requires_exact_int(auth_conn):
-    """A string '67686090' must NOT match the int 67686090 in superuser_ids.
+    """A string '111111111' must NOT match the int 111111111 in superuser_ids.
     Python set membership is type-sensitive (str != int).
     """
     # The superuser set contains an int; passing a string tg_id should never match.
     # In practice tg_id comes from read_session which enforces int, but this
     # documents the invariant at the tg_auth.authorize level.
     result = tg_auth.authorize(
-        auth_conn, "67686090", "jobhunter", superuser_ids={67686090}  # type: ignore[arg-type]
+        auth_conn, "111111111", "jobhunter", superuser_ids={111111111}  # type: ignore[arg-type]
     )
     # A string is not in a set of ints in Python.
     assert result is False, (
@@ -626,7 +626,7 @@ def test_read_session_returns_exact_tg_id():
     """read_session must return the EXACT integer tg_id that was signed,
     not a different one (no payload confusion / elevation).
     """
-    for tg_id in (1, 67686090, 2**31 - 1, 2**32, 9999999999):
+    for tg_id in (1, 111111111, 2**31 - 1, 2**32, 9999999999):
         token, _ = tg_auth.issue_session(tg_id, secret=TEST_SESSION_SECRET, remember=False)
         result = tg_auth.read_session(token, secret=TEST_SESSION_SECRET)
         assert result == tg_id, f"Expected {tg_id!r}, got {result!r}."
