@@ -920,3 +920,150 @@ h1::before {
 *::-webkit-scrollbar-thumb:hover {
   background: var(--teal-dim);
 }
+
+/* ============================ MOBILE (<=768px) =========================
+   CSS-first responsive layer. Desktop layout above is untouched; everything
+   here is scoped to narrow viewports. Strategy:
+   - .app stacks to a single column (sidebar on top), the whole PAGE scrolls.
+   - nav becomes a wrapping pill row; filters stay reachable + compact.
+   - lane tables scroll horizontally inside .table-scroll (score + role first).
+   - the detail panel becomes a full-screen fixed sheet with a sticky close
+     header, instead of an off-screen side column.
+   - 44px-ish tap targets; no horizontal PAGE scroll. Theme preserved. */
+@media (max-width: 768px) {
+  html,
+  body {
+    /* kill incidental horizontal page scroll (radar bleed / wide rows); the
+       only intentional x-scroll is inside .table-scroll. */
+    overflow-x: hidden;
+  }
+
+  .app {
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  /* sidebar: full-width banner on top, natural height, page scrolls past it */
+  .sidebar {
+    width: auto;
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 14px 14px 16px;
+  }
+  .sidebar::after {
+    display: none; /* right-edge teal seam is meaningless when stacked */
+  }
+
+  /* nav as a wrapping pill row to save vertical space */
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .nav-link {
+    border: 1px solid var(--line-2);
+    border-left: 1px solid var(--line-2);
+    border-radius: var(--radius);
+    padding: 11px 13px;
+  }
+  .nav-link.active {
+    border-color: var(--ox);
+  }
+
+  /* compact, touch-sized filter controls */
+  .filters {
+    padding-top: 12px;
+  }
+  .field input,
+  .field select {
+    padding: 10px 9px;
+    font-size: 16px; /* >=16px avoids iOS Safari zoom-on-focus */
+  }
+  .field select {
+    padding-right: 26px;
+  }
+
+  /* main: edge-to-edge, grows with content so the PAGE scrolls (not an inner
+     scroll box that collapsed to 0 height in the column layout) */
+  .main {
+    flex: 0 0 auto;
+    padding: 18px 14px 28px;
+    overflow: visible;
+    box-shadow: inset 0 1px 0 rgba(146, 236, 220, 0.05);
+  }
+  .view {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  h1 {
+    font-size: 26px;
+  }
+
+  /* lane tables: horizontal scroll so columns are never cut off; score dot +
+     role are leftmost and visible first. stack/salary/date scroll into view. */
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -2px;
+    border: 1px solid var(--hair);
+    border-radius: var(--radius);
+  }
+  .pipeline-table {
+    min-width: 560px;
+  }
+  .pipeline-table th,
+  .pipeline-table td {
+    padding: 12px 12px; /* taller rows = easier tap targets */
+  }
+  .cell-stack {
+    max-width: 160px;
+  }
+
+  /* buttons: comfortable tap size */
+  .btn {
+    padding: 11px 15px;
+    font-size: 12px;
+  }
+
+  /* DETAIL PANEL -> full-screen sheet overlay (was an off-screen side column) */
+  .detail-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: 100%;
+    flex: none;
+    height: 100vh;
+    height: 100dvh; /* honor mobile browser chrome where supported */
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    padding: 0 16px 28px;
+    z-index: 60;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* opaque base so the list behind never shows through the sheet */
+    background:
+      linear-gradient(165deg, var(--panel-2) 0%, var(--panel) 55%, var(--inset) 100%),
+      var(--bg);
+    box-shadow: none;
+  }
+  /* keep the close button reachable while scrolling a long detail */
+  .detail-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin: 0 -16px 4px;
+    padding: 14px 16px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .detail-head h2 {
+    font-size: 19px;
+  }
+  .detail-head .btn {
+    padding: 9px 14px;
+  }
+}
