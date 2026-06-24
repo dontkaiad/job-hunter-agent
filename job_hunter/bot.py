@@ -21,8 +21,9 @@ from typing import Any, List, Optional, Set, Tuple
 
 import psycopg
 
+from . import add_by_url as add_by_url_mod
 from . import fx as fx_mod
-from . import pipeline, store
+from . import pipeline, research_fetch, store
 from .config import Config, load_config
 from .pipeline import Deps
 from .schema_extract import from_dict
@@ -60,6 +61,23 @@ def decode_callback(data: str) -> Optional[Tuple[str, int]]:
     except ValueError:
         return None
     return action, item_id
+
+
+# --- Pure: URL extraction (add-by-URL bot handler) --------------------------
+
+
+def first_url(text: Optional[str]) -> Optional[str]:
+    """Return the FIRST http(s) URL in a message, or None. PURE, never raises.
+
+    Reuses ``research_fetch``'s URL regex + trailing-punctuation trim so a link
+    pasted with surrounding prose (or a trailing period) is recognized exactly as
+    the ingest path recognizes in-body apply URLs. A t.me link counts — it is
+    just another source.
+    """
+    match = research_fetch._URL_RE.search(text or "")
+    if not match:
+        return None
+    return research_fetch._strip_url_trailing(match.group(0)) or None
 
 
 # --- Pure: access control ---------------------------------------------------
@@ -702,6 +720,16 @@ class JobHunterBot:
         async def on_borderline(message: Message) -> None:  # noqa: ANN001
             await self.handle_borderline(message)
 
+        # Add-a-vacancy-by-URL: any text message carrying an http(s) link is run
+        # through the SAME add-by-URL flow as the dashboard input, then routed by
+        # score band. Registered AFTER the /borderline command so the command
+        # wins its match; this catch-all only sees non-command text and ignores
+        # anything without a URL. The access_gate OUTER middleware already
+        # allowlist-gates it (non-allowlisted senders never reach here).
+        @self._dp.message(F.text)
+        async def on_text(message: Message) -> None:  # noqa: ANN001
+            await self.handle_url_message(message)
+
         # --- Ops-channel plumbing (Part B) -------------------------------
         # Wire the ops startup ping + global error handler onto THIS existing
         # dispatcher (never a second Dispatcher). The handler bodies live as
@@ -805,6 +833,88 @@ class JobHunterBot:
         text = render_borderline(items)
         await message.answer(
             text,
+            link_preview_options=_no_preview(),
+        )
+
+    async def handle_url_message(self, message) -> None:  # noqa: ANN001
+        """Accept a pasted vacancy URL and run the SHARED add-by-URL flow.
+
+        Same backend as the dashboard input (add_by_url.add_by_url): fetch ->
+        SSRF guard -> insert (source_channel='manual') -> extract -> score ->
+        advance(). The result is routed by score band in ``_deliver_by_band``.
+
+        Feedback to the SENDER:
+          - no URL in the text        -> ignored silently (e.g. /start, chatter).
+          - invalid/unreadable URL    -> a short error reply, no card.
+          - duplicate                 -> "уже в пайплайне (#id)", no second card.
+          - added                     -> band routing delivers the card/line.
+
+        The access_gate OUTER middleware already allowlist-gates this handler.
+        """
+        url = first_url(getattr(message, "text", None))
+        if not url:
+            return  # not a vacancy link; do not reply (avoids chatter spam)
+
+        outcome = add_by_url_mod.add_by_url(self.conn, url, self.deps)
+
+        if outcome.status == "invalid_url":
+            await message.answer("это не похоже на ссылку на вакансию")
+            return
+        if outcome.status == "unreadable":
+            await message.answer("не удалось прочитать страницу по ссылке")
+            return
+        if outcome.status == "duplicate":
+            await message.answer(f"уже в пайплайне (#{outcome.item_id})")
+            return
+
+        # status == "added": deliver per score band, reusing existing renderers.
+        await self._deliver_by_band(outcome.item_id)
+
+    async def _deliver_by_band(self, item_id: int) -> None:
+        """Route a freshly-added item to the operator by score band, REUSING the
+        existing renderers (no parallel card renderer):
+
+          - SURFACED (score >= 60): the full card + Approve/Backlog/Skip buttons
+            via ``notify_surfaced`` — byte-identical to a harvested surfaced card.
+          - borderline [50, 60): the COMPACT ``render_borderline`` block (the same
+            renderer the /borderline list uses), no action buttons.
+          - rejected (score < 50, incl. salary-guard hard rejects): a single
+            "отклонено: score N · <reason>" line. The item sits in 'rejected'
+            (visible in the dashboard) without spamming a full card.
+
+        All three go to ``cfg.notify_chat_id`` — the same channel harvested cards
+        use — so a surfaced add looks exactly like a surfaced harvest.
+        """
+        self._ensure()
+        item = store.get_item(self.conn, item_id)
+        if item is None:  # pragma: no cover - just-added item cannot vanish
+            return
+
+        # SURFACED -> the EXACT surfaced-card delivery harvested cards use.
+        if item.state == SURFACED:
+            await self.notify_surfaced(item_id)
+            return
+
+        score = item.relevance_score if item.relevance_score is not None else 0.0
+
+        # Borderline band -> the compact /borderline renderer for a single item.
+        if self.BORDERLINE_MIN <= score < self.BORDERLINE_MAX:
+            await self._bot.send_message(
+                self.cfg.notify_chat_id,
+                render_borderline([item]),
+                link_preview_options=_no_preview(),
+            )
+            return
+
+        # Rejected -> a single processed-and-why line (int() truncates, never
+        # rounds 49.x up to "50"). Reuses the borderline compact-reason helper.
+        reason = _borderline_reason(item)
+        line = f"отклонено: score {int(score)}"
+        if reason:
+            line += f" · {reason}"
+        await self._bot.send_message(
+            self.cfg.notify_chat_id,
+            line,
             link_preview_options=_no_preview(),
         )
 

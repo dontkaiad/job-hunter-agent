@@ -153,6 +153,24 @@ def get_item(conn: psycopg.Connection, item_id: int) -> Optional[WorkItem]:
     return WorkItem.from_row(row) if row else None
 
 
+def get_item_by_source(
+    conn: psycopg.Connection, source_channel: str, source_message_id: str
+) -> Optional[WorkItem]:
+    """Look up an item by its (source_channel, source_message_id) dedup key.
+
+    READ-ONLY. Used by the add-by-URL flow to detect a URL that is already in the
+    pipeline (the SAME pair the partial unique index dedups on), so the caller can
+    reply "already in pipeline" instead of inserting a second card. Returns None
+    when no row matches.
+    """
+    row = conn.execute(
+        "SELECT * FROM work_items "
+        "WHERE source_channel = %s AND source_message_id = %s LIMIT 1",
+        (source_channel, source_message_id),
+    ).fetchone()
+    return WorkItem.from_row(row) if row else None
+
+
 def list_by_state(conn: psycopg.Connection, state: str, limit: int = 100) -> List[WorkItem]:
     rows = conn.execute(
         "SELECT * FROM work_items WHERE state = %s ORDER BY updated_at ASC LIMIT %s",

@@ -53,6 +53,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from . import add_by_url as add_by_url_mod
 from . import fx as fx_mod
 from . import pipeline as pipeline_mod
 from . import store
@@ -140,6 +141,20 @@ class ItemDetail(BaseModel):
     published_at: Optional[str] = None  # = created_at (INGESTION time)
     updated_at: Optional[str] = None
     history: List[Transition] = []
+
+
+class AddRequest(BaseModel):
+    url: str
+
+
+class AddResult(BaseModel):
+    """Result of POST /api/items/add. ``duplicate`` true => the fields point at
+    an already-existing card (no second item was created); the UI links to it."""
+
+    item_id: int
+    state: str
+    score: Optional[float] = None
+    duplicate: bool = False
 
 
 # --- Salary display (reuse the bot's FX + format helper) --------------------
@@ -697,6 +712,59 @@ def draft_item(
             ),
         )
     return _build_item_detail(conn, updated, fx)
+
+
+# --- Add a vacancy by URL ---------------------------------------------------
+#
+# Paste a vacancy link -> fetch (SSRF-guarded) -> insert as a "manual" item ->
+# run the SAME extract->score->advance pipeline -> it appears as a scored card.
+# The whole flow lives in add_by_url.py and is SHARED with the bot's URL handler.
+# advance() stays the sole writer; this endpoint adds NO scoring/pipeline logic.
+
+
+def get_fetcher():
+    """Yield the page fetcher used by add-by-URL. Overridden in tests with a
+    fake (no network). The default is the real SSRF-guarded research_fetch path
+    (``add_by_url.default_fetch``)."""
+    return add_by_url_mod.default_fetch
+
+
+@writer_router.post("/items/add", response_model=AddResult)
+def add_item(
+    payload: AddRequest,
+    conn: psycopg.Connection = Depends(get_conn),
+    deps: Deps = Depends(get_deps),
+    fetcher=Depends(get_fetcher),
+) -> AddResult:
+    """Add a vacancy by URL: fetch -> insert (source_channel='manual') -> run the
+    pipeline, then return the new item's id + final state + score.
+
+    Maps the shared ``AddOutcome`` to HTTP:
+      - added      -> 200 AddResult(duplicate=False)
+      - duplicate  -> 200 AddResult(duplicate=True) pointing at the existing card
+      - invalid_url-> 422 ("invalid URL")
+      - unreadable -> 422 ("couldn't read that page") and NO card is inserted
+
+    "unreadable" fires when the SSRF-guarded fetch yields fewer than
+    research_fetch._MIN_USABLE_CHARS (=200) stripped chars — a JS-only page,
+    a blocked/non-HTML response, or an SSRF-blocked host — so a garbage card is
+    never created.
+    """
+    outcome = add_by_url_mod.add_by_url(conn, payload.url, deps, fetch=fetcher)
+
+    if outcome.status == "invalid_url":
+        raise HTTPException(status_code=422, detail=outcome.reason or "invalid URL")
+    if outcome.status == "unreadable":
+        raise HTTPException(
+            status_code=422, detail=outcome.reason or "couldn't read that page"
+        )
+    # added | duplicate both carry a real item; serialize to AddResult.
+    return AddResult(
+        item_id=outcome.item_id,
+        state=outcome.state,
+        score=outcome.score,
+        duplicate=(outcome.status == "duplicate"),
+    )
 
 
 # --- Public auth routes (issue #5): NOT gated -------------------------------

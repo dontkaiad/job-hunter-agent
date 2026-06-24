@@ -87,6 +87,18 @@ export const api = {
   act(id, action) {
     return request(`/api/items/${id}/${action}`, { method: "POST" });
   },
+
+  // Add a vacancy by URL. Returns { item_id, state, score, duplicate }.
+  // duplicate=true => the URL is already in the pipeline (no new card created).
+  // A 422 ApiError is thrown for an invalid or unreadable URL (detail carries
+  // the human message).
+  addByUrl(url) {
+    return request(`/api/items/add`, {
+      method: "POST",
+      headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+  },
 };
 
 export { ApiError };

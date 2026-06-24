@@ -5,6 +5,7 @@ import { useFilters } from "../state/FiltersContext.jsx";
 import { LANES, laneForStatus } from "../lib.js";
 import PipelineTable from "../components/PipelineTable.jsx";
 import DetailPanel from "../components/DetailPanel.jsx";
+import AddByUrl from "../components/AddByUrl.jsx";
 
 // MAIN pipeline view: a hybrid kanban+table. Rows from GET /api/pipeline are
 // grouped into status LANES (Ожидают решения / Одобрено / Отправлено). Items in
@@ -53,12 +54,23 @@ export default function PipelineView() {
     [fetchList]
   );
 
+  // After an add (fresh or duplicate): refetch the list so the new/existing card
+  // is present, then open it.
+  const onAdded = useCallback(
+    (itemId) => {
+      fetchList();
+      if (itemId != null) navigate(`/item/${itemId}`);
+    },
+    [fetchList, navigate]
+  );
+
   const grouped = groupByLane(items);
 
   return (
     <div className="view">
       <div className="view-list">
         <h1>Пайплайн</h1>
+        <AddByUrl onAdded={onAdded} />
         {loading && <div className="loading">Загрузка…</div>}
         {error && <div className="error">{error}</div>}
 

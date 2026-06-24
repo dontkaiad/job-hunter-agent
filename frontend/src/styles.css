@@ -462,6 +462,88 @@ h1::before {
   min-width: 0;
 }
 
+/* Add-vacancy-by-URL (top of the pipeline view). Matches the .field input +
+   .btn-action language so it reads as part of the hacker-witch theme. */
+.add-url {
+  margin: 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.add-url-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.add-url-row {
+  display: flex;
+  gap: 8px;
+}
+.add-url-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.add-url-input::placeholder {
+  color: var(--ink-4);
+}
+.add-url-input:focus {
+  border-color: var(--teal-dim);
+  box-shadow: 0 0 0 1px var(--teal-dim), 0 0 12px rgba(84, 199, 182, 0.18);
+}
+.add-url-btn {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--teal-bri);
+  background: rgba(84, 199, 182, 0.08);
+  border: 1px solid var(--teal-dim);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.add-url-btn::before {
+  content: "▸ ";
+  color: var(--teal);
+}
+.add-url-btn:hover:not(:disabled) {
+  color: #03100d;
+  background: var(--teal);
+  border-color: var(--teal);
+  box-shadow: 0 0 16px rgba(84, 199, 182, 0.4);
+}
+.add-url-btn:hover:not(:disabled)::before {
+  color: #03100d;
+}
+.add-url-btn:disabled {
+  color: var(--ink-4);
+  background: transparent;
+  cursor: not-allowed;
+}
+.add-url-error {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ox-bri);
+}
+.add-url-notice {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--khaki);
+}
+
 /* ============================ MAIN / VIEWS ============================== */
 .main {
   flex: 1;
@@ -1027,6 +1109,19 @@ h1::before {
   }
   .field select {
     padding-right: 26px;
+  }
+
+  /* add-by-URL: stack input over a full-width button, iOS-zoom-safe input */
+  .add-url-row {
+    flex-direction: column;
+  }
+  .add-url-input {
+    font-size: 16px; /* >=16px avoids iOS Safari zoom-on-focus */
+    padding: 11px 10px;
+  }
+  .add-url-btn {
+    padding: 12px 14px;
+    font-size: 12px;
   }
 
   /* main: edge-to-edge, grows with content so the PAGE scrolls (not an inner
