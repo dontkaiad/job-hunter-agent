@@ -1,177 +1,98 @@
 # job-hunter-agent
 
-Event-driven agent that scores AI/LLM job posts and drafts applications,
-human-in-the-loop at every gate.
+> An AI agent that ingests job postings, scores them against a candidate profile
+> with explainable reasoning, researches the company, and drafts tailored
+> applications — with a human in the loop at every gate.
 
-See `DESIGN.md` (state machine, schema, module layout, extract schema) and
-`SCORING.md` (scoring rules) for the authoritative spec.
+**The problem.** Job hunting is tedious in any field: reading a firehose of
+postings — most of them irrelevant — and then writing a fresh, tailored
+application for each promising one.
 
-## Pipeline
+**The solution.** This agent harvests postings, extracts each into a structured
+schema, and scores role-fit with a rubric-driven LLM judge that returns a
+human-readable rationale. Only for the roles the operator *approves* does it run
+source-grounded company research and draft an application. Nothing is ever sent
+automatically: a human approves at the surface gate and again before send.
 
-```
-discovered → extracted → scored → { rejected | surfaced }
-surfaced  → { skipped | backlog | approved }
-approved  → researched → drafted → sent → closed
-```
+![Dashboard](docs/dashboard.png)
+<!-- Drop a de-identified dashboard screenshot at docs/dashboard.png (see docs/README.md). -->
 
-- **extract (T1)** — LLM (`claude-haiku-4-5`) parses raw posts into the Extract
-  schema; deterministic regex heuristics are the fallback.
-- **score (T2–T4)** — deterministic rules (`SCORING.md`). Salary is converted to
-  a ₽-equivalent via live no-key FX (frankfurter.app / open.er-api.com, cached
-  24h) for the < 150k ₽ hard reject and for display. Near the surface threshold
-  T=60, an LLM tiebreak makes the final call.
-- **surface gate (T5–T9)** — aiogram bot sends the job with inline buttons
-  (Approve / Backlog / Skip) that drive `advance(item, decision=...)`.
-- **research (T10) / draft (T11)** — LLM-backed; draft is reviewed with a Send
-  button (T12), then archived (T13).
+## Features
 
-## Setup
+- **Explainable AI scoring** — a rubric-driven Claude Sonnet judge returns a
+  0–100 relevance score plus a short reasoning verdict shown on every card. It
+  classifies each posting requirement as HARD or SOFT, so a missing
+  "nice-to-have" only lightly lowers the score instead of sinking a good-fit role.
+- **Source-grounded research** — fetches the company page and grounds claims in
+  the fetched text (`sourced_facts`). When no real page is available it falls
+  back to "desk" research and labels itself (`research_source`), never
+  fabricating company facts.
+- **Human-in-the-loop pipeline** — a Telegram bot (inline Approve / Backlog /
+  Skip) and a read/act React dashboard drive the *same* state machine. The agent
+  proposes; the human disposes.
+- **Borderline band** — postings scoring 50–59 are surfaced in a dedicated
+  review view so near-misses are examined, not silently dropped.
+- **Cost-aware model routing** — Haiku for the high-volume steps, Sonnet
+  reserved for the single judgment step, prompt caching where it actually
+  engages. Steady-state ≈ **$0.13 per daily harvest** (see [COST.md](COST.md)).
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env   # then fill in the values (see below)
-# Your candidate profile (role, skills, salary floor, draft signature, ...) is a
-# YAML file, NOT an env var. Copy the generic example and edit it:
-cp config/profile.example.yaml config/profile.local.yaml   # then fill in your details
-```
+## Tech stack
 
-`config/profile.local.yaml` is **gitignored** and holds your personal data — it
-is never committed. If it is absent the bot falls back to the generic, runnable
-`config/profile.example.yaml`. The profile drives the scoring rubric block, the
-draft prompt (gender / honesty / signature), and the EUR/month salary floor.
+- **Agent / backend:** Python 3.9, aiogram (Telegram bot), APScheduler (daily harvest)
+- **Dashboard:** FastAPI + uvicorn serving a React (Vite) SPA, Telegram-login auth
+- **Data:** PostgreSQL (psycopg 3)
+- **AI:** Anthropic API — Claude **Haiku 4.5** (extract / research / draft) and
+  Claude **Sonnet 4.6** (the scoring judge)
+- **Infra:** Docker Compose on a single VPS, Caddy reverse proxy + TLS
+- **External:** live, no-key FX (frankfurter.app / open.er-api.com) for salary normalization
 
-## .env keys
+> **Roadmap (not yet built):** the Competencies view (currently a stub), the
+> Market analysis view (currently a stub), and support for additional job
+> sources beyond the current channels.
 
-| Key | What | Where to get it |
-|-----|------|-----------------|
-| `ANTHROPIC_API_KEY` | LLM for extract/tiebreak/research/draft | console.anthropic.com → API Keys |
-| `ANTHROPIC_MODEL` | LLM model (default `claude-haiku-4-5`) | — |
-| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | Telethon userbot app | my.telegram.org/apps |
-| `TELEGRAM_SESSION` | StringSession (run the login command below) | generated locally |
-| `TELEGRAM_SESSION_NAME` | fallback on-disk session file name | — |
-| `TELEGRAM_CHANNELS` | comma-separated source channels (`@a,@b`) | the channels you read |
-| `TELEGRAM_FETCH_LIMIT` | messages per channel per run | default 50 |
-| `BOT_TOKEN` | aiogram notification bot token | @BotFather |
-| `NOTIFY_CHAT_ID` | numeric chat to notify | @userinfobot |
-| `DB_PATH` | SQLite path (default `job_hunter.db`) | — |
-| `FX_PROVIDER` | `frankfurter` or `erapi` | — |
-| `FX_CACHE_TTL` | FX cache seconds (default 86400) | — |
+## Architecture in brief
 
-## Run
+A deterministic state machine moves each posting through
+`ingest → extract → score → surface → (human) → research → draft → sent`. A
+single function — `advance()` — is the **only** writer of item state, so every
+transition is consistent and auditable; the automated harvest path and the
+human-action path both go through that one writer. Full design, data model,
+security model, and scope choices are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-The system runs as **two cooperating processes** that share the SAME SQLite DB
-(`DB_PATH`, default `job_hunter.db`):
+## Cost
 
-| Command | Lifetime | What it does |
-|---------|----------|--------------|
-| `python -m job_hunter.run` | one-shot (exits) | harvest → extract → score → **deliver** surfaced cards (with Approve / Backlog / Skip buttons) to the bot chat. Cron-friendly. |
-| `python -m job_hunter.serve` | long-running | starts aiogram long-polling and **receives the button taps**, driving `advance()`: Approve / Backlog / Skip at the surface gate and draft → Send at the draft gate. |
+Steady-state ≈ **$0.13 per daily harvest** (~13 postings, extract + score) and
+≈ **$0.01 per approved vacancy** (research + draft). The full method, per-step
+token math, and the four cost-aware design levers are in [COST.md](COST.md).
 
-Because `run` exits immediately, it cannot receive the `callback_query` updates
-produced when you tap a button — so the buttons would appear to do nothing on
-their own. `serve` is the long-lived half that handles those taps. They talk
-through the shared DB: `run` writes the surfaced cards, `serve` reads each tap
-and advances the item. Run `run` on a schedule (or by hand) to deliver new
-cards; keep `serve` running to action them.
+## Documentation
 
-Both need `BOT_TOKEN` + `NOTIFY_CHAT_ID`. The **Approve → research → draft** path
-additionally needs `ANTHROPIC_API_KEY` (when you tap Approve, `serve` drives the
-LLM research + draft steps and sends the generated отклик back with a Send
-button); without it, Approve still advances the state but no draft is produced.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, state machine, data model, security, observability, scope choices
+- [DECISIONS.md](DECISIONS.md) — ADR-style record of the key AI-integration decisions
+- [COST.md](COST.md) — real cost numbers and the cost-aware design
+- `DESIGN.md` / `SCORING.md` — the authoritative low-level spec
+
+## Quick start
 
 ```bash
-# 1) one-time: generate a reusable Telegram StringSession (interactive)
-#    ONLY needed for INGEST_MODE=telethon; the default web ingest needs no auth.
-.venv/bin/python -m job_hunter.ingest_telegram --login   # paste into TELEGRAM_SESSION
-
-# 2) one-shot: ingest + score + deliver surfaced cards to the bot chat
-.venv/bin/python -m job_hunter.run
-
-# 3) long-running: handle button presses (approve/backlog/skip, draft→send).
-#    Keep this alive; Ctrl-C stops it cleanly (HTTP session + DB closed).
-.venv/bin/python -m job_hunter.serve
-
-# ingest only (no scoring/notify)
-.venv/bin/python -m job_hunter.ingest_telegram
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env                                       # fill in values
+cp config/profile.example.yaml config/profile.local.yaml   # your profile (gitignored)
+.venv/bin/python -m pytest                                 # all I/O mocked; no creds needed
 ```
 
-> Note: `python -m job_hunter.bot` is an alias of `python -m job_hunter.serve`
-> (same startup → polling → graceful-teardown lifecycle).
+The candidate profile is a **gitignored** YAML; in its absence the bot falls
+back to the generic, runnable `config/profile.example.yaml`. The repo ships
+**no personal data** — the dashboard profile defaults to a generic "Кандидат"
+with an initials placeholder, and the real name/avatar are supplied only as
+out-of-repo build inputs at deploy time.
 
-## Deploy (Docker / VPS)
-
-One container runs the long-lived `serve` process: aiogram long-polling **plus**
-a single daily harvest (the same ingest → score → notify path as
-`python -m job_hunter.run`) fired at **10:00 local time**, all under one event
-loop. So the container both delivers fresh cards every morning and handles the
-Approve / Backlog / Skip / «Отправила» taps continuously.
-
-The real secrets and your real profile live **on the host** and are never
-committed or baked into the image:
+Run locally:
 
 ```bash
-# On the VPS, in the repo dir:
-cp .env.example .env                                   # fill in real values
-cp config/profile.example.yaml config/profile.local.yaml   # fill in your profile
-mkdir -p data                                          # host dir for the SQLite DB
+.venv/bin/python -m job_hunter.run     # one-shot: ingest → score → deliver surfaced cards
+.venv/bin/python -m job_hunter.serve   # long-running: handle button taps + the daily 10:00 harvest
 ```
 
-In `.env` set, at minimum, `BOT_TOKEN`, `NOTIFY_CHAT_ID`, `TELEGRAM_CHANNELS`,
-`ANTHROPIC_API_KEY`, and for the container set the timezone:
-
-```ini
-SCHEDULE_TZ=Europe/Belgrade       # the 10:00 harvest fires at 10:00 in this tz
-TZ=Europe/Belgrade                # container OS clock (same value as SCHEDULE_TZ)
-# DB_PATH defaults to /app/data/job_hunter.db inside the image (baked into the
-# Dockerfile), so you do NOT need to set it for Docker. Set it only to override.
-```
-
-Optionally set the ops-logging vars (`TG_LOG_BOT_TOKEN`, `TG_LOG_CHAT_ID`,
-`TG_LOG_THREAD_JOBHUNTER`) to get startup pings + error notifications in a
-separate Telegram ops topic. They are optional — if unset, ops logging is a
-silent no-op.
-
-Then build and start. **Pass the short git sha at build time** so the startup
-ping reports which commit is running (the `.git` dir is excluded from the image,
-so the sha cannot be read at runtime — it must be baked in):
-
-```bash
-GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
-docker compose logs -f job-hunter   # watch polling + the daily harvest
-```
-
-Notes:
-
-- **Persistence.** The SQLite DB lives on the host in `./data` (mounted to
-  `/app/data`) and survives `--force-recreate` / image rebuilds. The candidate
-  profile is bind-mounted **read-only** from `./config/profile.local.yaml`, so
-  the real profile stays on the host, never in the image.
-- **env_file is read at container CREATE, not on restart.** After editing
-  `.env`, apply it with `docker compose up -d --force-recreate` (a plain
-  `docker compose restart` re-uses the old environment).
-- **No ports.** The bot is outbound-only (long-polling + sending); there is no
-  dashboard, so the service publishes nothing.
-- **Healthcheck.** `serve` writes a heartbeat (epoch) to `/tmp/heartbeat` every
-  30s from a background task on the polling loop; the compose healthcheck marks
-  the container unhealthy if that file is older than 90s, catching a wedged loop
-  (not just a dead PID). `restart: unless-stopped` revives it on crash / reboot.
-- **Ownership.** The container starts as root, the entrypoint `chown`s the
-  bind-mounted `/app/data` to the non-root `appuser` (uid 10001), then drops
-  privileges (via `runuser`) before running `serve` — so the DB file is created
-  and owned correctly on the host volume and survives recreates.
-- **Timezone.** `SCHEDULE_TZ` controls the 10:00 harvest trigger; if left empty
-  it falls back to the system local timezone (never hardcoded UTC). It affects
-  the trigger only — stored timestamps are always UTC.
-
-The one-shot `python -m job_hunter.run` still works unchanged if you want to
-harvest by hand or via host cron instead of (or in addition to) the in-container
-daily schedule.
-
-## Tests
-
-```bash
-.venv/bin/python -m pytest
-```
-
-All LLM, FX and Telegram I/O is mocked in tests; no network/credentials needed.
+Deployment is two Docker Compose services (the bot and the dashboard) on a VPS
+behind Caddy; see the Deployment section of [ARCHITECTURE.md](ARCHITECTURE.md).
