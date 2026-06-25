@@ -64,12 +64,50 @@ from dotenv import load_dotenv
 from . import obs
 from . import run as run_mod
 from . import store
+from . import tg_logger
 from .bot import JobHunterBot, build_deps
 from .config import Config, load_config
 
 # Daily harvest time (LOCAL to the resolved schedule timezone).
 HARVEST_HOUR = 10
 HARVEST_MINUTE = 0
+
+# --- DB reconnect ------------------------------------------------------------
+_RECONNECT_MAX_RETRIES = 3
+_RECONNECT_BACKOFF_BASE = 2.0  # seconds; waits 2s then 4s between attempts
+
+
+async def _ensure_reconnected(conn, dsn: str):
+    """Return ``conn`` if live; reconnect with retries+backoff if closed.
+
+    Called at the top of every scheduled job so a DB restart (which sets
+    conn.closed != 0 via psycopg's AdminShutdown handling) is recovered on
+    the NEXT scheduled run without a manual docker restart.
+
+    Sends a WARNING to the ops channel on reconnect and a loud ERROR if all
+    retries fail (then re-raises so the job also fails with a clear cause).
+    """
+    if not conn.closed:
+        return conn
+
+    last_exc: Exception | None = None
+    for attempt in range(1, _RECONNECT_MAX_RETRIES + 1):
+        try:
+            new_conn = store.connect(dsn)
+            await tg_logger.send_log(
+                f"⚠️ jobhunter: psycopg conn closed (DB restart?); "
+                f"reconnected on attempt {attempt}/{_RECONNECT_MAX_RETRIES}"
+            )
+            return new_conn
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < _RECONNECT_MAX_RETRIES:
+                await asyncio.sleep(_RECONNECT_BACKOFF_BASE**attempt)
+
+    await tg_logger.send_log(
+        f"🔴 jobhunter: DB reconnect failed after {_RECONNECT_MAX_RETRIES} attempts: {last_exc!r}"
+    )
+    raise last_exc  # type: ignore[misc]
 
 # Harvest staleness watchdog runs the hour AFTER the harvest (11:00 local), once
 # a day, so it sends AT MOST ONE alert per day (no spam, no extra dedup state).
@@ -248,6 +286,9 @@ async def _amain(cfg: Config | None = None) -> None:
     # below runs aiogram polling on) — no second event loop, no asyncio.run
     # inside the job, so serve's loop-thread ``conn`` keeps its thread affinity.
     async def _scheduled_harvest():
+        nonlocal conn
+        conn = await _ensure_reconnected(conn, cfg.database_url)
+        bot.conn = conn
         await run_mod.harvest(cfg, conn, bot, deps)
 
     # SECOND scheduled job (observability): once a day, the hour after the
@@ -255,6 +296,9 @@ async def _amain(cfg: Config | None = None) -> None:
     # send a LOUD ops alert. Read-only against the ops heartbeat table; it never
     # touches work_items, so advance() stays the sole pipeline-state writer.
     async def _scheduled_staleness_check():
+        nonlocal conn
+        conn = await _ensure_reconnected(conn, cfg.database_url)
+        bot.conn = conn
         await obs.check_harvest_staleness(conn)
 
     tz = resolve_schedule_tz(os.environ.get("SCHEDULE_TZ"))
