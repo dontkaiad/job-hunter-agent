@@ -1,6 +1,6 @@
-// The 12 pipeline states, mirrored from job_hunter/states.py. Used for the
-// status filter select and lane/action mapping. Kept in sync MANUALLY with the
-// backend — these are stable constants.
+// The pipeline states, mirrored from job_hunter/states.py. Used for the status
+// filter select and lane/action mapping. Kept in sync MANUALLY with the backend
+// — these are stable constants.
 
 export const DISCOVERED = "discovered";
 export const EXTRACTED = "extracted";
@@ -14,6 +14,11 @@ export const RESEARCHED = "researched";
 export const DRAFTED = "drafted";
 export const SENT = "sent";
 export const CLOSED = "closed";
+// Post-send response funnel.
+export const SCREENING = "screening";
+export const INTERVIEW = "interview";
+export const OFFER = "offer";
+export const DECLINED = "declined";
 
 // Russian labels for the status filter select.
 export const STATE_LABELS = {
@@ -29,6 +34,10 @@ export const STATE_LABELS = {
   drafted: "drafted",
   sent: "sent",
   closed: "closed",
+  screening: "ответили / скрининг",
+  interview: "собес",
+  offer: "оффер 🎉",
+  declined: "отказ работодателя",
 };
 
 export const ALL_STATES = [
@@ -44,4 +53,8 @@ export const ALL_STATES = [
   DRAFTED,
   SENT,
   CLOSED,
+  SCREENING,
+  INTERVIEW,
+  OFFER,
+  DECLINED,
 ];

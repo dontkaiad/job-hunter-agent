@@ -20,12 +20,20 @@ CREATE TABLE IF NOT EXISTS work_items (
     extracted_json    TEXT,
     relevance_score   DOUBLE PRECISION,
     created_at        TEXT             NOT NULL,
-    updated_at        TEXT             NOT NULL,
-    CHECK (state IN (
-        'discovered','extracted','scored','rejected','surfaced',
-        'skipped','backlog','approved','researched','drafted','sent','closed'
-    ))
+    updated_at        TEXT             NOT NULL
 );
+
+-- Valid-state CHECK as a NAMED constraint, applied via idempotent drop+recreate
+-- so it is the SINGLE source of truth AND widens an EXISTING DB (the inline
+-- CREATE TABLE check only runs on a fresh table). The post-send funnel states
+-- (screening/interview/offer/declined) were added here; widening is safe — it
+-- never rejects existing rows. Keep in sync with job_hunter/states.ALL_STATES.
+ALTER TABLE work_items DROP CONSTRAINT IF EXISTS work_items_state_check;
+ALTER TABLE work_items ADD CONSTRAINT work_items_state_check CHECK (state IN (
+    'discovered','extracted','scored','rejected','surfaced',
+    'skipped','backlog','approved','researched','drafted','sent','closed',
+    'screening','interview','offer','declined'
+));
 
 CREATE INDEX IF NOT EXISTS idx_work_items_state      ON work_items (state);
 CREATE INDEX IF NOT EXISTS idx_work_items_updated_at ON work_items (updated_at);

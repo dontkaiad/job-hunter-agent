@@ -3,6 +3,7 @@
 //   GET  /api/pipeline?status&min_score&max_score&remote&processed&q
 //   GET  /api/items/:id
 //   POST /api/items/:id/{approve|backlog|skip|sent|draft}
+//   POST /api/items/:id/{screening|interview|offer|decline|close}  (funnel)
 //
 // AUTH: the SPA assumes an existing .heylark.dev Telegram-login session cookie
 // (hl_session). Cookies are same-origin so they ride along automatically with
@@ -82,8 +83,9 @@ export const api = {
     return request(`/api/items/${id}`);
   },
 
-  // The 5 action endpoints. Each returns the updated ItemDetail. action is one
-  // of: approve | backlog | skip | sent | draft.
+  // The action endpoints. Each returns the updated ItemDetail. action is one of:
+  // approve | backlog | skip | sent | draft (pre-send) or the post-send funnel
+  // screening | interview | offer | decline | close.
   act(id, action) {
     return request(`/api/items/${id}/${action}`, { method: "POST" });
   },

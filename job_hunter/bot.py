@@ -28,8 +28,9 @@ from .config import Config, load_config
 from .pipeline import Deps
 from .schema_extract import from_dict
 from .states import (
-    DECISION_APPROVE, DECISION_BACKLOG, DECISION_SEND, DECISION_SKIP,
-    DRAFTED, SURFACED,
+    DECISION_APPROVE, DECISION_BACKLOG, DECISION_CLOSE, DECISION_DECLINE,
+    DECISION_INTERVIEW, DECISION_OFFER, DECISION_SCREENING, DECISION_SEND,
+    DECISION_SKIP, DRAFTED, SURFACED, allowed_transitions,
 )
 
 CALLBACK_PREFIX = "jh"
@@ -108,12 +109,19 @@ def _user_id_of(update: Any) -> Optional[int]:
         return None
 
 
-# Maps button action -> pipeline decision.
+# Maps button action -> pipeline decision. The post-send funnel actions reuse
+# the decision string AS the action token (screening/interview/offer/decline/
+# close), so encode_callback(decision, id) round-trips through decode_callback.
 ACTION_TO_DECISION = {
     "approve": DECISION_APPROVE,
     "skip": DECISION_SKIP,
     "backlog": DECISION_BACKLOG,
     "send": DECISION_SEND,
+    "screening": DECISION_SCREENING,
+    "interview": DECISION_INTERVIEW,
+    "offer": DECISION_OFFER,
+    "decline": DECISION_DECLINE,
+    "close": DECISION_CLOSE,
 }
 
 
@@ -535,6 +543,13 @@ _FINAL_STATE_LINE = {
     DECISION_BACKLOG: "📥 В бэклоге",
     DECISION_SKIP: "⏭️ Пропущено",
     DECISION_SEND: "✅ Отправлено",
+    # Post-send response funnel. For non-terminal stages (screening/interview)
+    # this line is appended AND the card keeps the next-step keyboard.
+    DECISION_SCREENING: "📞 Ответили / скрининг",
+    DECISION_INTERVIEW: "🗣️ Собес",
+    DECISION_OFFER: "🎉 Оффер!",
+    DECISION_DECLINE: "❌ Отказ работодателя",
+    DECISION_CLOSE: "🗄️ Закрыто",
 }
 
 
@@ -608,6 +623,36 @@ def draft_keyboard_spec(
             # copy_text button: no callback_data, no style; copy_text carries
             # the clipboard payload (serialised as {"text": c} to the Bot API).
             spec.append(("📋 Контакт", None, None, c))
+    return spec
+
+
+# Post-send response funnel buttons. decision -> (label, style). Labels are the
+# human-readable button text; the style is the Bot API 9.4 colour for clients
+# that render it. SAME action token == decision string (see ACTION_TO_DECISION).
+FUNNEL_DECISION_LABELS = {
+    DECISION_SCREENING: ("Ответили / скрининг", BUTTON_STYLE_PRIMARY),
+    DECISION_INTERVIEW: ("Собес", BUTTON_STYLE_PRIMARY),
+    DECISION_OFFER: ("Оффер 🎉", BUTTON_STYLE_SUCCESS),
+    DECISION_DECLINE: ("Отказ", BUTTON_STYLE_DANGER),
+    DECISION_CLOSE: ("Закрыть", BUTTON_STYLE_DANGER),
+}
+
+
+def funnel_keyboard_spec(state: str, item_id: int) -> List[Tuple[str, str, Optional[str]]]:
+    """Buttons for the post-send funnel, derived from the state machine. PURE.
+
+    Reads ``states.allowed_transitions(state)`` and renders one button per manual
+    funnel decision legal from ``state`` (screening/interview/offer/decline/
+    close). Returns [] for any state with no funnel actions (surfaced/drafted/
+    terminal), so callers can treat an empty spec as "nothing to re-stage".
+    """
+    spec: List[Tuple[str, str, Optional[str]]] = []
+    for t in allowed_transitions(state):
+        entry = FUNNEL_DECISION_LABELS.get(t.decision)
+        if entry is None:
+            continue
+        label, style = entry
+        spec.append((label, encode_callback(t.decision, item_id), style))
     return spec
 
 
@@ -1021,12 +1066,17 @@ class JobHunterBot:
         ack = self._ack_text(decision, result.status)
         await cb.answer(ack)
 
-        # Edit the card to a final-state line and REMOVE the inline keyboard so
-        # the delivered card no longer looks actionable. Only do this when the
-        # decision actually moved the item; for a no-op (e.g. already advanced)
-        # leave the card untouched but still strip the keyboard defensively.
+        # Edit the card to a final-state line. When the new state still has
+        # manual funnel actions (post-send: sent->screening->interview), SWAP the
+        # keyboard for the next step instead of removing it. Otherwise (terminal
+        # or the pre-send gates) REMOVE the keyboard so the card is no longer
+        # actionable. For a no-op leave the text untouched but strip defensively.
         if result.status == "moved":
-            await self._finalize_card(cb, decision)
+            next_spec = funnel_keyboard_spec(result.to_state, item_id)
+            if next_spec:
+                await self._restage_card(cb, decision, next_spec)
+            else:
+                await self._finalize_card(cb, decision)
         else:
             await self._strip_keyboard(cb)
 
@@ -1055,6 +1105,32 @@ class JobHunterBot:
         # remove the keyboard so the card is no longer actionable.
         await self._strip_keyboard(cb)
 
+    async def _restage_card(self, cb, decision: str, spec) -> None:  # noqa: ANN001
+        """Append the stage line and SWAP the keyboard to the next funnel step.
+
+        Used after a move into a state that still has manual actions (the post-
+        send funnel). Mirrors _finalize_card but sets a fresh keyboard instead of
+        dropping it. Robust to a non-editable message: falls back to swapping
+        only the keyboard, and never raises.
+        """
+        line = final_state_line(decision)
+        kb = _build_keyboard(spec)
+        message = getattr(cb, "message", None)
+        if message is None:
+            return
+        original = getattr(message, "html_text", None) or getattr(message, "text", None) or ""
+        new_text = f"{original}\n\n{line}" if line else original
+        try:
+            await message.edit_text(new_text, reply_markup=kb, parse_mode="HTML")
+            return
+        except Exception:
+            pass
+        # Text edit failed: at least swap the keyboard so the next step is offered.
+        try:
+            await message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+
     @staticmethod
     async def _strip_keyboard(cb) -> None:  # noqa: ANN001
         """Remove the inline keyboard from the card, ignoring any edit error."""
@@ -1075,6 +1151,11 @@ class JobHunterBot:
             DECISION_SKIP: "Skipped",
             DECISION_BACKLOG: "Backlogged",
             DECISION_SEND: "Sent",
+            DECISION_SCREENING: "Скрининг",
+            DECISION_INTERVIEW: "Собес",
+            DECISION_OFFER: "Оффер 🎉",
+            DECISION_DECLINE: "Отказ",
+            DECISION_CLOSE: "Закрыто",
         }.get(decision, "Done")
 
     async def run(self) -> None:

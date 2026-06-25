@@ -52,6 +52,11 @@ describe("laneForStatus", () => {
     expect(laneForStatus("researched")).toBe("approved");
     expect(laneForStatus("drafted")).toBe("approved");
     expect(laneForStatus("sent")).toBe("sent");
+    // Active post-send funnel rides the "sent" lane; terminals drop out.
+    expect(laneForStatus("screening")).toBe("sent");
+    expect(laneForStatus("interview")).toBe("sent");
+    expect(laneForStatus("offer")).toBe(null);
+    expect(laneForStatus("declined")).toBe(null);
     expect(laneForStatus("rejected")).toBe(null);
     expect(laneForStatus("backlog")).toBe(null);
   });
@@ -75,7 +80,22 @@ describe("actionsForStatus", () => {
       "draft",
     ]);
     expect(actionsForStatus("drafted").map((a) => a.action)).toEqual(["sent"]);
-    expect(actionsForStatus("sent")).toEqual([]);
+    // Post-send funnel (mirrors states.py T13..T21).
+    expect(actionsForStatus("sent").map((a) => a.action)).toEqual([
+      "screening",
+      "decline",
+      "close",
+    ]);
+    expect(actionsForStatus("screening").map((a) => a.action)).toEqual([
+      "interview",
+      "decline",
+      "close",
+    ]);
+    expect(actionsForStatus("interview").map((a) => a.action)).toEqual([
+      "offer",
+      "decline",
+      "close",
+    ]);
   });
 });
 
@@ -158,15 +178,29 @@ describe("LANES titles", () => {
 });
 
 describe("actionsForStatus — match backend transitions", () => {
-  it("sent state returns empty (terminal for UI actions)", () => {
-    // T13 sent->closed is deterministic (no human action). Correct to return [].
-    expect(actionsForStatus("sent")).toEqual([]);
+  it("sent state offers the post-send funnel (screening/decline/close)", () => {
+    // The old deterministic T13 sent->closed is gone; SENT now has manual exits.
+    expect(actionsForStatus("sent").map((a) => a.action)).toEqual([
+      "screening",
+      "decline",
+      "close",
+    ]);
   });
 
-  it("rejected/skipped/closed return empty (terminal states)", () => {
+  it("rejected/skipped/closed/offer/declined return empty (terminal states)", () => {
     expect(actionsForStatus("rejected")).toEqual([]);
     expect(actionsForStatus("skipped")).toEqual([]);
     expect(actionsForStatus("closed")).toEqual([]);
+    expect(actionsForStatus("offer")).toEqual([]);
+    expect(actionsForStatus("declined")).toEqual([]);
+  });
+
+  it("offer is only reachable after interview (not from sent/screening)", () => {
+    expect(actionsForStatus("sent").map((a) => a.action)).not.toContain("offer");
+    expect(actionsForStatus("screening").map((a) => a.action)).not.toContain(
+      "offer",
+    );
+    expect(actionsForStatus("interview").map((a) => a.action)).toContain("offer");
   });
 
   it("drafted returns only [sent] (T12 drafted->sent is the sole HITL from drafted)", () => {

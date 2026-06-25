@@ -32,10 +32,19 @@ from job_hunter.states import (
     BACKLOG,
     DECISION_APPROVE,
     DECISION_BACKLOG,
+    DECISION_CLOSE,
+    DECISION_DECLINE,
+    DECISION_INTERVIEW,
+    DECISION_OFFER,
+    DECISION_SCREENING,
     DECISION_SEND,
     DECISION_SKIP,
+    DECLINED,
     DRAFTED,
+    INTERVIEW,
+    OFFER,
     SCORED,
+    SCREENING,
     SENT,
     SKIPPED,
     SURFACED,
@@ -135,6 +144,16 @@ def client(conn, auth_conn, deps_factory):
         ("skip", DECISION_SKIP, BACKLOG, SKIPPED),
         ("backlog", DECISION_BACKLOG, SURFACED, BACKLOG),
         ("sent", DECISION_SEND, DRAFTED, SENT),
+        # Post-send response funnel.
+        ("screening", DECISION_SCREENING, SENT, SCREENING),
+        ("interview", DECISION_INTERVIEW, SCREENING, INTERVIEW),
+        ("offer", DECISION_OFFER, INTERVIEW, OFFER),
+        ("decline", DECISION_DECLINE, SENT, DECLINED),
+        ("decline", DECISION_DECLINE, SCREENING, DECLINED),
+        ("decline", DECISION_DECLINE, INTERVIEW, DECLINED),
+        ("close", DECISION_CLOSE, SENT, "closed"),
+        ("close", DECISION_CLOSE, SCREENING, "closed"),
+        ("close", DECISION_CLOSE, INTERVIEW, "closed"),
     ],
 )
 def test_action_matches_bot_transition(
@@ -205,6 +224,30 @@ def test_sent_on_surfaced_409(client, conn):
     resp = client.post(f"/api/items/{item_id}/sent")
     assert resp.status_code == 409
     assert "surfaced" in resp.json()["detail"]
+
+
+def test_offer_on_sent_409(client, conn):
+    """offer skips screening+interview -> illegal from SENT -> 409."""
+    item_id = _seed(conn, state=SENT)
+    resp = client.post(f"/api/items/{item_id}/offer")
+    assert resp.status_code == 409
+    assert "sent" in resp.json()["detail"]
+
+
+def test_screening_on_drafted_409(client, conn):
+    item_id = _seed(conn, state=DRAFTED)
+    resp = client.post(f"/api/items/{item_id}/screening")
+    assert resp.status_code == 409
+
+
+def test_funnel_full_walk_sent_to_offer(client, conn):
+    """Drive one item through the whole funnel via the HTTP endpoints."""
+    item_id = _seed(conn, state=SENT)
+    assert client.post(f"/api/items/{item_id}/screening").json()["status"] == SCREENING
+    assert client.post(f"/api/items/{item_id}/interview").json()["status"] == INTERVIEW
+    assert client.post(f"/api/items/{item_id}/offer").json()["status"] == OFFER
+    # offer is terminal -> any further funnel action is 409.
+    assert client.post(f"/api/items/{item_id}/close").status_code == 409
 
 
 def test_approve_on_skipped_409(client, conn):

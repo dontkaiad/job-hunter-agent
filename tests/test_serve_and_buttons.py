@@ -14,7 +14,10 @@ import pytest
 from job_hunter import bot, pipeline, serve, store
 from job_hunter.config import Config
 from job_hunter.pipeline import Deps
-from job_hunter.states import APPROVED, BACKLOG, DRAFTED, SKIPPED, SURFACED
+from job_hunter.states import (
+    APPROVED, BACKLOG, DRAFTED, SKIPPED, SURFACED,
+    SENT, SCREENING, INTERVIEW, OFFER, DECLINED,
+)
 
 
 ALLOWED_UID = 777
@@ -173,6 +176,96 @@ def test_button_approve_finalizes_card_and_drives_draft(conn, fake_llm, fake_fx)
     assert cb.message.edit_text_calls == 1
     assert "✅ Принято" in cb.message.last_edit_text
     assert cb.message.last_edit_markup is None
+
+
+def _seed_state(conn, deps, state):
+    """Surface an item then force it into ``state`` (post-send funnel seeding)."""
+    item_id = _surface_item(conn, deps)
+    cur = store.get_item(conn, item_id)
+    store.update_state(
+        conn, item_id, state,
+        from_state=cur.state, kind="hitl", actor="human", reason="test seed",
+    )
+    assert store.get_item(conn, item_id).state == state
+    return item_id
+
+
+def _markup_labels(markup):
+    """Extract button labels from a recorded InlineKeyboardMarkup."""
+    return [b.text for row in markup.inline_keyboard for b in row]
+
+
+def test_button_sent_restages_card_to_funnel(conn, deps):
+    """Confirming «Отправила» (DRAFTED->SENT) must NOT kill the card: it re-stages
+    it with the post-send funnel keyboard so the operator can record the reply."""
+    item_id = _seed_state(conn, deps, DRAFTED)
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    cb = FakeCallback(bot.encode_callback("send", item_id))
+
+    status = asyncio.run(b.handle_callback(cb))
+
+    assert status == "moved"
+    assert store.get_item(conn, item_id).state == SENT
+    assert "✅ Отправлено" in cb.message.last_edit_text
+    # Keyboard SWAPPED (not removed) to the funnel actions.
+    assert cb.message.last_edit_markup is not None
+    assert _markup_labels(cb.message.last_edit_markup) == [
+        "Ответили / скрининг", "Отказ", "Закрыть",
+    ]
+
+
+def test_button_screening_advances_and_restages(conn, deps):
+    item_id = _seed_state(conn, deps, SENT)
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    cb = FakeCallback(bot.encode_callback("screening", item_id))
+
+    status = asyncio.run(b.handle_callback(cb))
+
+    assert status == "moved"
+    assert store.get_item(conn, item_id).state == SCREENING
+    assert cb.answered == "Скрининг"
+    assert "📞 Ответили / скрининг" in cb.message.last_edit_text
+    assert _markup_labels(cb.message.last_edit_markup) == ["Собес", "Отказ", "Закрыть"]
+
+
+def test_button_offer_finalizes_card(conn, deps):
+    """Offer is terminal: the card is finalised (keyboard removed), no re-stage."""
+    item_id = _seed_state(conn, deps, INTERVIEW)
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    cb = FakeCallback(bot.encode_callback("offer", item_id))
+
+    status = asyncio.run(b.handle_callback(cb))
+
+    assert status == "moved"
+    assert store.get_item(conn, item_id).state == OFFER
+    assert "🎉 Оффер!" in cb.message.last_edit_text
+    assert cb.message.last_edit_markup is None  # terminal: keyboard removed
+
+
+def test_button_decline_from_sent_finalizes_card(conn, deps):
+    item_id = _seed_state(conn, deps, SENT)
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    cb = FakeCallback(bot.encode_callback("decline", item_id))
+
+    status = asyncio.run(b.handle_callback(cb))
+
+    assert status == "moved"
+    assert store.get_item(conn, item_id).state == DECLINED
+    assert "❌ Отказ работодателя" in cb.message.last_edit_text
+    assert cb.message.last_edit_markup is None  # terminal
+
+
+def test_button_offer_illegal_from_sent_is_noop(conn, deps):
+    """An offer button on a SENT item (skipping screening/interview) is illegal:
+    no state change, card keyboard stripped defensively, status not 'moved'."""
+    item_id = _seed_state(conn, deps, SENT)
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    cb = FakeCallback(bot.encode_callback("offer", item_id))
+
+    status = asyncio.run(b.handle_callback(cb))
+
+    assert status != "moved"
+    assert store.get_item(conn, item_id).state == SENT
 
 
 def test_button_non_allowlisted_is_fail_closed(conn, deps, monkeypatch):

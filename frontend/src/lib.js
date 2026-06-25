@@ -7,6 +7,8 @@ import {
   RESEARCHED,
   DRAFTED,
   SENT,
+  SCREENING,
+  INTERVIEW,
 } from "./states.js";
 
 // Score band classification. The 50-59 BORDERLINE band is deliberately a
@@ -58,7 +60,11 @@ export function laneForStatus(status) {
   if (status === SURFACED) return "surfaced";
   if (status === APPROVED || status === RESEARCHED || status === DRAFTED)
     return "approved";
-  if (status === SENT) return "sent";
+  // The "sent" lane holds the whole ACTIVE post-send funnel so those items stay
+  // visible+clickable in the kanban (where the funnel buttons live). Terminal
+  // offer/declined/closed drop out of the lanes, like rejected/skipped.
+  if (status === SENT || status === SCREENING || status === INTERVIEW)
+    return "sent";
   return null;
 }
 
@@ -89,6 +95,26 @@ export function actionsForStatus(status) {
       return [{ action: "draft", label: "Сгенерировать отклик" }];
     case DRAFTED:
       return [{ action: "sent", label: "Отметить отправленным" }];
+    // Post-send response funnel (mirrors states.py T13..T21). decline/close are
+    // available at every funnel stage; offer only after an interview.
+    case SENT:
+      return [
+        { action: "screening", label: "Ответили / скрининг" },
+        { action: "decline", label: "Отказ" },
+        { action: "close", label: "Закрыть" },
+      ];
+    case SCREENING:
+      return [
+        { action: "interview", label: "Собес" },
+        { action: "decline", label: "Отказ" },
+        { action: "close", label: "Закрыть" },
+      ];
+    case INTERVIEW:
+      return [
+        { action: "offer", label: "Оффер 🎉" },
+        { action: "decline", label: "Отказ" },
+        { action: "close", label: "Закрыть" },
+      ];
     default:
       return [];
   }

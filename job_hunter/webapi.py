@@ -29,9 +29,10 @@ processed (разобрано / неразобрано) — JUDGMENT CALL (tweak
   processed=false (неразобрано) => state IN {discovered, extracted, scored,
     surfaced}: still in the review inbox / automated pipeline.
   processed=true  (разобрано)   => everything else {skipped, backlog, approved,
-    researched, drafted, sent, closed, rejected}: a human acted or it is
-    resolved. Implemented as a SQL ``state IN (...)`` partition in
-    ``store.list_pipeline``.
+    researched, drafted, sent, closed, rejected} plus the post-send funnel
+    {screening, interview, offer, declined}: a human acted or it is resolved.
+    Implemented as a SQL ``state NOT IN (unprocessed)`` partition in
+    ``store.list_pipeline`` (so new funnel states are processed automatically).
 """
 
 from __future__ import annotations
@@ -65,6 +66,11 @@ from .states import (
     APPROVED,
     DECISION_APPROVE,
     DECISION_BACKLOG,
+    DECISION_CLOSE,
+    DECISION_DECLINE,
+    DECISION_INTERVIEW,
+    DECISION_OFFER,
+    DECISION_SCREENING,
     DECISION_SEND,
     DECISION_SKIP,
     DRAFTED,
@@ -571,6 +577,11 @@ _DECISION_LABELS = {
     DECISION_SKIP: "skip",
     DECISION_BACKLOG: "backlog",
     DECISION_SEND: "sent",
+    DECISION_SCREENING: "screening",
+    DECISION_INTERVIEW: "interview",
+    DECISION_OFFER: "offer",
+    DECISION_DECLINE: "decline",
+    DECISION_CLOSE: "close",
 }
 
 
@@ -661,6 +672,71 @@ def sent_item(
 ) -> ItemDetail:
     """DECISION_SEND: T12 drafted->sent (the bot's «✅ Отправила» manual-confirm)."""
     return _apply_decision(conn, item_id, DECISION_SEND, fx, deps)
+
+
+# Post-send response funnel (all manual, KIND_HITL). Each route mirrors the bot
+# button 1:1 via _apply_decision -> advance_by_id, so advance() stays the SOLE
+# writer. allowed_transitions gates legality; an out-of-state call -> 409.
+#   screening -> T13 sent->screening
+#   interview -> T16 screening->interview
+#   offer     -> T19 interview->offer       (terminal)
+#   decline   -> T14/T17/T20 *->declined    (terminal; employer rejection)
+#   close     -> T15/T18/T21 *->closed      (terminal; withdrawn / stale)
+
+
+@writer_router.post("/items/{item_id}/screening", response_model=ItemDetail)
+def screening_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_SCREENING: T13 sent->screening (employer replied)."""
+    return _apply_decision(conn, item_id, DECISION_SCREENING, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/interview", response_model=ItemDetail)
+def interview_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_INTERVIEW: T16 screening->interview."""
+    return _apply_decision(conn, item_id, DECISION_INTERVIEW, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/offer", response_model=ItemDetail)
+def offer_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_OFFER: T19 interview->offer (terminal)."""
+    return _apply_decision(conn, item_id, DECISION_OFFER, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/decline", response_model=ItemDetail)
+def decline_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_DECLINE: T14/T17/T20 *->declined (employer rejection, terminal)."""
+    return _apply_decision(conn, item_id, DECISION_DECLINE, fx, deps)
+
+
+@writer_router.post("/items/{item_id}/close", response_model=ItemDetail)
+def close_item(
+    item_id: int,
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+) -> ItemDetail:
+    """DECISION_CLOSE: T15/T18/T21 *->closed (withdrawn / no longer relevant)."""
+    return _apply_decision(conn, item_id, DECISION_CLOSE, fx, deps)
 
 
 @writer_router.post("/items/{item_id}/draft", response_model=ItemDetail)

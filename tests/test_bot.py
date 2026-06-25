@@ -351,6 +351,49 @@ def test_send_decision_final_state_line_is_otpravleno():
     assert bot.final_state_line(bot.DECISION_SEND) == "✅ Отправлено"
 
 
+# --- Post-send funnel keyboard (derived from states.allowed_transitions) -----
+
+
+def test_funnel_keyboard_for_sent():
+    from job_hunter.states import SENT
+
+    spec = bot.funnel_keyboard_spec(SENT, 7)
+    labels = [b[0] for b in spec]
+    assert labels == ["Ответили / скрининг", "Отказ", "Закрыть"]
+    # Each action token round-trips back to the matching decision.
+    decisions = [bot.ACTION_TO_DECISION[bot.decode_callback(b[1])[0]] for b in spec]
+    assert decisions == [
+        bot.DECISION_SCREENING, bot.DECISION_DECLINE, bot.DECISION_CLOSE,
+    ]
+
+
+def test_funnel_keyboard_for_screening_and_interview():
+    from job_hunter.states import SCREENING, INTERVIEW
+
+    assert [b[0] for b in bot.funnel_keyboard_spec(SCREENING, 1)] == [
+        "Собес", "Отказ", "Закрыть",
+    ]
+    assert [b[0] for b in bot.funnel_keyboard_spec(INTERVIEW, 1)] == [
+        "Оффер 🎉", "Отказ", "Закрыть",
+    ]
+
+
+def test_funnel_keyboard_empty_outside_funnel():
+    from job_hunter.states import SURFACED, DRAFTED, OFFER, DECLINED, CLOSED
+
+    # Pre-send gates and terminals carry NO funnel buttons.
+    for st in (SURFACED, DRAFTED, OFFER, DECLINED, CLOSED):
+        assert bot.funnel_keyboard_spec(st, 1) == []
+
+
+def test_funnel_final_state_lines():
+    assert bot.final_state_line(bot.DECISION_SCREENING) == "📞 Ответили / скрининг"
+    assert bot.final_state_line(bot.DECISION_INTERVIEW) == "🗣️ Собес"
+    assert bot.final_state_line(bot.DECISION_OFFER) == "🎉 Оффер!"
+    assert bot.final_state_line(bot.DECISION_DECLINE) == "❌ Отказ работодателя"
+    assert bot.final_state_line(bot.DECISION_CLOSE) == "🗄️ Закрыто"
+
+
 # --- Link preview disabled on the card send ---------------------------------
 
 

@@ -5,8 +5,9 @@ advance() is the SOLE writer of work_items.state. It combines pure decisions
 drives the real LLM + FX integrations injected via a Deps bundle.
 
 Transition kinds:
-  - deterministic: T1 (extract), T2 (score), T3/T4 (reject/surface), T13 (close)
-  - hitl:          T5..T9 (gate decisions), T12 (send)
+  - deterministic: T1 (extract), T2 (score), T3/T4 (reject/surface)
+  - hitl:          T5..T9 (gate decisions), T12 (send), T13..T21 (post-send
+                   response funnel: screening/interview/offer/decline/close)
   - agent(LLM):    T10 (research), T11 (draft)
 
 Idempotency: advancing a terminal item is a no-op 'terminal' result.
@@ -31,7 +32,7 @@ from .schema_extract import ExtractResult, from_dict, serialize
 from .scoring import passes_threshold
 from .states import (
     APPROVED, DRAFTED, EXTRACTED, KIND_AGENT, KIND_DETERMINISTIC, KIND_HITL,
-    REJECTED, RESEARCHED, SCORED, SENT, SURFACED, CLOSED, DISCOVERED,
+    REJECTED, RESEARCHED, SCORED, SURFACED, DISCOVERED,
     allowed_transitions, is_terminal, transition_for_decision,
 )
 from .store import WorkItem
@@ -333,24 +334,15 @@ def _do_draft(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                          extra={"draft": draft_text})
 
 
-def _do_close(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
-    """T13: sent -> closed (deterministic)."""
-    store.update_state(
-        conn, item.id, CLOSED,
-        from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,
-        reason="archived",
-    )
-    return AdvanceResult("moved", item.id, item.state, CLOSED, "T13", "closed")
-
-
 # Map current state -> deterministic/agent handler (HITL handled separately).
+# SENT is intentionally absent: the post-send funnel (T13..T21) is ALL manual,
+# so a SENT item waits for a human decision (advance() returns 'needs_human').
 _AUTO_HANDLERS = {
     DISCOVERED: _do_extract,
     EXTRACTED: _do_score,
     SCORED: _do_reject_or_surface,
     APPROVED: _do_research,
     RESEARCHED: _do_draft,
-    SENT: _do_close,
 }
 
 

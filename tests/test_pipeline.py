@@ -6,8 +6,10 @@ from job_hunter import pipeline, store
 from job_hunter.pipeline import Deps
 from job_hunter.states import (
     APPROVED, BACKLOG, CLOSED, DRAFTED, EXTRACTED, REJECTED, RESEARCHED,
-    SCORED, SENT, SKIPPED, SURFACED, DECISION_APPROVE, DECISION_SEND,
-    DECISION_SKIP, DECISION_BACKLOG,
+    SCORED, SENT, SKIPPED, SURFACED, SCREENING, INTERVIEW, OFFER, DECLINED,
+    DECISION_APPROVE, DECISION_SEND, DECISION_SKIP, DECISION_BACKLOG,
+    DECISION_SCREENING, DECISION_INTERVIEW, DECISION_OFFER, DECISION_DECLINE,
+    DECISION_CLOSE,
 )
 
 
@@ -106,8 +108,54 @@ def test_full_path_approve_research_draft_send_close(conn, deps, fake_llm):
 
     # hitl: send
     assert pipeline.advance_by_id(conn, item_id, decision=DECISION_SEND, deps=deps).to_state == SENT
-    # deterministic: close
-    assert pipeline.advance_by_id(conn, item_id, deps=deps).to_state == CLOSED
+    # NO auto-close any more: a decision-less advance() on SENT waits for a human.
+    waiting = pipeline.advance_by_id(conn, item_id, deps=deps)
+    assert waiting.status == "needs_human"
+    assert store.get_item(conn, item_id).state == SENT
+    # hitl funnel: close it manually -> closed.
+    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_CLOSE, deps=deps).to_state == CLOSED
+
+
+def _drive_to_sent(conn, deps, fake_llm):
+    """Helper: take a fresh GOOD_POST item all the way to SENT."""
+    fake_llm.set_for("research", '{"summary":"s","talking_points":[],"questions":[]}')
+    fake_llm.set_for("application message", "Hello.")
+    item_id = _insert(conn, GOOD_POST, mid=str(_drive_to_sent.n))
+    _drive_to_sent.n += 1
+    pipeline.run_to_gate(conn, item_id, deps=deps)
+    pipeline.advance_by_id(conn, item_id, decision=DECISION_APPROVE, deps=deps)
+    pipeline.run_to_gate(conn, item_id, deps=deps)  # research + draft
+    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_SEND, deps=deps).to_state == SENT
+    return item_id
+
+
+_drive_to_sent.n = 100
+
+
+def test_funnel_screening_interview_offer(conn, deps, fake_llm):
+    item_id = _drive_to_sent(conn, deps, fake_llm)
+    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_SCREENING, deps=deps).to_state == SCREENING
+    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_INTERVIEW, deps=deps).to_state == INTERVIEW
+    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_OFFER, deps=deps).to_state == OFFER
+    # offer is terminal: further advance is a no-op 'terminal'.
+    assert pipeline.advance_by_id(conn, item_id, deps=deps).status == "terminal"
+
+
+def test_funnel_decline_from_sent_is_terminal(conn, deps, fake_llm):
+    item_id = _drive_to_sent(conn, deps, fake_llm)
+    res = pipeline.advance_by_id(conn, item_id, decision=DECISION_DECLINE, deps=deps)
+    assert res.to_state == DECLINED
+    # declined != the scoring REJECTED; and it is terminal.
+    assert DECLINED != REJECTED
+    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_CLOSE, deps=deps).status == "terminal"
+
+
+def test_funnel_offer_illegal_before_interview(conn, deps, fake_llm):
+    item_id = _drive_to_sent(conn, deps, fake_llm)
+    # offer from sent is not a legal decision -> no-op, state unchanged.
+    res = pipeline.advance_by_id(conn, item_id, decision=DECISION_OFFER, deps=deps)
+    assert res.status == "noop"
+    assert store.get_item(conn, item_id).state == SENT
 
 
 def test_do_draft_passes_full_raw_text_to_llm(conn, deps, fake_llm):
