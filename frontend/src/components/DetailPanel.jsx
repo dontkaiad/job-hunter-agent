@@ -119,9 +119,11 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
             onAction={runAction}
           />
 
-          <ListBlock label="Причины" items={detail.reasons} />
           <ListBlock label="Бенефиты" items={detail.benefits} />
 
+          {/* «Причины» убрана: бэкенд кладёт в reasons ровно [reasoning],
+              т.е. тот же текст, что и в «Обоснование» ниже (см. pipeline._do_score).
+              Показываем обоснование один раз — форматированным <pre>. */}
           <TextBlock label="Обоснование" value={detail.reasoning} />
           <TextBlock label="Отклик (draft)" value={detail.draft} />
 
