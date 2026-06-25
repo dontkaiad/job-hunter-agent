@@ -238,6 +238,10 @@ config/profile.local.yaml
 # clone / the Docker build renders the initials placeholder instead.
 frontend/src/assets/avatar.local.*
 
+# Local-only browser-tab favicon (maintainer's bot avatar). NEVER commit it; a
+# fresh clone / the Docker build ships NO favicon (browser default) instead.
+frontend/src/assets/favicon.local.*
+
 # Local-only de-identification denylist (the maintainer's personal needles).
 # Loaded by tests/_personal_needles.py; NEVER commit it.
 tests/_personal_needles.local.py
