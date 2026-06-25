@@ -24,29 +24,35 @@ from typing import List
 
 from dotenv import load_dotenv
 
-from . import clock, ingest_telegram, ingest_web, obs, pipeline, store
+from . import clock, ingest_telegram, obs, pipeline, sources, store
 from .bot import JobHunterBot, build_deps, notify
 from .config import Config, load_config
 from .states import SURFACED
 
 
 async def ingest(cfg: Config, conn) -> List[int]:
-    """Dispatch ingestion by INGEST_MODE: 'web' (default) or 'telethon'.
+    """Multi-source aggregator: fan out over every enabled Source, concat ids.
 
-    'web' uses the public t.me/s/ HTTP reader with no authentication. It runs
-    synchronously (httpx) but is offloaded to a worker thread so the async
-    caller is not blocked. Each thread owns its OWN database connection: the
-    worker thread opens and closes its own psycopg connection via
-    ``ingest_web.ingest_with_own_connection`` -- the main-thread ``conn`` is
-    deliberately NOT passed across the thread boundary.
+    Sources (see ``sources.py``):
+      - Telegram: INGEST_MODE=web (default) uses the public t.me/s/ reader; set
+        INGEST_MODE=telethon for the userbot fallback. The telethon path runs on
+        the event loop (this thread) against the main-thread ``conn``; the web
+        path is a synchronous Source offloaded to a worker thread.
+      - Jobicy: the international-remote JSON API, active when JOBICY_GEOS is set.
 
-    'telethon' runs on the event loop (this thread) and therefore uses the
-    main-thread ``conn`` directly -- no thread crossing.
+    Each SYNCHRONOUS (httpx) Source is offloaded via ``asyncio.to_thread`` and
+    owns its OWN psycopg connection end-to-end (``ingest_with_own_connection``);
+    the main-thread ``conn`` is deliberately NOT crossed over the thread boundary.
     """
     mode = (cfg.ingest_mode or "web").lower()
+    new_ids: List[int] = []
     if mode == "telethon":
-        return await ingest_telegram.ingest_async(cfg, conn)
-    return await asyncio.to_thread(ingest_web.ingest_with_own_connection, cfg)
+        new_ids.extend(await ingest_telegram.ingest_async(cfg, conn))
+    for source in sources.http_sources(cfg, mode=mode):
+        new_ids.extend(
+            await asyncio.to_thread(source.ingest_with_own_connection, cfg)
+        )
+    return new_ids
 
 
 async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:

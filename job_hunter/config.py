@@ -102,6 +102,21 @@ class Config:
     # behavior; works on desktop / local dev).
     dashboard_public_url: str = ""
 
+    # --- Jobicy international-remote source (OPTIONAL) ---
+    # Jobicy (jobicy.com/api/v2/remote-jobs) is a no-auth JSON job board used as
+    # the first international-remote auto-source (EU relocation / Blue Card goal).
+    # ``jobicy_geos`` is a SMALL list of geo slugs swept each harvest (e.g.
+    # europe,poland,serbia,czechia,germany). EMPTY => the source is DISABLED
+    # (no Jobicy fetch happens), so it is purely opt-in. Each geo watermarks
+    # independently (channel_state key "jobicy:<geo>") while all geos share
+    # source_channel="jobicy" so the same job dedups across overlapping sweeps.
+    jobicy_geos: List[str] = field(default_factory=list)
+    # Industry filter (Jobicy taxonomy). "dev" is the densest AI/ML feed per the
+    # recon; tag-filtering is intentionally NOT used (its tag taxonomy is broken).
+    jobicy_industry: str = "dev"
+    # Results per geo per fetch (Jobicy caps at 50).
+    jobicy_count: int = 50
+
     # FX
     fx_provider: str = "frankfurter"
     fx_cache_ttl: int = 86400
@@ -177,4 +192,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,
         new_channel_lookback_days=_int_or_none(get("NEW_CHANNEL_LOOKBACK_DAYS")) or 14,
+        jobicy_geos=_split_csv(get("JOBICY_GEOS")),
+        jobicy_industry=get("JOBICY_INDUSTRY") or "dev",
+        jobicy_count=_int_or_none(get("JOBICY_COUNT")) or 50,
     )
