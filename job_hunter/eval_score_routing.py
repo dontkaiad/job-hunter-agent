@@ -44,7 +44,7 @@ def main() -> int:
     print(f"[eval] haiku_model={haiku_model!r}  threshold={SURFACE_THRESHOLD}")
 
     profile = load_profile()
-    print(f"[eval] profile loaded: {profile.name!r}")
+    print(f"[eval] profile loaded (role={profile.role!r})")
 
     conn = store.connect(cfg.database_url)
     store.init_db(conn)
