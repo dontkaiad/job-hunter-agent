@@ -443,6 +443,10 @@ _SCORE_SCAFFOLD = (
     "DEFAULT TO SOFT. Do not invent hard severity.\n\n"
     "Do NOT consider salary thresholds — a separate deterministic guard handles "
     "pay. Judge ROLE FIT only.\n\n"
+    "SCORE CALIBRATION ANCHORS — orient your numeric scale to THIS candidate "
+    "before you score. These are reference points; use them to avoid systematic "
+    "over- or under-scoring:\n"
+    "{calibration_block}\n\n"
     "OUTPUT FORMAT for «Обоснование» (this constrains the PRESENTATION, not the "
     "judgment above). Write it in the SAME language as the posting and structure "
     "it as a scannable verdict + bullets:\n"
@@ -470,14 +474,45 @@ _SCORE_SCAFFOLD = (
 )
 
 
+def _build_calibration_block(profile: Profile) -> str:
+    """Four numeric anchors that tell the model where the scale sits for THIS
+    candidate. Purely cosmetic relative to the rubric — these calibrate the
+    numeric output without changing the judgment criteria. PURE.
+    """
+    floor = int(round(profile.salary_floor_eur))
+    return (
+        f"  ~10  — Backend/fullstack developer role in an RF office, pure CRUD / "
+        f"microservices Python work, no LLM or AI involvement, mandatory CS degree "
+        f"required. (Wrong domain + wrong location + hard degree block.)\n"
+        f"  ~42  — Data Scientist role (model training, statistics, Jupyter), Python "
+        f"livecoding interview expected, fluent English required 'right now'. (Wrong "
+        f"domain: DS/ML training ≠ LLM engineering; coding interview = near-certain "
+        f"fail; language gap is an immediate blocker.)\n"
+        f"  ~65  — LLM / Prompt Engineer, fully remote, RAG and prompt engineering "
+        f"are core, matching stack, but 3+ years commercial LLM experience required "
+        f"as HARD (candidate has ~1.5 years relevant). Grade is correct, location "
+        f"is ideal, but the hard seniority gap prevents a strong score.\n"
+        f"  ~88  — AI / Prompt Engineer, fully remote or EU relocation with visa "
+        f"sponsorship, owns LLM behavior end-to-end (prompt engineering, RAG, cost "
+        f"routing, monitoring), middle grade expected, no degree requirement, salary "
+        f">= EUR {floor}/month. (Exact profile match on role, location, grade, and "
+        f"stack — no hard blockers.)"
+    )
+
+
 def build_score_system(profile: Profile) -> str:
     """Render the full SCORE system prompt from the loaded profile. PURE.
 
     The JUDGE instructions + RUBRIC structure + OUTPUT FORMAT live in
     ``_SCORE_SCAFFOLD`` (code); the candidate-SPECIFIC DATA is injected via
-    ``render_profile_block(profile)``. No personal specifics are hardcoded.
+    ``render_profile_block(profile)`` and ``_build_calibration_block(profile)``.
+    No personal specifics are hardcoded.
     """
-    return _SCORE_SCAFFOLD.replace("{profile_block}", render_profile_block(profile))
+    return (
+        _SCORE_SCAFFOLD
+        .replace("{profile_block}", render_profile_block(profile))
+        .replace("{calibration_block}", _build_calibration_block(profile))
+    )
 
 
 # Module-level constant rendered from the GENERIC example profile so the module
