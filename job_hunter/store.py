@@ -61,57 +61,158 @@ class WorkItem:
         )
 
 
-def connect(dsn: str) -> psycopg.Connection:
-    """Open a psycopg3 connection from a DATABASE_URL (postgresql://...).
+# --- DB resilience ----------------------------------------------------------
 
-    ``row_factory=dict_row`` makes rows support ``row["col"]`` indexing, a
-    drop-in replacement for the previous sqlite3.Row factory. psycopg3 is NOT
-    autocommit: a transaction opens on the first execute and stays open until
-    commit()/rollback() — matching the SQLite semantics advance() relies on.
-    """
+_RECONNECT_MAX_RETRIES = 3
+_RECONNECT_BACKOFF_BASE = 2.0  # seconds; waits 2s, then 4s between attempts
+
+# Connection-level errors that warrant a reconnect + retry.
+_CONN_ERROR_TYPES = (psycopg.OperationalError, psycopg.InterfaceError)
+
+
+def _raw_connect(dsn: str) -> psycopg.Connection:
+    """Open a bare psycopg3 connection (testable seam; do not call directly)."""
     return psycopg.connect(dsn, row_factory=dict_row)
 
 
-# --- DB reconnect -----------------------------------------------------------
+class ResilientConn:
+    """Auto-reconnecting wrapper around a synchronous psycopg Connection.
 
-_RECONNECT_MAX_RETRIES = 3
-_RECONNECT_BACKOFF_BASE = 2.0  # seconds; waits 2s then 4s between attempts
+    Returned by ``connect()``. All store functions receive this object as
+    ``conn``.  On a connection-level error (AdminShutdown, OperationalError,
+    InterfaceError) in ``execute()``, the wrapper reconnects ``_inner`` in-place
+    and retries the statement once — callers see neither the disconnect nor the
+    retry.
 
+    ``_inner`` is replaced on reconnect so every caller that holds a reference
+    to this wrapper automatically uses the new live connection.
 
-async def ensure_reconnected(conn, dsn: str):
-    """Return ``conn`` if live; reconnect with retries+backoff if closed.
-
-    Called at the top of every scheduled job AND interactive callbacks so a DB
-    restart (which sets conn.closed != 0 via psycopg's AdminShutdown handling)
-    is recovered automatically without a container restart.
-
-    Sends a WARNING to the ops channel on reconnect and a loud ERROR if all
-    retries fail (then re-raises so the caller also fails with a clear cause).
+    Public API matches the psycopg Connection subset used in this codebase:
+    ``execute()``, ``commit()``, ``rollback()``, ``close()``, ``closed``.
     """
-    import asyncio
+
+    def __init__(self, inner: psycopg.Connection, dsn: str) -> None:
+        self._inner = inner
+        self._dsn = dsn
+
+    # ------------------------------------------------------------------
+    # psycopg Connection proxy
+    # ------------------------------------------------------------------
+
+    @property
+    def closed(self) -> int:
+        return self._inner.closed
+
+    def execute(self, sql: str, params=None):
+        args: tuple = (sql,) if params is None else (sql, params)
+        try:
+            return self._inner.execute(*args)
+        except _CONN_ERROR_TYPES as exc:
+            print(
+                f"[db] connection error: {exc!r} — reconnecting...",
+                flush=True,
+            )
+            self._sync_reconnect()
+            return self._inner.execute(*args)
+
+    def commit(self) -> None:
+        self._inner.commit()
+
+    def rollback(self) -> None:
+        try:
+            self._inner.rollback()
+        except Exception:
+            pass  # if connection is already dead, rollback is moot
+
+    def close(self) -> None:
+        try:
+            self._inner.close()
+        except Exception:
+            pass
+
+    def cursor(self, *args, **kwargs):
+        return self._inner.cursor(*args, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Reconnect internals
+    # ------------------------------------------------------------------
+
+    def _sync_reconnect(self) -> None:
+        """Replace _inner with a fresh connection, synchronously, with backoff.
+
+        Prints to stdout (visible in ``docker logs``) on success or failure.
+        The async path (``ensure_reconnected``) additionally logs to the ops
+        Telegram channel.
+        """
+        import time as _t
+
+        last_exc: Exception | None = None
+        for attempt in range(1, _RECONNECT_MAX_RETRIES + 1):
+            try:
+                self._inner = _raw_connect(self._dsn)
+                print(
+                    f"[db] ⚠️ reconnected (attempt {attempt}/{_RECONNECT_MAX_RETRIES})",
+                    flush=True,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt < _RECONNECT_MAX_RETRIES:
+                    _t.sleep(_RECONNECT_BACKOFF_BASE ** attempt)
+
+        print(
+            f"[db] 🔴 DB reconnect failed after {_RECONNECT_MAX_RETRIES} attempts:"
+            f" {last_exc!r}",
+            flush=True,
+        )
+        raise last_exc  # type: ignore[misc]
+
+
+def connect(dsn: str) -> ResilientConn:
+    """Open a resilient psycopg3 connection from a DATABASE_URL.
+
+    Returns a ``ResilientConn`` that auto-reconnects on connection-level errors
+    so any DB restart (AdminShutdown from a parallel project) is transparent to
+    callers. ``row_factory=dict_row`` preserves ``row["col"]`` access throughout.
+
+    psycopg3 is NOT autocommit: a transaction opens on the first execute and
+    stays open until commit()/rollback() — matching the SQLite semantics
+    advance() relies on.
+    """
+    return ResilientConn(_raw_connect(dsn), dsn)
+
+
+async def ensure_reconnected(conn: ResilientConn, dsn: str) -> ResilientConn:
+    """Proactive pre-flight reconnect for scheduled jobs and interactive callbacks.
+
+    With ``ResilientConn`` in place, reactive reconnect happens automatically
+    on any ``execute()`` call. This function is an ADDITIONAL proactive check:
+    if ``conn.closed`` at the START of a job, reconnect immediately rather than
+    failing on the first DB call. Also sends an ops notification via tg_logger
+    (the only async touch-point).
+
+    Callers continue to do ``conn = await store.ensure_reconnected(conn, dsn)``
+    unchanged; the same ``ResilientConn`` object is returned (reconnected
+    in-place).
+    """
     from . import tg_logger
 
     if not conn.closed:
         return conn
 
-    last_exc: Exception | None = None
-    for attempt in range(1, _RECONNECT_MAX_RETRIES + 1):
-        try:
-            new_conn = connect(dsn)
-            await tg_logger.send_log(
-                f"⚠️ jobhunter: psycopg conn closed (DB restart?); "
-                f"reconnected on attempt {attempt}/{_RECONNECT_MAX_RETRIES}"
-            )
-            return new_conn
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
-            if attempt < _RECONNECT_MAX_RETRIES:
-                await asyncio.sleep(_RECONNECT_BACKOFF_BASE**attempt)
+    try:
+        conn._sync_reconnect()
+        await tg_logger.send_log(
+            "⚠️ jobhunter: proactive DB reconnect before scheduled job "
+            "(conn was closed — DB restart?)"
+        )
+    except Exception as exc:
+        await tg_logger.send_log(
+            f"🔴 jobhunter: proactive DB reconnect failed: {exc!r}"
+        )
+        raise
 
-    await tg_logger.send_log(
-        f"🔴 jobhunter: DB reconnect failed after {_RECONNECT_MAX_RETRIES} attempts: {last_exc!r}"
-    )
-    raise last_exc  # type: ignore[misc]
+    return conn
 
 
 def _split_statements(sql: str) -> List[str]:

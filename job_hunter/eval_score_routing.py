@@ -105,24 +105,8 @@ def main() -> int:
             item_id = row["id"]
             sonnet_score = int(round(float(row["relevance_score"])))
             state = row["state"]
-            in_corridor = CORRIDOR_LO <= sonnet_score <= CORRIDOR_HI
 
-            # reconnect if the DB dropped the connection mid-eval
-            if conn.closed:
-                print(f"[eval] connection closed — reconnecting...", flush=True)
-                conn = store.connect(cfg.database_url)
-
-            try:
-                item = store.get_item(conn, item_id)
-            except Exception as db_exc:
-                print(f"[eval] DB error on id={item_id}: {db_exc!r} — reconnecting...", flush=True)
-                try:
-                    conn = store.connect(cfg.database_url)
-                    item = store.get_item(conn, item_id)
-                except Exception as exc2:
-                    print(f"{item_id:>8}  ERROR (db): {exc2!r}")
-                    continue
-
+            item = store.get_item(conn, item_id)
             extracted = _load_extracted(item) if item else None
             if extracted is None:
                 print(f"{item_id:>8}  skip: no extracted_json")
@@ -139,7 +123,10 @@ def main() -> int:
                 continue
 
             diff = haiku_score - sonnet_score
-            in_corridor_any = CORRIDOR_LO <= sonnet_score <= CORRIDOR_HI or CORRIDOR_LO <= haiku_score <= CORRIDOR_HI
+            in_corridor_any = (
+                CORRIDOR_LO <= sonnet_score <= CORRIDOR_HI
+                or CORRIDOR_LO <= haiku_score <= CORRIDOR_HI
+            )
             results.append({
                 "id": item_id, "sonnet": sonnet_score,
                 "haiku": haiku_score, "diff": diff, "state": state,
@@ -153,7 +140,10 @@ def main() -> int:
                 flag = "  ← false-surface"
 
             corr_mark = "  *" if in_corridor_any else ""
-            print(f"{item_id:>8}  {sonnet_score:>7}  {haiku_score:>7}  {diff:>+6}  {str(in_corridor_any):>7}  {state}{flag}{corr_mark}")
+            print(
+                f"{item_id:>8}  {sonnet_score:>7}  {haiku_score:>7}  {diff:>+6}"
+                f"  {str(in_corridor_any):>7}  {state}{flag}{corr_mark}"
+            )
             time.sleep(THROTTLE_S)
     finally:
         conn.close()
