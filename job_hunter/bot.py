@@ -836,6 +836,7 @@ class JobHunterBot:
         from . import tg_logger
 
         exc = getattr(event, "exception", event)
+        print(f"[error] unhandled handler exception: {exc!r}", flush=True)
         await tg_logger.send_error_log(exc)
         return True
 
@@ -1034,6 +1035,7 @@ class JobHunterBot:
     async def handle_callback(self, cb) -> str:  # noqa: ANN001
         """Process an inline-button press: validate, advance, ack. Returns the
         result status string (also used by tests)."""
+        print(f"[callback] {cb.data!r}", flush=True)
         # Defense in depth: the outer middleware already gates updates, but
         # re-check here so the handler is safe even if invoked directly. Drop
         # silently (empty ack to stop the spinner) with NO business logic.
@@ -1052,6 +1054,11 @@ class JobHunterBot:
         if decision is None:
             await cb.answer("unknown action")
             return "unknown_action"
+
+        # Reconnect if the DB connection was killed between scheduled jobs.
+        # Mirrors the reconnect guard in the scheduled jobs (serve.py), covering
+        # the gap between daily harvests when the connection can die undetected.
+        self.conn = await store.ensure_reconnected(self.conn, self.cfg.database_url)
 
         result = pipeline.advance_by_id(self.conn, item_id, decision=decision, deps=self.deps)
 

@@ -1,4 +1,4 @@
-"""Unit tests for serve._ensure_reconnected (DB auto-reconnect on job startup).
+"""Unit tests for store.ensure_reconnected (DB auto-reconnect on job startup).
 
 Strategy: fake psycopg connections (closed/open flag), mock store.connect and
 tg_logger.send_log. No real Postgres needed.
@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from job_hunter import serve
+from job_hunter import store
 
 
 # ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ class _FakeConn:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -38,9 +38,9 @@ def test_ensure_reconnected_live_conn_is_noop(monkeypatch):
     """conn.closed == 0 → returned as-is; store.connect never called."""
     live = _FakeConn(closed=0)
     connect_calls = []
-    monkeypatch.setattr("job_hunter.serve.store.connect", lambda dsn: connect_calls.append(dsn) or _FakeConn())
+    monkeypatch.setattr("job_hunter.store.connect", lambda dsn: connect_calls.append(dsn) or _FakeConn())
 
-    result = _run(serve._ensure_reconnected(live, "postgresql://x"))
+    result = _run(store.ensure_reconnected(live, "postgresql://x"))
 
     assert result is live
     assert connect_calls == [], "store.connect must not be called for a live conn"
@@ -61,10 +61,10 @@ def test_ensure_reconnected_reconnects_closed_conn(monkeypatch):
     async def fake_send_log(text: str) -> None:
         sent_logs.append(text)
 
-    monkeypatch.setattr("job_hunter.serve.store.connect", lambda dsn: fresh)
+    monkeypatch.setattr("job_hunter.store.connect", lambda dsn: fresh)
     monkeypatch.setattr("job_hunter.tg_logger.send_log", fake_send_log)
 
-    result = _run(serve._ensure_reconnected(dead, "postgresql://testdsn"))
+    result = _run(store.ensure_reconnected(dead, "postgresql://testdsn"))
 
     assert result is fresh, "must return the new connection"
     assert len(sent_logs) == 1
@@ -92,15 +92,15 @@ def test_ensure_reconnected_retries_then_raises(monkeypatch):
     async def fake_send_log(text: str) -> None:
         sent_logs.append(text)
 
-    monkeypatch.setattr("job_hunter.serve.store.connect", failing_connect)
+    monkeypatch.setattr("job_hunter.store.connect", failing_connect)
     monkeypatch.setattr("job_hunter.tg_logger.send_log", fake_send_log)
-    monkeypatch.setattr("job_hunter.serve._RECONNECT_BACKOFF_BASE", 0.0)  # no sleep in tests
+    monkeypatch.setattr("job_hunter.store._RECONNECT_BACKOFF_BASE", 0.0)  # no sleep in tests
 
     with pytest.raises(OSError, match="connection refused"):
-        _run(serve._ensure_reconnected(dead, "postgresql://testdsn"))
+        _run(store.ensure_reconnected(dead, "postgresql://testdsn"))
 
-    assert len(connect_calls) == serve._RECONNECT_MAX_RETRIES, (
-        f"expected {serve._RECONNECT_MAX_RETRIES} attempts, got {len(connect_calls)}"
+    assert len(connect_calls) == store._RECONNECT_MAX_RETRIES, (
+        f"expected {store._RECONNECT_MAX_RETRIES} attempts, got {len(connect_calls)}"
     )
     assert any("🔴" in log or "failed" in log.lower() for log in sent_logs), (
         f"expected a loud error log; got: {sent_logs}"
@@ -124,7 +124,7 @@ def test_closure_nonlocal_rebind_shared_across_closures(monkeypatch):
     async def fake_send_log(text: str) -> None:
         sent_logs.append(text)
 
-    monkeypatch.setattr("job_hunter.serve.store.connect", lambda dsn: fresh)
+    monkeypatch.setattr("job_hunter.store.connect", lambda dsn: fresh)
     monkeypatch.setattr("job_hunter.tg_logger.send_log", fake_send_log)
 
     conn = dead  # shared cell in the enclosing scope
@@ -138,7 +138,7 @@ def test_closure_nonlocal_rebind_shared_across_closures(monkeypatch):
     async def closure_a() -> None:
         """Simulates _scheduled_harvest: reconnects and rebinds the shared cell."""
         nonlocal conn
-        conn = await serve._ensure_reconnected(conn, "postgresql://x")
+        conn = await store.ensure_reconnected(conn, "postgresql://x")
         bot.conn = conn
 
     async def closure_b() -> None:

@@ -72,6 +72,48 @@ def connect(dsn: str) -> psycopg.Connection:
     return psycopg.connect(dsn, row_factory=dict_row)
 
 
+# --- DB reconnect -----------------------------------------------------------
+
+_RECONNECT_MAX_RETRIES = 3
+_RECONNECT_BACKOFF_BASE = 2.0  # seconds; waits 2s then 4s between attempts
+
+
+async def ensure_reconnected(conn, dsn: str):
+    """Return ``conn`` if live; reconnect with retries+backoff if closed.
+
+    Called at the top of every scheduled job AND interactive callbacks so a DB
+    restart (which sets conn.closed != 0 via psycopg's AdminShutdown handling)
+    is recovered automatically without a container restart.
+
+    Sends a WARNING to the ops channel on reconnect and a loud ERROR if all
+    retries fail (then re-raises so the caller also fails with a clear cause).
+    """
+    import asyncio
+    from . import tg_logger
+
+    if not conn.closed:
+        return conn
+
+    last_exc: Exception | None = None
+    for attempt in range(1, _RECONNECT_MAX_RETRIES + 1):
+        try:
+            new_conn = connect(dsn)
+            await tg_logger.send_log(
+                f"⚠️ jobhunter: psycopg conn closed (DB restart?); "
+                f"reconnected on attempt {attempt}/{_RECONNECT_MAX_RETRIES}"
+            )
+            return new_conn
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < _RECONNECT_MAX_RETRIES:
+                await asyncio.sleep(_RECONNECT_BACKOFF_BASE**attempt)
+
+    await tg_logger.send_log(
+        f"🔴 jobhunter: DB reconnect failed after {_RECONNECT_MAX_RETRIES} attempts: {last_exc!r}"
+    )
+    raise last_exc  # type: ignore[misc]
+
+
 def _split_statements(sql: str) -> List[str]:
     """Split a DDL script into individual statements on ';'. PURE.
 

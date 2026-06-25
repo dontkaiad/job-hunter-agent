@@ -295,6 +295,39 @@ def test_button_non_allowlisted_is_fail_closed(conn, deps, monkeypatch):
     assert cb.message.markup_cleared is False
 
 
+def test_handle_callback_reconnects_closed_conn(monkeypatch, conn, deps):
+    """handle_callback calls store.ensure_reconnected when self.conn is closed.
+
+    Guards the interactive callback path against a dead DB connection (e.g.
+    after a Postgres restart between daily harvest runs), mirroring the guard
+    already in the scheduled-job closures in serve.py.
+    """
+    class _Dead:
+        closed = 1
+
+    dead = _Dead()
+    reconnect_calls = []
+
+    async def fake_ensure_reconnected(c, dsn):
+        reconnect_calls.append(c)
+        return conn  # hand back the real live conn so advance works
+
+    monkeypatch.setattr("job_hunter.store.ensure_reconnected", fake_ensure_reconnected)
+
+    item_id = _surface_item(conn, deps)
+    b = bot.JobHunterBot(_cfg(), conn, deps)
+    b.conn = dead  # inject dead connection after bot is constructed
+
+    cb = FakeCallback(bot.encode_callback("skip", item_id))
+    status = asyncio.run(b.handle_callback(cb))
+
+    assert reconnect_calls, "ensure_reconnected must be called when conn.closed != 0"
+    assert reconnect_calls[0] is dead, "must pass the closed conn to ensure_reconnected"
+    assert b.conn is conn, "bot.conn must be updated to the live conn after reconnect"
+    assert status == "moved"
+    assert store.get_item(conn, item_id).state == SKIPPED
+
+
 def test_finalize_card_falls_back_when_edit_text_raises(conn, deps):
     """When message.edit_text raises (non-editable message), _finalize_card
     must NOT raise and must fall back to stripping the keyboard."""
