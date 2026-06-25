@@ -176,13 +176,18 @@ def test_do_draft_passes_full_raw_text_to_llm(conn, deps, fake_llm):
     assert "UNIQUE_RAWTEXT_MARKER_T11" in draft_calls[-1]["user"]
 
 
-def test_sonnet_score_stored_with_reasoning(conn, fake_llm, fake_fx):
-    """T2 stores the Sonnet relevance_score AND the Обоснование rationale."""
+def test_score_stored_with_reasoning(conn, fake_llm, fake_fx):
+    """T2 stores the relevance_score AND the Обоснование rationale.
+
+    Score >= 60 → two LLM calls (Haiku score + Sonnet refine). The stored score
+    is Haiku's; the stored Обоснование is the Sonnet-refined text.
+    """
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    fake_llm.set_for(
-        "hiring-fit JUDGE",
+    # Two responses: Haiku (score 82, above threshold) → Sonnet refine.
+    fake_llm.responses = [
+        '{"relevance_score": 82, "Обоснование": "haiku: applied-LLM роль, remote"}',
         '{"relevance_score": 82, "Обоснование": "applied-LLM роль, remote"}',
-    )
+    ]
     item_id = _insert(conn, GOOD_POST)
     pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
     res = pipeline.advance_by_id(conn, item_id, deps=deps)  # score
@@ -191,20 +196,54 @@ def test_sonnet_score_stored_with_reasoning(conn, fake_llm, fake_fx):
     item = store.get_item(conn, item_id)
     assert item.relevance_score == 82.0
     blob = json.loads(item.extracted_json)
-    assert blob["Обоснование"] == "applied-LLM роль, remote"
+    assert blob["Обоснование"] == "applied-LLM роль, remote"  # Sonnet's text
 
 
-def test_score_routes_to_judge_model(conn, fake_llm, fake_fx):
-    """The relevance score call must request the JUDGE (Sonnet) model id."""
+def test_score_routes_haiku_only_below_threshold(conn, fake_llm, fake_fx):
+    """Score < 60: only the cheap (Haiku) model is called — Sonnet is NOT invoked."""
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 70, "Обоснование": "ok"}')
+    # Score 45 < SURFACE_THRESHOLD (60) → no Sonnet refinement.
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 45, "Обоснование": "weak fit"}')
     item_id = _insert(conn, GOOD_POST)
-    pipeline.advance_by_id(conn, item_id, deps=deps)  # extract (heuristic; no LLM call)
-    pipeline.advance_by_id(conn, item_id, deps=deps)  # score (Sonnet)
-    # Exactly one LLM call happened (the score); it used the judge model.
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # score
     score_calls = [c for c in fake_llm.calls if "hiring-fit JUDGE" in c["system"]]
-    assert len(score_calls) == 1
-    assert score_calls[0]["model"] == deps.judge_model
+    # Exactly ONE call — Haiku only; Sonnet was not invoked.
+    assert len(score_calls) == 1, f"expected 1 score call, got {len(score_calls)}"
+    assert score_calls[0]["model"] == deps.cheap_model
+
+
+def test_score_routes_haiku_then_sonnet_above_threshold(conn, fake_llm, fake_fx):
+    """Score >= 60: Haiku scores first, Sonnet refines the Обоснование.
+
+    The stored relevance_score must be Haiku's number (threshold stability).
+    The stored Обоснование must be Sonnet's text.
+    """
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+    # Haiku returns 75 (above threshold) → Sonnet refine pass is triggered.
+    # FakeLLM matches by system substring; both score calls share "hiring-fit JUDGE".
+    # Use the responses list so first call → haiku response, second → sonnet response.
+    fake_llm.responses = [
+        '{"relevance_score": 75, "Обоснование": "haiku: strong fit"}',
+        '{"relevance_score": 75, "Обоснование": "sonnet: strong fit — 75/100 ✅ LLM role"}',
+    ]
+    item_id = _insert(conn, GOOD_POST)
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # score
+
+    item = store.get_item(conn, item_id)
+    # Score is Haiku's (threshold-stable).
+    assert item.relevance_score == 75.0
+    # Reasoning is Sonnet's (quality).
+    blob = json.loads(item.extracted_json)
+    assert "sonnet" in blob["Обоснование"]
+
+    score_calls = [c for c in fake_llm.calls if "hiring-fit JUDGE" in c["system"]]
+    assert len(score_calls) == 2, f"expected 2 score calls (haiku + sonnet), got {len(score_calls)}"
+    assert score_calls[0]["model"] == deps.cheap_model, "first call must be Haiku"
+    assert score_calls[1]["model"] == deps.judge_model, "second call must be Sonnet"
+    # Second call user prompt contains the score anchor.
+    assert "75" in score_calls[1]["user"]
 
 
 def test_salary_guard_overrides_high_llm_score(conn, fake_llm, fake_fx):

@@ -834,6 +834,41 @@ def llm_score(
     return parse_score_response(text)
 
 
+def llm_score_refine(
+    client: LLMClient,
+    extracted: ExtractResult,
+    raw_text: str,
+    fixed_score: int,
+    model: str = JUDGE_MODEL,
+    profile: Optional[Profile] = None,
+) -> str:
+    """Write a quality Обоснование for a vacancy whose score is already fixed.
+
+    Second pass for vacancies that Haiku scored at/above SURFACE_THRESHOLD.
+    ``fixed_score`` (the Haiku score) is anchored in the prompt so the verdict
+    line Sonnet writes matches the stored number — no display inconsistency.
+
+    Returns the reasoning string only (the score is not re-evaluated).
+    """
+    system = build_score_system(profile) if profile is not None else SCORE_SYSTEM
+    anchor = (
+        f"\n\nIMPORTANT: The relevance_score for this vacancy is already "
+        f"determined as {fixed_score}. You MUST output "
+        f'"relevance_score": {fixed_score} in your JSON. '
+        f"Focus on writing a concise, accurate Обоснование that reflects "
+        f"a score of {fixed_score}/100."
+    )
+    text = client.complete(
+        system,
+        build_score_prompt(extracted, raw_text) + anchor,
+        max_tokens=SCORE_MAX_TOKENS,
+        model=model,
+        cache_system=should_cache_system(system, model),
+    )
+    result = parse_score_response(text)
+    return result.get("reasoning", "")
+
+
 def llm_research(
     client: LLMClient,
     extracted: ExtractResult,

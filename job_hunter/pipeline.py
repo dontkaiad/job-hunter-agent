@@ -26,7 +26,7 @@ from . import agents, scoring, store
 from .extract import extract as heuristic_extract
 from .extract import reconcile as reconcile_extract
 from .fx import FxRates
-from .llm import CHEAP_MODEL, JUDGE_MODEL, LLMClient, llm_extract, llm_score
+from .llm import CHEAP_MODEL, JUDGE_MODEL, LLMClient, llm_extract, llm_score, llm_score_refine
 from .profile import Profile, example_profile
 from .schema_extract import ExtractResult, from_dict, serialize
 from .scoring import passes_threshold
@@ -181,12 +181,14 @@ def _store_reasoning(extracted_json: str, reasoning: str) -> str:
 def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T2: extracted -> scored.
 
-    Routed judgment:
-      1) LENIENT deterministic prefilter drops only obvious non-jobs (score 0,
+    Cost-aware routing:
+      1) LENIENT deterministic prefilter drops obvious non-jobs (score 0,
          no LLM call for junk).
-      2) Survivors are scored by the Sonnet rubric judge (relevance_score +
-         Обоснование). The salary floor is NOT applied here — it is a separate
-         deterministic guard at T3/T4.
+      2) Haiku scores ALL surviving vacancies (cheap first pass: score +
+         Обоснование). Score is final here — Haiku's number drives T3/T4.
+      3) If score >= SURFACE_THRESHOLD: Sonnet rewrites the Обоснование only
+         (second pass for vacancies the operator will actually read). The stored
+         score stays at Haiku's value so the threshold crossing is stable.
     """
     extracted = _load_extracted(item)
     if extracted is None:
@@ -200,25 +202,44 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         used = "prefilter-drop"
     else:
         reasoning = ""
-        used = "sonnet"
+        used = "haiku"
         if deps.llm_client is not None:
             try:
+                # First pass: Haiku scores every vacancy (fast + cheap).
                 verdict = llm_score(
-                    deps.llm_client, extracted, raw, model=deps.judge_model,
+                    deps.llm_client, extracted, raw, model=deps.cheap_model,
                     profile=deps.profile,
                 )
                 score = scoring.clamp_score(verdict["score"])
                 reasoning = verdict.get("reasoning", "")
+
+                # Second pass: Sonnet rewrites the Обоснование for high-scorers.
+                # Score stays at Haiku's value; only the display text improves.
+                if score >= scoring.SURFACE_THRESHOLD:
+                    try:
+                        sonnet_reasoning = llm_score_refine(
+                            deps.llm_client, extracted, raw, score,
+                            model=deps.judge_model, profile=deps.profile,
+                        )
+                        if sonnet_reasoning:
+                            reasoning = sonnet_reasoning
+                            used = "haiku+sonnet"
+                    except Exception as exc:  # noqa: BLE001
+                        used = f"haiku+sonnet(err)"
+                        print(f"[score] id={item.id} sonnet refine failed: {exc!r}", flush=True)
+
             except Exception as exc:  # noqa: BLE001 - degrade, never crash T2
                 score = 0
                 reasoning = f"score failed ({exc}); defaulted low"
-                used = "sonnet(error)"
+                used = "haiku(error)"
         else:
             # No judge available: keep the item visible to a human rather than
             # silently rejecting. Score at the surface threshold (lenient).
             score = scoring.SURFACE_THRESHOLD
             reasoning = "no LLM judge configured; surfaced for manual review"
             used = "no-llm"
+
+    print(f"[score] id={item.id} score={score} used={used}", flush=True)
 
     extracted.relevance_score = float(score)
     extracted.reasons = [reasoning] if reasoning else []
