@@ -100,47 +100,63 @@ def main() -> int:
     client = AnthropicClient(api_key=cfg.anthropic_api_key, model=haiku_model)
     results = []
 
-    for row in rows:
-        item_id = row["id"]
-        sonnet_score = int(round(float(row["relevance_score"])))
-        state = row["state"]
-        in_corridor = CORRIDOR_LO <= sonnet_score <= CORRIDOR_HI
+    try:
+        for row in rows:
+            item_id = row["id"]
+            sonnet_score = int(round(float(row["relevance_score"])))
+            state = row["state"]
+            in_corridor = CORRIDOR_LO <= sonnet_score <= CORRIDOR_HI
 
-        item = store.get_item(conn, item_id)
-        extracted = _load_extracted(item) if item else None
-        if extracted is None:
-            print(f"{item_id:>8}  skip: no extracted_json")
-            continue
+            # reconnect if the DB dropped the connection mid-eval
+            if conn.closed:
+                print(f"[eval] connection closed — reconnecting...", flush=True)
+                conn = store.connect(cfg.database_url)
 
-        try:
-            verdict = llm_score(
-                client, extracted, item.raw_text or "",
-                model=haiku_model, profile=profile,
-            )
-            haiku_score = clamp_score(verdict["score"])
-        except Exception as exc:
-            print(f"{item_id:>8}  ERROR: {exc!r}")
-            continue
+            try:
+                item = store.get_item(conn, item_id)
+            except Exception as db_exc:
+                print(f"[eval] DB error on id={item_id}: {db_exc!r} — reconnecting...", flush=True)
+                try:
+                    conn = store.connect(cfg.database_url)
+                    item = store.get_item(conn, item_id)
+                except Exception as exc2:
+                    print(f"{item_id:>8}  ERROR (db): {exc2!r}")
+                    continue
 
-        diff = haiku_score - sonnet_score
-        in_corridor_any = CORRIDOR_LO <= sonnet_score <= CORRIDOR_HI or CORRIDOR_LO <= haiku_score <= CORRIDOR_HI
-        results.append({
-            "id": item_id, "sonnet": sonnet_score,
-            "haiku": haiku_score, "diff": diff, "state": state,
-            "in_corridor": in_corridor_any,
-        })
+            extracted = _load_extracted(item) if item else None
+            if extracted is None:
+                print(f"{item_id:>8}  skip: no extracted_json")
+                continue
 
-        flag = ""
-        if sonnet_score >= SURFACE_THRESHOLD and haiku_score < SURFACE_THRESHOLD:
-            flag = "  ← FALSE-REJECT"
-        elif sonnet_score < SURFACE_THRESHOLD and haiku_score >= SURFACE_THRESHOLD:
-            flag = "  ← false-surface"
+            try:
+                verdict = llm_score(
+                    client, extracted, item.raw_text or "",
+                    model=haiku_model, profile=profile,
+                )
+                haiku_score = clamp_score(verdict["score"])
+            except Exception as exc:
+                print(f"{item_id:>8}  ERROR: {exc!r}")
+                continue
 
-        corr_mark = "  *" if in_corridor_any else ""
-        print(f"{item_id:>8}  {sonnet_score:>7}  {haiku_score:>7}  {diff:>+6}  {str(in_corridor_any):>7}  {state}{flag}{corr_mark}")
-        time.sleep(THROTTLE_S)
+            diff = haiku_score - sonnet_score
+            in_corridor_any = CORRIDOR_LO <= sonnet_score <= CORRIDOR_HI or CORRIDOR_LO <= haiku_score <= CORRIDOR_HI
+            results.append({
+                "id": item_id, "sonnet": sonnet_score,
+                "haiku": haiku_score, "diff": diff, "state": state,
+                "in_corridor": in_corridor_any,
+            })
 
-    conn.close()
+            flag = ""
+            if sonnet_score >= SURFACE_THRESHOLD and haiku_score < SURFACE_THRESHOLD:
+                flag = "  ← FALSE-REJECT"
+            elif sonnet_score < SURFACE_THRESHOLD and haiku_score >= SURFACE_THRESHOLD:
+                flag = "  ← false-surface"
+
+            corr_mark = "  *" if in_corridor_any else ""
+            print(f"{item_id:>8}  {sonnet_score:>7}  {haiku_score:>7}  {diff:>+6}  {str(in_corridor_any):>7}  {state}{flag}{corr_mark}")
+            time.sleep(THROTTLE_S)
+    finally:
+        conn.close()
 
     if not results:
         print("\n[eval] No results produced.")
