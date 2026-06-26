@@ -872,12 +872,22 @@ def refresh_market_worth(
     config: Config = Depends(get_config),
     conn: psycopg.Connection = Depends(get_conn),
 ) -> dict:
-    """Recompute the salary benchmark from the pipeline DB (instant, zero API)."""
+    """Recompute the salary benchmark from the pipeline DB (instant, zero API).
+
+    Explicit user action — logs result to Telegram ops channel (degraded or not).
+    The GET endpoint is silent; only this POST endpoint sends ops notifications.
+    """
     from dataclasses import asdict
 
-    from .market_worth import get_or_refresh
+    from .market_worth import get_or_refresh, _log
 
     result = get_or_refresh(conn, config)
+    _log(
+        f"📊 market_worth (refresh): RU {result.ru_min}–{result.ru_max} ₽ "
+        f"(n={result.ru_sample_size}) | "
+        f"intl {result.intl_min}–{result.intl_max} {result.intl_currency} "
+        f"(n={result.intl_sample_size}) | degraded={result.degraded}"
+    )
     return asdict(result)
 
 
