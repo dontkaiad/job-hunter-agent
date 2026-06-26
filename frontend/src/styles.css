@@ -1210,55 +1210,21 @@ h1::before {
 
 /* ============================ MARKET WORTH ================================= */
 .market-worth-view .view-list {
-  max-width: 680px;
+  max-width: 960px;
 }
-.market-worth-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+.market-worth-view h1 {
   margin-bottom: 24px;
 }
-.market-worth-header h1 {
-  margin: 0;
-}
 
-/* Refresh button — same design language as .add-url-btn */
-.btn-refresh {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--teal-bri);
-  background: rgba(84, 199, 182, 0.08);
-  border: 1px solid var(--teal-dim);
-  border-radius: var(--radius);
-  padding: 8px 14px;
-  cursor: pointer;
-  transition: color 0.12s, background 0.12s, box-shadow 0.12s, border-color 0.12s;
+/* Two-column layout: pipeline stats left, benchmark aside right */
+.market-worth-layout {
+  display: grid;
+  grid-template-columns: 1fr 230px;
+  gap: 24px;
+  align-items: start;
 }
-.btn-refresh::before {
-  content: "▸ ";
-  color: var(--teal);
-}
-.btn-refresh:hover:not(:disabled) {
-  color: #03100d;
-  background: var(--teal);
-  border-color: var(--teal);
-  box-shadow: 0 0 16px rgba(84, 199, 182, 0.4);
-}
-.btn-refresh:hover:not(:disabled)::before {
-  color: #03100d;
-}
-.btn-refresh:disabled {
-  color: var(--ink-4);
-  background: transparent;
-  border-color: var(--line);
-  cursor: not-allowed;
-}
-.btn-refresh.loading::before {
-  content: "⏳ ";
+.market-worth-main {
+  min-width: 0;
 }
 
 .market-worth-warning {
@@ -1441,73 +1407,73 @@ h1::before {
   color: var(--teal-bri);
 }
 
-/* Static manual benchmark block */
+/* Static manual benchmark — compact right-column aside */
 .market-worth-benchmark {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--teal-dim);
+  border-left: 2px solid var(--teal-dim);
   border-radius: var(--radius);
-  padding: 18px 20px;
-  margin-bottom: 24px;
+  padding: 14px 16px;
+  position: sticky;
+  top: 20px;
 }
 .market-worth-benchmark-title {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--teal);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .market-worth-benchmark-subtitle {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--ink-4);
-  letter-spacing: 0.04em;
-  margin-bottom: 16px;
+  letter-spacing: 0.03em;
+  margin-bottom: 12px;
 }
 .market-worth-benchmark-rows {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 .market-worth-benchmark-row {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 7px;
 }
 .market-worth-benchmark-flag {
-  font-size: 18px;
-  line-height: 1.3;
+  font-size: 14px;
+  line-height: 1.4;
   flex-shrink: 0;
 }
 .market-worth-benchmark-range {
   font-family: var(--mono);
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--teal-bri);
   letter-spacing: -0.01em;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .market-worth-benchmark-note {
-  font-size: 12px;
+  font-size: 10.5px;
   color: var(--ink-3);
-  line-height: 1.5;
+  line-height: 1.45;
 }
 .market-worth-benchmark-sources {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10px;
   color: var(--ink-4);
-  line-height: 1.6;
+  line-height: 1.55;
   border-top: 1px solid var(--line-2);
-  padding-top: 12px;
-  margin-bottom: 8px;
+  padding-top: 10px;
+  margin-bottom: 6px;
 }
 .market-worth-benchmark-footer {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--ink-4);
-  letter-spacing: 0.03em;
   font-style: italic;
 }
 
@@ -1520,6 +1486,18 @@ h1::before {
   color: var(--teal);
 }
 
+@media (max-width: 700px) {
+  .market-worth-layout {
+    grid-template-columns: 1fr;
+  }
+  .market-worth-benchmark {
+    position: static;
+    order: 1;
+  }
+  .market-worth-main {
+    order: 0;
+  }
+}
 @media (max-width: 640px) {
   .market-worth-grid {
     grid-template-columns: 1fr;
