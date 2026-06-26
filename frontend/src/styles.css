@@ -1276,42 +1276,85 @@ h1::before {
 
 /* ============================ MARKET WORTH ================================= */
 .market-worth-view .view-list {
-  max-width: 760px;
+  max-width: 1100px;
 }
 .market-worth-view h1 {
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 
-/* Tab bar */
-.mw-tabs {
+/* Header row: title + n=X */
+.mw-header {
   display: flex;
-  gap: 2px;
-  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  gap: 14px;
   margin-bottom: 24px;
 }
-.mw-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  padding: 8px 16px;
+.mw-header-n {
   font-family: var(--mono);
   font-size: 11px;
-  letter-spacing: 0.06em;
+  color: var(--ink-4);
+  letter-spacing: 0.04em;
+}
+
+/* Outer layout: main grid + right sidebar */
+.mw-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+/* 2-column grid of analytics cards */
+.mw-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+/* Individual analytics card */
+.mw-block-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+
+/* Card title row */
+.mw-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.mw-card-title {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--ink-3);
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
 }
-.mw-tab:hover {
-  color: var(--ink-2);
+.mw-card-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-4);
 }
-.mw-tab--active {
-  color: var(--teal-bri);
-  border-bottom-color: var(--teal);
+
+/* Sample count note inside salary cards */
+.mw-sample-note {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  margin-top: 6px;
 }
-.mw-tab-panel {
-  min-height: 200px;
+
+/* Benchmark sidebar */
+.mw-sidebar-benchmark {
+  width: 210px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 20px;
 }
 
 /* Tab stubs / empty states */
@@ -1350,12 +1393,6 @@ h1::before {
   border-radius: var(--radius);
 }
 
-/* Benchmark inset — now lives inside the Зарплата tab */
-.market-worth-benchmark--inline {
-  margin-top: 28px;
-  border-top: 1px solid var(--line);
-  padding-top: 20px;
-}
 
 .market-worth-warning {
   font-family: var(--mono);
@@ -1722,6 +1759,19 @@ h1::before {
 }
 .profile-salary-val {
   color: var(--teal);
+}
+
+@media (max-width: 860px) {
+  .mw-layout {
+    flex-direction: column;
+  }
+  .mw-grid {
+    grid-template-columns: 1fr;
+  }
+  .mw-sidebar-benchmark {
+    width: 100%;
+    position: static;
+  }
 }
 
 @media (max-width: 640px) {
