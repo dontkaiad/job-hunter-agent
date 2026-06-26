@@ -76,6 +76,40 @@ export default function MarketWorthView() {
           </button>
         </div>
 
+        {/* Static manual-research benchmark — hardcoded, no API */}
+        <div className="market-worth-benchmark">
+          <div className="market-worth-benchmark-title">Ориентир по рынку</div>
+          <div className="market-worth-benchmark-subtitle">
+            applied AI / LLM engineer · middle · ресёрч 06.2026
+          </div>
+          <div className="market-worth-benchmark-rows">
+            <div className="market-worth-benchmark-row">
+              <span className="market-worth-benchmark-flag">🇷🇺</span>
+              <div>
+                <div className="market-worth-benchmark-range">200 000 – 300 000 ₽/мес</div>
+                <div className="market-worth-benchmark-note">
+                  Не соглашаться ниже 200к. Целиться в 250–300к — стек выше базового middle.
+                </div>
+              </div>
+            </div>
+            <div className="market-worth-benchmark-row">
+              <span className="market-worth-benchmark-flag">🌍</span>
+              <div>
+                <div className="market-worth-benchmark-range">$4 500 – 8 000 /мес · €4 000 – 7 000</div>
+                <div className="market-worth-benchmark-note">
+                  Реально метить в $5–7k. Топ-бэнды ($200k+) требуют fine-tuning/PyTorch — не твой путь сейчас.
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="market-worth-benchmark-sources">
+            Источники: enigmai.ru, vc.ru/ai, hirehi.ru, ayautomate.com, kore1.com, remotelytalents.com, lemon.io
+          </div>
+          <div className="market-worth-benchmark-footer">
+            Анализ актуален на 26.06.2026 · рекомендуется повторный анализ через LLM раз в 2–3 месяца
+          </div>
+        </div>
+
         {(loading || refreshing) && !data && (
           <div className="loading">Загрузка…</div>
         )}
