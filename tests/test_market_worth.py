@@ -345,4 +345,52 @@ def test_fmt_range_min_only():
 
 
 def test_fmt_range_none():
-    assert fmt_range(None, None, "EUR") == "—"
+    result = fmt_range(None, None, "EUR")
+    assert result == "нет данных"
+
+
+# ---------------------------------------------------------------------------
+# T12: _validate — null-data degraded checks
+# ---------------------------------------------------------------------------
+
+
+def test_validate_ru_null_degraded(tmp_path):
+    cfg = _cfg(tmp_path)
+    result = _make_result(ru_min=None, ru_max=None)
+    out = _validate(result, cfg)
+    assert out.degraded
+    assert "Russian salary data not found" in out.degraded_reason
+
+
+def test_validate_intl_null_degraded(tmp_path):
+    cfg = _cfg(tmp_path)
+    result = _make_result(intl_min=None, intl_max=None)
+    out = _validate(result, cfg)
+    assert out.degraded
+    assert "International salary data not found" in out.degraded_reason
+
+
+def test_validate_intl_max_null_degraded(tmp_path):
+    cfg = _cfg(tmp_path)
+    result = _make_result(intl_max=None)
+    out = _validate(result, cfg)
+    assert out.degraded
+    assert "upper bound not confirmed" in out.degraded_reason
+
+
+def test_validate_ru_max_null_degraded(tmp_path):
+    cfg = _cfg(tmp_path)
+    result = _make_result(ru_max=None)
+    out = _validate(result, cfg)
+    assert out.degraded
+    assert "upper bound not confirmed" in out.degraded_reason
+
+
+def test_validate_both_null_degraded(tmp_path):
+    """Both markets missing → both reasons accumulated."""
+    cfg = _cfg(tmp_path)
+    result = _make_result(ru_min=None, ru_max=None, intl_min=None, intl_max=None)
+    out = _validate(result, cfg)
+    assert out.degraded
+    assert "Russian" in out.degraded_reason
+    assert "International" in out.degraded_reason

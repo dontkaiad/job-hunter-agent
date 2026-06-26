@@ -122,36 +122,36 @@ def _extract_urls_from_text(text: str) -> list:
 
 def _build_extraction_prompt(research_text: str, detected_sources: list) -> str:
     sources_hint = (
-        f"\n\nSOURCES DETECTED IN TEXT (include ALL of these verbatim in sources[]):\n"
+        "\n\nSOURCES DETECTED IN TEXT — include ALL of these verbatim in sources[]:\n"
         + "\n".join(f"  - {s}" for s in detected_sources)
         if detected_sources else ""
     )
     return (
         "Extract salary benchmark data from the research text below.\n"
         "Return ONLY valid JSON, no markdown fences, no prose.\n\n"
-        "EXTRACTION RULES — follow strictly:\n"
-        "1. ru_min, ru_max: Russian salary in ₽/month, BOTH required integers.\n"
-        "   If text has only one RU value V, set min=round(V*0.70), max=round(V*1.35).\n"
-        "   If text has no Russian data at all, estimate for AI/LLM Engineer middle "
-        "grade Russia: min=150000, max=280000.\n"
-        "2. intl_min, intl_max: international remote salary in €/month (or $/month), "
-        "BOTH required integers.\n"
-        "   Same rule: if only one value V found, min=round(V*0.75), max=round(V*1.40).\n"
-        "   If no intl data: estimate for AI/LLM Engineer remote Europe: "
-        "min=3500, max=7000.\n"
-        "3. ru_currency: always \"RUB\".\n"
-        "4. intl_currency: \"EUR\" if euros mentioned or ambiguous, \"USD\" only if "
-        "dollars explicitly stated.\n"
-        "5. sources: use the detected sources list provided below. If the list is "
-        "empty, also scan the text for any URL (https://...) or site name (e.g. "
-        "hh.ru, glassdoor) and add those.\n"
-        "6. reasoning_short: 2-3 sentences summarising key findings and caveats.\n"
+        "EXTRACTION RULES — NO estimation or fabrication allowed:\n\n"
+        "ru_min, ru_max (Russian salary, ₽/month):\n"
+        "  - Text gives a range (e.g. '150 000–280 000 ₽') → extract both as integers.\n"
+        "  - Text gives one value → set ru_min to that value, ru_max to null.\n"
+        "  - Text gives no Russian salary data → set BOTH to null.\n"
+        "  - NEVER invent, estimate, or calculate a value not in the text.\n\n"
+        "intl_min, intl_max (international remote salary, €/month or $/month):\n"
+        "  - Same rules as above.\n"
+        "  - NEVER multiply or extrapolate a missing bound.\n\n"
+        "ru_currency: always \"RUB\".\n"
+        "intl_currency: \"EUR\" if euros mentioned or currency unclear, "
+        "\"USD\" only if dollars explicitly stated.\n\n"
+        "sources: include ALL entries from the detected-sources list below, "
+        "plus any other URLs or site names you see cited in the text.\n\n"
+        "reasoning_short: 2-3 sentences. If data for a market is missing or "
+        "incomplete, say so explicitly (e.g. 'Russian market data was not found "
+        "in the searched sources.').\n"
         f"{sources_hint}\n\n"
-        "JSON schema (fill ALL fields):\n"
+        "JSON schema — null is valid for missing salary bounds:\n"
         '{"ru_min": 150000, "ru_max": 280000, "ru_currency": "RUB", '
-        '"intl_min": 4000, "intl_max": 7000, "intl_currency": "EUR", '
+        '"intl_min": 4500, "intl_max": null, "intl_currency": "EUR", '
         '"sources": ["hh.ru", "glassdoor.com"], '
-        '"reasoning_short": "Middle AI engineers in Russia earn..."}\n\n'
+        '"reasoning_short": "..."}\n\n'
         "Research text:\n"
         + research_text
     )
@@ -260,7 +260,9 @@ def _validate(result: MarketWorthResult, cfg) -> MarketWorthResult:
     intl_floor = getattr(cfg, "market_worth_intl_min", DEFAULT_INTL_MIN_FLOOR)
     intl_ceil  = getattr(cfg, "market_worth_intl_max", DEFAULT_INTL_MAX_CEILING)
 
-    if result.ru_min is not None and result.ru_max is not None:
+    if result.ru_min is None and result.ru_max is None:
+        reasons.append("Russian salary data not found in research")
+    elif result.ru_min is not None and result.ru_max is not None:
         if result.ru_min > result.ru_max:
             reasons.append(f"ru_min ({result.ru_min}) > ru_max ({result.ru_max})")
         elif not (ru_floor <= result.ru_min and result.ru_max <= ru_ceil):
@@ -268,8 +270,12 @@ def _validate(result: MarketWorthResult, cfg) -> MarketWorthResult:
                 f"RU range {result.ru_min}–{result.ru_max} outside bounds "
                 f"[{ru_floor}, {ru_ceil}]"
             )
+    elif result.ru_max is None:
+        reasons.append("Russian salary upper bound not confirmed by sources")
 
-    if result.intl_min is not None and result.intl_max is not None:
+    if result.intl_min is None and result.intl_max is None:
+        reasons.append("International salary data not found in research")
+    elif result.intl_min is not None and result.intl_max is not None:
         if result.intl_min > result.intl_max:
             reasons.append(f"intl_min ({result.intl_min}) > intl_max ({result.intl_max})")
         elif not (intl_floor <= result.intl_min and result.intl_max <= intl_ceil):
@@ -277,6 +283,8 @@ def _validate(result: MarketWorthResult, cfg) -> MarketWorthResult:
                 f"intl range {result.intl_min}–{result.intl_max} outside bounds "
                 f"[{intl_floor}, {intl_ceil}]"
             )
+    elif result.intl_max is None:
+        reasons.append("International salary upper bound not confirmed by sources")
 
     if reasons:
         return replace(result, degraded=True, degraded_reason="; ".join(reasons))
@@ -434,10 +442,10 @@ def _log(msg: str) -> None:
 def fmt_range(mn, mx, currency: str, *, suffix: str = "/мес") -> str:
     """Format a salary range as a human-readable string."""
     if mn is None and mx is None:
-        return "—"
+        return "нет данных"
     sym = {"RUB": "₽", "EUR": "€", "USD": "$"}.get(currency, currency)
     if mn is not None and mx is not None:
         return f"{mn:,}–{mx:,} {sym}{suffix}".replace(",", " ")
     if mn is not None:
-        return f"от {mn:,} {sym}{suffix}".replace(",", " ")
+        return f"от {mn:,} {sym}{suffix} (потолок не найден)".replace(",", " ")
     return f"до {mx:,} {sym}{suffix}".replace(",", " ")

@@ -7,9 +7,9 @@ function fmtRange(min, max, currency) {
   const fmt = (n) =>
     n == null ? null : n.toLocaleString("ru-RU");
   if (min != null && max != null) return `${fmt(min)}–${fmt(max)} ${sym}/мес`;
-  if (min != null) return `от ${fmt(min)} ${sym}/мес`;
+  if (min != null) return `от ${fmt(min)} ${sym}/мес (потолок не найден)`;
   if (max != null) return `до ${fmt(max)} ${sym}/мес`;
-  return "—";
+  return "нет данных";
 }
 
 export default function MarketWorthView() {
