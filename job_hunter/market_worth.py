@@ -150,6 +150,10 @@ def _validate(result: MarketWorthResult, cfg) -> MarketWorthResult:
     """Return result with degraded=True if any sanity check fails."""
     reasons: list[str] = []
 
+    # sources presence is checked, but authenticity is not verified —
+    # relies on web_search grounding (the tool forces real fetches before the
+    # model writes). A model that ignores web results and invents citations
+    # would still pass this check; the only mitigation is the tool being enabled.
     if not result.sources:
         reasons.append("no sources returned — result may be hallucinated")
 
