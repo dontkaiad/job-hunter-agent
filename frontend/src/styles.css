@@ -1677,6 +1677,44 @@ h1::before {
   text-align: right;
 }
 
+/* Requirements tab */
+.req-relocation-card {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  background: var(--teal-deep);
+  border: 1px solid var(--teal-dim);
+  border-left: 3px solid var(--teal);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 28px;
+}
+.req-relocation-val {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--teal-bri);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.req-relocation-label {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+.req-relocation-abs {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-left: 4px;
+}
+.req-section {
+  margin-bottom: 28px;
+}
+.req-section:last-child {
+  margin-bottom: 0;
+}
+
 /* Compact salary under avatar in sidebar */
 .profile-salary-line {
   display: block;

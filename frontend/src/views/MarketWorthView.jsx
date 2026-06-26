@@ -196,18 +196,54 @@ function BenefitsTab({ ba }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tab: Требования (stub)
+// Tab: Требования
 // ---------------------------------------------------------------------------
 
-function RequirementsStub() {
+function RequirementsTab({ ra }) {
+  if (!ra) return <div className="tab-empty">Нет данных</div>;
+  const {
+    seniority_dist, remote_dist,
+    relocation_count, relocation_pct,
+    total_pool, vacancies_with_seniority,
+    small_sample, degraded_reason,
+  } = ra;
+
   return (
-    <div className="tab-stub">
-      <div className="tab-stub-label">Скоро</div>
-      <p className="tab-stub-text">
-        Грейд, формат работы, релокация — агрегация по полям
-        <code>seniority</code>, <code>remote</code>, <code>relocation</code>.
-      </p>
-    </div>
+    <>
+      {small_sample && <div className="market-worth-warning">{degraded_reason}</div>}
+
+      {/* Relocation highlight — shown first, prominent */}
+      <div className="req-relocation-card">
+        <div className="req-relocation-val">{relocation_pct}%</div>
+        <div className="req-relocation-label">
+          вакансий с релокацией
+          <span className="req-relocation-abs"> ({relocation_count} из {total_pool})</span>
+        </div>
+      </div>
+
+      {/* Seniority */}
+      <div className="req-section">
+        <FreqBlockHeader
+          title="Грейд"
+          n={vacancies_with_seniority}
+          pool={total_pool}
+        />
+        {seniority_dist.length === 0
+          ? <div className="stack-block-empty">Данных о грейде нет</div>
+          : <FreqList items={seniority_dist} nameKey="grade" pctKey="pct" countKey="count" />
+        }
+      </div>
+
+      {/* Work format */}
+      <div className="req-section">
+        <FreqBlockHeader
+          title="Формат работы"
+          n={total_pool}
+          pool={total_pool}
+        />
+        <FreqList items={remote_dist.filter(d => d.count > 0)} nameKey="label" pctKey="pct" countKey="count" />
+      </div>
+    </>
   );
 }
 
@@ -278,7 +314,7 @@ export default function MarketWorthView() {
               {activeTab === "Зарплата" && <SalaryTab data={data} />}
               {activeTab === "Стек" && <StackTab sa={data.stack_analytics} />}
               {activeTab === "Бенефиты" && <BenefitsTab ba={data.benefits_analytics} />}
-              {activeTab === "Требования" && <RequirementsStub />}
+              {activeTab === "Требования" && <RequirementsTab ra={data.requirements_analytics} />}
             </div>
           </>
         )}
