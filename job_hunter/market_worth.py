@@ -144,19 +144,39 @@ def _call_with_web_search(
     if not research_text:
         raise ValueError("web_search response contained no text block")
 
+    # Diagnostic: log what Sonnet actually produced (first 500 chars).
+    # Helps diagnose web_search availability issues or unexpected model output.
+    print(
+        f"[market_worth] research_text[:{min(500, len(research_text))}]="
+        f"{research_text[:500]!r}",
+        flush=True,
+    )
+
     # --- step 2: JSON extraction (cheap, deterministic) ---
+    # Use assistant prefill ("{") to guarantee Haiku starts its response with "{"
+    # and cannot produce a preamble like "Here is the JSON:". The prefilled "{"
+    # is prepended back onto the response before parsing.
     extraction_resp = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=1000,
-        messages=[{"role": "user", "content": _EXTRACTION_PROMPT + research_text}],
+        messages=[
+            {"role": "user", "content": _EXTRACTION_PROMPT + research_text},
+            {"role": "assistant", "content": "{"},
+        ],
     )
-    json_text = next(
+    continuation = next(
         (b.text for b in reversed(extraction_resp.content)
          if getattr(b, "type", None) == "text"),
         None,
     )
-    if not json_text:
+    if not continuation:
         raise ValueError("JSON extraction response contained no text block")
+    json_text = "{" + continuation  # restore the prefilled opening brace
+    print(
+        f"[market_worth] json_text[:{min(300, len(json_text))}]="
+        f"{json_text[:300]!r}",
+        flush=True,
+    )
     return json_text
 
 
