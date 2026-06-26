@@ -1230,17 +1230,6 @@ h1::before {
     margin-top: 4px;
   }
 
-  /* market-worth two-column collapses at 768px too */
-  .market-worth-layout {
-    grid-template-columns: 1fr;
-  }
-  .market-worth-benchmark {
-    position: static;
-    order: 1;
-  }
-  .market-worth-main {
-    order: 0;
-  }
   .market-worth-view .view-list {
     max-width: 100%;
   }
@@ -1287,21 +1276,85 @@ h1::before {
 
 /* ============================ MARKET WORTH ================================= */
 .market-worth-view .view-list {
-  max-width: 960px;
+  max-width: 760px;
 }
 .market-worth-view h1 {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
-/* Two-column layout: pipeline stats left, benchmark aside right */
-.market-worth-layout {
-  display: grid;
-  grid-template-columns: 1fr 230px;
-  gap: 24px;
-  align-items: start;
+/* Tab bar */
+.mw-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
 }
-.market-worth-main {
-  min-width: 0;
+.mw-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.mw-tab:hover {
+  color: var(--ink-2);
+}
+.mw-tab--active {
+  color: var(--teal-bri);
+  border-bottom-color: var(--teal);
+}
+.mw-tab-panel {
+  min-height: 200px;
+}
+
+/* Tab stubs / empty states */
+.tab-empty {
+  font-size: 13px;
+  color: var(--ink-3);
+  padding: 32px 0;
+}
+.tab-stub {
+  padding: 32px 0;
+}
+.tab-stub-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: inline-block;
+  padding: 3px 8px;
+  margin-bottom: 12px;
+}
+.tab-stub-text {
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1.6;
+  margin: 0;
+}
+.tab-stub-text code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  background: var(--panel-2);
+  padding: 1px 5px;
+  border-radius: var(--radius);
+}
+
+/* Benchmark inset — now lives inside the Зарплата tab */
+.market-worth-benchmark--inline {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
 }
 
 .market-worth-warning {
@@ -1484,15 +1537,13 @@ h1::before {
   color: var(--teal-bri);
 }
 
-/* Static manual benchmark — compact right-column aside */
+/* Static manual benchmark */
 .market-worth-benchmark {
   background: var(--panel);
   border: 1px solid var(--line);
   border-left: 2px solid var(--teal-dim);
   border-radius: var(--radius);
   padding: 14px 16px;
-  position: sticky;
-  top: 20px;
 }
 .market-worth-benchmark-title {
   font-family: var(--mono);

@@ -863,10 +863,16 @@ def get_market_worth(
 
     from .market_worth import get_or_refresh
     from .stack_analytics import compute_from_pipeline as compute_stack
+    from .benefits_analytics import compute_from_pipeline as compute_benefits
 
     result = get_or_refresh(conn, config)
     stack = compute_stack(conn, config)
-    return {**asdict(result), "stack_analytics": asdict(stack)}
+    benefits = compute_benefits(conn, config)
+    return {
+        **asdict(result),
+        "stack_analytics": asdict(stack),
+        "benefits_analytics": asdict(benefits),
+    }
 
 
 @writer_router.post("/market-worth/refresh")
@@ -874,7 +880,7 @@ def refresh_market_worth(
     config: Config = Depends(get_config),
     conn: psycopg.Connection = Depends(get_conn),
 ) -> dict:
-    """Recompute salary benchmark + stack analytics from the pipeline DB (instant, zero API).
+    """Recompute salary benchmark + stack + benefits analytics (instant, zero API).
 
     Explicit user action — logs salary result to Telegram ops channel.
     The GET endpoint is silent; only this POST endpoint sends ops notifications.
@@ -883,17 +889,24 @@ def refresh_market_worth(
 
     from .market_worth import get_or_refresh, _log
     from .stack_analytics import compute_from_pipeline as compute_stack
+    from .benefits_analytics import compute_from_pipeline as compute_benefits
 
     result = get_or_refresh(conn, config)
     stack = compute_stack(conn, config)
+    benefits = compute_benefits(conn, config)
     _log(
         f"📊 market_worth (refresh): RU {result.ru_min}–{result.ru_max} ₽ "
         f"(n={result.ru_sample_size}) | "
         f"intl {result.intl_min}–{result.intl_max} {result.intl_currency} "
         f"(n={result.intl_sample_size}) | degraded={result.degraded} | "
-        f"stack pool={stack.total_pool} tech={len(stack.tech_freq)}"
+        f"stack pool={stack.total_pool} tech={len(stack.tech_freq)} | "
+        f"benefits pool={benefits.total_pool} types={len(benefits.benefits_freq)}"
     )
-    return {**asdict(result), "stack_analytics": asdict(stack)}
+    return {
+        **asdict(result),
+        "stack_analytics": asdict(stack),
+        "benefits_analytics": asdict(benefits),
+    }
 
 
 # --- Public auth routes (issue #5): NOT gated -------------------------------
