@@ -843,6 +843,68 @@ def add_item(
     )
 
 
+# --- Market Worth endpoints --------------------------------------------------
+#
+# GET  /api/market-worth   — return cached result (fresh or stale-with-flag).
+#                            404 if no cache exists at all.
+# POST /api/market-worth/refresh — force web-search refresh, return new result.
+#                            Slow (~10-30s); runs synchronously in a thread
+#                            (FastAPI wraps sync routes automatically).
+
+
+def _get_profile():
+    """Load the candidate profile (local real profile if present, else example)."""
+    from .profile import load_profile
+
+    return load_profile()
+
+
+@router.get("/market-worth")
+def get_market_worth(
+    config: Config = Depends(get_config),
+) -> dict:
+    """Return the cached MarketWorthResult as JSON.
+
+    Returns 200 with the cached data (which may be stale or degraded).
+    Returns 404 when no cache file exists yet (first run before any refresh).
+    """
+    from .market_worth import age_days, is_stale, load_cache
+
+    result = load_cache(config.market_worth_cache_path)
+    if result is None:
+        raise HTTPException(status_code=404, detail="no market worth data yet — run refresh")
+
+    from dataclasses import asdict
+
+    data = asdict(result)
+    data["age_days"] = age_days(result)
+    data["stale"] = is_stale(result, config.market_worth_cache_days)
+    return data
+
+
+@writer_router.post("/market-worth/refresh")
+def refresh_market_worth(
+    config: Config = Depends(get_config),
+) -> dict:
+    """Force a web-search refresh of the salary benchmark.
+
+    Slow endpoint (~10-30s) — calls Anthropic with the web_search tool.
+    Returns the new MarketWorthResult as JSON.
+    """
+    from dataclasses import asdict
+
+    from .market_worth import age_days, get_or_refresh, is_stale
+    from .profile import load_profile
+
+    profile = load_profile()
+    result = get_or_refresh(config, profile, force=True)
+
+    data = asdict(result)
+    data["age_days"] = age_days(result)
+    data["stale"] = is_stale(result, config.market_worth_cache_days)
+    return data
+
+
 # --- Public auth routes (issue #5): NOT gated -------------------------------
 #
 # These three routes are the login flow and MUST be reachable without a session.

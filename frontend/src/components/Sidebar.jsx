@@ -53,8 +53,9 @@ export default function Sidebar() {
         <div className="profile-id">
           <div className="profile-name">{profileName}</div>
           <div className="profile-role">{profileRole}</div>
-          {/* PLACEHOLDER: market-salary widget is a later pass. */}
-          <div className="profile-salary">Зп по рынку: — (скоро)</div>
+          <NavLink to="/market-worth" className="profile-salary">
+            Анализ рынка →
+          </NavLink>
         </div>
       </section>
 
@@ -68,10 +69,9 @@ export default function Sidebar() {
         <NavLink to="/competencies" className="nav-link">
           Компетенции
         </NavLink>
-        {/* DISABLED: market analysis is not built yet. */}
-        <span className="nav-link nav-disabled" aria-disabled="true">
-          Анализ рынка <em>(скоро)</em>
-        </span>
+        <NavLink to="/market-worth" className="nav-link">
+          Анализ рынка
+        </NavLink>
       </nav>
 
       <Filters

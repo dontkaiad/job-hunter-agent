@@ -90,6 +90,18 @@ export const api = {
     return request(`/api/items/${id}/${action}`, { method: "POST" });
   },
 
+  // Market Worth: GET /api/market-worth and POST /api/market-worth/refresh.
+  // GET returns cached data (may include stale=true/degraded=true).
+  // 404 means no cache exists yet (show "no data" state).
+  // POST forces a web-search refresh (~10-30s); returns the new data.
+  getMarketWorth() {
+    return request("/api/market-worth");
+  },
+
+  refreshMarketWorth() {
+    return request("/api/market-worth/refresh", { method: "POST" });
+  },
+
   // Add a vacancy by URL. Returns { item_id, state, score, duplicate }.
   // duplicate=true => the URL is already in the pipeline (no new card created).
   // A 422 ApiError is thrown for an invalid or unreadable URL (detail carries

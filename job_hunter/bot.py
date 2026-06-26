@@ -523,6 +523,32 @@ def render_borderline(items: List[store.WorkItem]) -> str:
     return "\n".join(blocks)
 
 
+def _render_worth(result, age: int) -> str:
+    """Render a MarketWorthResult as a Telegram-ready text block. PURE."""
+    from .market_worth import fmt_range
+
+    ru   = fmt_range(result.ru_min, result.ru_max, result.ru_currency)
+    intl = fmt_range(result.intl_min, result.intl_max, result.intl_currency)
+
+    lines = [
+        "📊 <b>Зарплата по рынку</b>",
+        "",
+        f"🇷🇺 Россия:       {ru}",
+        f"🌍 Международный: {intl}",
+        "",
+        result.reasoning_short,
+    ]
+    if result.sources:
+        lines += ["", "<b>Источники:</b>"]
+        for s in result.sources[:5]:
+            lines.append(f"  • {s}")
+    freshness = f"обновлено {age} д. назад" if age > 0 else "обновлено сегодня"
+    if result.degraded:
+        freshness += f" | ⚠️ {result.degraded_reason}"
+    lines += ["", f"<i>{freshness}</i>"]
+    return "\n".join(lines)
+
+
 def render_draft(item: store.WorkItem) -> str:
     """Render a drafted item (with the generated message) for review. PURE."""
     try:
@@ -765,6 +791,11 @@ class JobHunterBot:
         async def on_borderline(message: Message) -> None:  # noqa: ANN001
             await self.handle_borderline(message)
 
+        # Market Worth: /worth or /worth refresh
+        @self._dp.message(Command("worth"))
+        async def on_worth(message: Message) -> None:  # noqa: ANN001
+            await self.handle_worth(message)
+
         # Add-a-vacancy-by-URL: any text message carrying an http(s) link is run
         # through the SAME add-by-URL flow as the dashboard input, then routed by
         # score band. Registered AFTER the /borderline command so the command
@@ -881,6 +912,45 @@ class JobHunterBot:
             text,
             link_preview_options=_no_preview(),
         )
+
+    async def handle_worth(self, message) -> None:  # noqa: ANN001
+        """/worth [refresh] — show (or force-refresh) the market salary benchmark.
+
+        /worth          → return cached result, or refresh if no cache exists.
+        /worth refresh  → force a web-search refresh regardless of cache age.
+
+        The refresh call is slow (~10-30 s); bot sends a "loading…" message
+        first and edits it with the result when the search completes.
+        """
+        from .market_worth import age_days, fmt_range, get_or_refresh, is_stale, load_cache
+        from .profile import load_profile
+
+        text = getattr(message, "text", "") or ""
+        force = text.strip().lower().endswith("refresh")
+
+        profile = load_profile()
+
+        if not force:
+            cached = load_cache(self.cfg.market_worth_cache_path)
+            if cached is not None and not is_stale(cached, self.cfg.market_worth_cache_days):
+                await message.answer(
+                    _render_worth(cached, age_days(cached)),
+                    parse_mode="HTML",
+                    link_preview_options=_no_preview(),
+                )
+                return
+
+        sent = await message.answer("⏳ Ищу данные по рынку…")
+        try:
+            import asyncio as _asyncio
+            result = await _asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: get_or_refresh(self.cfg, profile, force=True),
+            )
+            reply = _render_worth(result, age_days(result))
+        except Exception as exc:
+            reply = f"⚠️ Не удалось получить данные о рынке: {exc}"
+        await sent.edit_text(reply, parse_mode="HTML")
 
     async def handle_url_message(self, message) -> None:  # noqa: ANN001
         """Accept a pasted vacancy URL and run the SHARED add-by-URL flow.

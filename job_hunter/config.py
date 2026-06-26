@@ -121,6 +121,20 @@ class Config:
     # Results per geo per fetch (Jobicy caps at 50).
     jobicy_count: int = 50
 
+    # --- Market Worth: web-grounded salary benchmark (web_search model) ---
+    # Model used for the market-worth web-search call. Must support the
+    # web_search_20250305 tool (Claude Sonnet+). DeepSeek excluded (no web search).
+    market_model: str = "claude-sonnet-4-6"
+    # Local JSON file for the cached MarketWorthResult. Relative to CWD.
+    market_worth_cache_path: str = "market_worth_cache.json"
+    # Number of days before the cache is considered stale and re-fetched.
+    market_worth_cache_days: int = 14
+    # Sanity-check bounds: values outside these ranges mark the result degraded.
+    market_worth_ru_min: int = 50_000
+    market_worth_ru_max: int = 700_000
+    market_worth_intl_min: int = 1_000
+    market_worth_intl_max: int = 15_000
+
     # FX
     fx_provider: str = "frankfurter"
     fx_cache_ttl: int = 86400
@@ -197,6 +211,13 @@ def load_config(env: Optional[dict] = None) -> Config:
         superuser_tg_ids=_split_int_set(get("SUPERUSER_TG_IDS")),
         auth_database_url=get("AUTH_DATABASE_URL"),
         dashboard_public_url=get("DASHBOARD_PUBLIC_URL"),
+        market_model=get("MARKET_MODEL") or "claude-sonnet-4-6",
+        market_worth_cache_path=get("MARKET_WORTH_CACHE_PATH") or "market_worth_cache.json",
+        market_worth_cache_days=_int_or_none(get("MARKET_WORTH_CACHE_DAYS")) or 14,
+        market_worth_ru_min=_int_or_none(get("MARKET_WORTH_RU_MIN")) or 50_000,
+        market_worth_ru_max=_int_or_none(get("MARKET_WORTH_RU_MAX")) or 700_000,
+        market_worth_intl_min=_int_or_none(get("MARKET_WORTH_INTL_MIN")) or 1_000,
+        market_worth_intl_max=_int_or_none(get("MARKET_WORTH_INTL_MAX")) or 15_000,
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,
         new_channel_lookback_days=_int_or_none(get("NEW_CHANNEL_LOOKBACK_DAYS")) or 14,

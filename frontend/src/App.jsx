@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import PipelineView from "./views/PipelineView.jsx";
 import BorderlineView from "./views/BorderlineView.jsx";
 import CompetenciesView from "./views/CompetenciesView.jsx";
+import MarketWorthView from "./views/MarketWorthView.jsx";
 import { FiltersProvider } from "./state/FiltersContext.jsx";
 
 // Top-level shell: a persistent left sidebar + the routed main area. React
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/borderline" element={<BorderlineView />} />
           <Route path="/borderline/item/:id" element={<BorderlineView />} />
           <Route path="/competencies" element={<CompetenciesView />} />
+          <Route path="/market-worth" element={<MarketWorthView />} />
           <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
