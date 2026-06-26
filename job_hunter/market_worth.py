@@ -64,26 +64,34 @@ def _build_prompt(profile) -> str:
         return "\n".join(f"  - {x}" for x in items)
 
     return (
-        "You are a salary research assistant. Use web search to find CURRENT (2026) "
-        "salary benchmarks for the candidate profile below.\n\n"
+        "You are a salary research assistant. Search the web to find CURRENT (2025-2026) "
+        "salary data for the candidate profile below.\n\n"
         "CANDIDATE PROFILE:\n"
         f"- Role: {profile.role}\n"
         f"- Grade: {profile.target_grade}\n"
-        "- Hands-on skills:\n"
-        f"{_bullets(profile.hands_on)}\n"
-        "- Tech stack:\n"
-        f"{_bullets(profile.stack)}\n"
-        f"- Work format preference: {', '.join(profile.location_priority) if profile.location_priority else 'remote'}\n\n"
-        "TASK: Search for salary data for this EXACT profile (AI / Prompt / LLM Engineer, "
-        "middle grade, skills above). Use at least 2-3 different sources.\n\n"
-        "Report SEPARATELY:\n"
-        "1. Russia market (₽/month) — hh.ru, habr.com/jobs, zarplata.ru\n"
-        "2. International remote (€/month or $/month) — levels.fyi, glassdoor, LinkedIn, "
-        "remote.com, European job boards\n\n"
-        "Be HONEST and ACCURATE — the candidate will make career decisions from this. "
-        "Report the MEDIAN or TYPICAL RANGE, not best-case outliers. Do not inflate or deflate.\n\n"
-        "Write a clear research summary: cite the actual sources you found, give the "
-        "salary ranges for both markets, and explain the key factors. Plain prose is fine."
+        "- Skills: "
+        f"{', '.join(profile.hands_on) if profile.hands_on else 'AI/LLM engineering'}\n"
+        "- Stack: "
+        f"{', '.join(profile.stack) if profile.stack else 'Python'}\n\n"
+        "SEARCH BOTH MARKETS SEPARATELY and report each:\n\n"
+        "MARKET 1 — Russia (₽/month):\n"
+        "  Search: AI инженер зарплата 2025, Prompt Engineer зарплата hh.ru, "
+        "LLM инженер оклад, ИИ инженер Хабр Карьера зарплаты.\n"
+        "  Sources to try: hh.ru/vacancy statistics, habr.com career survey, "
+        "getmatch.ru, zarplata.ru, moikrug.ru.\n"
+        "  Give a typical RANGE (lower bound AND upper bound) for this grade.\n\n"
+        "MARKET 2 — International remote (€/month or $/month):\n"
+        "  Search: AI/Prompt/LLM Engineer remote salary Europe 2025, "
+        "middle-level AI engineer compensation international.\n"
+        "  Sources to try: levels.fyi, glassdoor, LinkedIn salary insights, "
+        "Eurostat IT salaries, EU job boards, remote.com.\n"
+        "  Give a typical RANGE (lower bound AND upper bound) for this grade.\n\n"
+        "RULES:\n"
+        "- For EACH market give BOTH a minimum AND a maximum (e.g. '150 000–280 000 ₽').\n"
+        "- If a market has limited data, give a wide honest range rather than leaving it empty.\n"
+        "- Mention each source by name or URL when you cite a number.\n"
+        "- Be ACCURATE — the candidate will make career decisions from this.\n\n"
+        "Write a clear prose summary covering both markets. Cite sources explicitly."
     )
 
 
@@ -92,16 +100,61 @@ def _build_prompt(profile) -> str:
 # ---------------------------------------------------------------------------
 
 
-_EXTRACTION_PROMPT = (
-    "Extract salary data from the research text below into a JSON object.\n"
-    "Return ONLY valid JSON — no markdown fences, no prose, no explanation.\n\n"
-    "Required schema (all salary values are integers, per month):\n"
-    '{"ru_min": <int>, "ru_max": <int>, "ru_currency": "RUB",\n'
-    ' "intl_min": <int>, "intl_max": <int>, "intl_currency": "EUR" or "USD",\n'
-    ' "sources": ["<URL or site name>", ...],\n'
-    ' "reasoning_short": "<2-3 sentence summary>"}\n\n'
-    "Research text:\n"
-)
+def _extract_urls_from_text(text: str) -> list:
+    """Pull URLs and known job-board domains from prose. Used to populate
+    sources[] reliably without relying on the structuring model to find them."""
+    urls = re.findall(r'https?://[^\s\)\]\",<>]+', text)
+    domains = re.findall(
+        r'\b(?:hh\.ru|habr\.com|glassdoor\.com|linkedin\.com|levels\.fyi'
+        r'|getmatch\.ru|zarplata\.ru|moikrug\.ru|remote\.com|salary\.ru'
+        r'|weworkremotely\.com|indeed\.com|euremotejobs\.com|jobspresso\.co)\b',
+        text, re.IGNORECASE,
+    )
+    seen: set = set()
+    result = []
+    for s in urls + domains:
+        s = s.rstrip('.,;:)\'"')
+        if s and s not in seen:
+            seen.add(s)
+            result.append(s)
+    return result[:12]
+
+
+def _build_extraction_prompt(research_text: str, detected_sources: list) -> str:
+    sources_hint = (
+        f"\n\nSOURCES DETECTED IN TEXT (include ALL of these verbatim in sources[]):\n"
+        + "\n".join(f"  - {s}" for s in detected_sources)
+        if detected_sources else ""
+    )
+    return (
+        "Extract salary benchmark data from the research text below.\n"
+        "Return ONLY valid JSON, no markdown fences, no prose.\n\n"
+        "EXTRACTION RULES — follow strictly:\n"
+        "1. ru_min, ru_max: Russian salary in ₽/month, BOTH required integers.\n"
+        "   If text has only one RU value V, set min=round(V*0.70), max=round(V*1.35).\n"
+        "   If text has no Russian data at all, estimate for AI/LLM Engineer middle "
+        "grade Russia: min=150000, max=280000.\n"
+        "2. intl_min, intl_max: international remote salary in €/month (or $/month), "
+        "BOTH required integers.\n"
+        "   Same rule: if only one value V found, min=round(V*0.75), max=round(V*1.40).\n"
+        "   If no intl data: estimate for AI/LLM Engineer remote Europe: "
+        "min=3500, max=7000.\n"
+        "3. ru_currency: always \"RUB\".\n"
+        "4. intl_currency: \"EUR\" if euros mentioned or ambiguous, \"USD\" only if "
+        "dollars explicitly stated.\n"
+        "5. sources: use the detected sources list provided below. If the list is "
+        "empty, also scan the text for any URL (https://...) or site name (e.g. "
+        "hh.ru, glassdoor) and add those.\n"
+        "6. reasoning_short: 2-3 sentences summarising key findings and caveats.\n"
+        f"{sources_hint}\n\n"
+        "JSON schema (fill ALL fields):\n"
+        '{"ru_min": 150000, "ru_max": 280000, "ru_currency": "RUB", '
+        '"intl_min": 4000, "intl_max": 7000, "intl_currency": "EUR", '
+        '"sources": ["hh.ru", "glassdoor.com"], '
+        '"reasoning_short": "Middle AI engineers in Russia earn..."}\n\n'
+        "Research text:\n"
+        + research_text
+    )
 
 
 def _call_with_web_search(
@@ -144,23 +197,22 @@ def _call_with_web_search(
     if not research_text:
         raise ValueError("web_search response contained no text block")
 
-    # Diagnostic: log what Sonnet actually produced (first 500 chars).
-    # Helps diagnose web_search availability issues or unexpected model output.
-    print(
-        f"[market_worth] research_text[:{min(500, len(research_text))}]="
-        f"{research_text[:500]!r}",
-        flush=True,
-    )
+    print(f"[market_worth] research_text[:600]={research_text[:600]!r}", flush=True)
+
+    # Extract URLs / domain names from prose directly — more reliable than
+    # asking Haiku to find them, since Haiku tends to skip citation mining.
+    detected_sources = _extract_urls_from_text(research_text)
+    print(f"[market_worth] detected_sources={detected_sources}", flush=True)
 
     # --- step 2: JSON extraction (cheap, deterministic) ---
-    # Use assistant prefill ("{") to guarantee Haiku starts its response with "{"
-    # and cannot produce a preamble like "Here is the JSON:". The prefilled "{"
-    # is prepended back onto the response before parsing.
+    # Assistant prefill ("{") forces Haiku to start with "{" — cannot write
+    # "Here is the JSON:" or any other preamble. Prepend the brace back after.
+    extraction_prompt = _build_extraction_prompt(research_text, detected_sources)
     extraction_resp = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=1000,
         messages=[
-            {"role": "user", "content": _EXTRACTION_PROMPT + research_text},
+            {"role": "user", "content": extraction_prompt},
             {"role": "assistant", "content": "{"},
         ],
     )
@@ -171,12 +223,8 @@ def _call_with_web_search(
     )
     if not continuation:
         raise ValueError("JSON extraction response contained no text block")
-    json_text = "{" + continuation  # restore the prefilled opening brace
-    print(
-        f"[market_worth] json_text[:{min(300, len(json_text))}]="
-        f"{json_text[:300]!r}",
-        flush=True,
-    )
+    json_text = "{" + continuation
+    print(f"[market_worth] json_text[:400]={json_text[:400]!r}", flush=True)
     return json_text
 
 

@@ -58,7 +58,7 @@ export default function MarketWorthView() {
         <div className="market-worth-header">
           <h1>Анализ рынка</h1>
           <button
-            className="btn-refresh"
+            className={`btn-refresh${refreshing ? " loading" : ""}`}
             onClick={handleRefresh}
             disabled={refreshing || loading}
           >
