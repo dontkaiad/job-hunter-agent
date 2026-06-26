@@ -82,23 +82,26 @@ def _build_prompt(profile) -> str:
         "remote.com, European job boards\n\n"
         "Be HONEST and ACCURATE — the candidate will make career decisions from this. "
         "Report the MEDIAN or TYPICAL RANGE, not best-case outliers. Do not inflate or deflate.\n\n"
-        "Return ONLY a JSON object with this exact schema (no prose before or after):\n"
-        "{\n"
-        '  "ru_min": <int ₽/month lower>,\n'
-        '  "ru_max": <int ₽/month upper>,\n'
-        '  "ru_currency": "RUB",\n'
-        '  "intl_min": <int €/$/month lower>,\n'
-        '  "intl_max": <int €/$/month upper>,\n'
-        '  "intl_currency": "EUR" or "USD",\n'
-        '  "sources": ["<URL or \'Site: article title\'>", ...],\n'
-        '  "reasoning_short": "<2-3 sentence summary of key findings>"\n'
-        "}"
+        "Write a clear research summary: cite the actual sources you found, give the "
+        "salary ranges for both markets, and explain the key factors. Plain prose is fine."
     )
 
 
 # ---------------------------------------------------------------------------
 # Web-search call (Anthropic tool_use)
 # ---------------------------------------------------------------------------
+
+
+_EXTRACTION_PROMPT = (
+    "Extract salary data from the research text below into a JSON object.\n"
+    "Return ONLY valid JSON — no markdown fences, no prose, no explanation.\n\n"
+    "Required schema (all salary values are integers, per month):\n"
+    '{"ru_min": <int>, "ru_max": <int>, "ru_currency": "RUB",\n'
+    ' "intl_min": <int>, "intl_max": <int>, "intl_currency": "EUR" or "USD",\n'
+    ' "sources": ["<URL or site name>", ...],\n'
+    ' "reasoning_short": "<2-3 sentence summary>"}\n\n'
+    "Research text:\n"
+)
 
 
 def _call_with_web_search(
@@ -108,9 +111,16 @@ def _call_with_web_search(
     *,
     _caller=None,
 ) -> str:
-    """Call the model with the web_search tool; return the final text block.
+    """Two-step call: web-grounded research → JSON extraction.
 
-    ``_caller(prompt) -> str`` is a test seam that bypasses the real API call.
+    Step 1 (model + web_search_20250305): search the web and produce prose with
+    citations. Asking for JSON here is futile — web_search mode makes the model
+    write narrative answers with inline citations and ignore format instructions.
+
+    Step 2 (claude-haiku-4-5, no tools): structure the prose into the required
+    JSON schema. No web access needed; the grounded data is already in the prose.
+
+    ``_caller(prompt) -> str`` is a test seam that bypasses both API calls.
     """
     if _caller is not None:
         return _caller(prompt)
@@ -118,16 +128,36 @@ def _call_with_web_search(
     import anthropic as _anthropic
 
     client = _anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
+
+    # --- step 1: grounded research ---
+    research_resp = client.messages.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=3000,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": prompt}],
     )
-    for block in reversed(response.content):
-        if hasattr(block, "type") and block.type == "text":
-            return block.text
-    raise ValueError("web_search response contained no text block")
+    research_text = next(
+        (b.text for b in reversed(research_resp.content)
+         if getattr(b, "type", None) == "text"),
+        None,
+    )
+    if not research_text:
+        raise ValueError("web_search response contained no text block")
+
+    # --- step 2: JSON extraction (cheap, deterministic) ---
+    extraction_resp = client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1000,
+        messages=[{"role": "user", "content": _EXTRACTION_PROMPT + research_text}],
+    )
+    json_text = next(
+        (b.text for b in reversed(extraction_resp.content)
+         if getattr(b, "type", None) == "text"),
+        None,
+    )
+    if not json_text:
+        raise ValueError("JSON extraction response contained no text block")
+    return json_text
 
 
 # ---------------------------------------------------------------------------
