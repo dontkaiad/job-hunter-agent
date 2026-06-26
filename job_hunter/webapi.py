@@ -897,7 +897,18 @@ def refresh_market_worth(
     from .profile import load_profile
 
     profile = load_profile()
-    result = get_or_refresh(config, profile, force=True)
+    try:
+        result = get_or_refresh(config, profile, force=True)
+    except Exception as exc:
+        # Surface Anthropic billing errors as 503 instead of 500 so the
+        # frontend can show a human-readable message.
+        msg = str(exc)
+        if "credit balance" in msg or "402" in msg:
+            raise HTTPException(
+                status_code=503,
+                detail="Anthropic API: insufficient credits — go to console.anthropic.com → Billing",
+            )
+        raise
 
     data = asdict(result)
     data["age_days"] = age_days(result)

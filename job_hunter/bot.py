@@ -949,7 +949,10 @@ class JobHunterBot:
             )
             reply = _render_worth(result, age_days(result))
         except Exception as exc:
-            reply = f"⚠️ Не удалось получить данные о рынке: {exc}"
+            if "credit balance" in str(exc) or "402" in str(exc):
+                reply = "⚠️ Anthropic API: кончился баланс — пополни на console.anthropic.com → Billing"
+            else:
+                reply = f"⚠️ Не удалось получить данные о рынке: {exc}"
         await sent.edit_text(reply, parse_mode="HTML")
 
     async def handle_url_message(self, message) -> None:  # noqa: ANN001
