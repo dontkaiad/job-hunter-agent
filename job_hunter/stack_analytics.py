@@ -186,7 +186,6 @@ def compute_from_pipeline(conn, cfg) -> StackAnalyticsResult:
         FROM work_items
         WHERE relevance_score >= 25
           AND extracted_json IS NOT NULL
-          AND state NOT IN ('rejected', 'closed', 'declined')
         """,
     ).fetchall()
 
