@@ -214,13 +214,11 @@ def test_score_routes_haiku_only_below_threshold(conn, fake_llm, fake_fx):
 
 
 def test_score_routes_haiku_then_sonnet_above_threshold(conn, fake_llm, fake_fx):
-    """Score >= 60: Haiku scores first, Sonnet refines the Обоснование.
-
-    The stored relevance_score must be Haiku's number (threshold stability).
-    The stored Обоснование must be Sonnet's text.
+    """Haiku score > corridor_hi (75 > 70): above corridor, Haiku score is final,
+    Sonnet refines the Обоснование only (text quality for surfaced items).
     """
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    # Haiku returns 75 (above threshold) → Sonnet refine pass is triggered.
+    # Haiku returns 75 (above corridor_hi=70) → Sonnet refine pass is triggered.
     # FakeLLM matches by system substring; both score calls share "hiring-fit JUDGE".
     # Use the responses list so first call → haiku response, second → sonnet response.
     fake_llm.responses = [
@@ -232,7 +230,7 @@ def test_score_routes_haiku_then_sonnet_above_threshold(conn, fake_llm, fake_fx)
     pipeline.advance_by_id(conn, item_id, deps=deps)  # score
 
     item = store.get_item(conn, item_id)
-    # Score is Haiku's (threshold-stable).
+    # Score is Haiku's (threshold-stable; Sonnet only refines text above corridor).
     assert item.relevance_score == 75.0
     # Reasoning is Sonnet's (quality).
     blob = json.loads(item.extracted_json)
@@ -242,8 +240,79 @@ def test_score_routes_haiku_then_sonnet_above_threshold(conn, fake_llm, fake_fx)
     assert len(score_calls) == 2, f"expected 2 score calls (haiku + sonnet), got {len(score_calls)}"
     assert score_calls[0]["model"] == deps.cheap_model, "first call must be Haiku"
     assert score_calls[1]["model"] == deps.judge_model, "second call must be Sonnet"
-    # Second call user prompt contains the score anchor.
+    # Second call user prompt contains the score anchor (llm_score_refine path).
     assert "75" in score_calls[1]["user"]
+
+
+def test_score_below_corridor_haiku_only(conn, fake_llm, fake_fx):
+    """Haiku score < corridor_lo (40 < 50): confident reject zone, judge NOT called.
+
+    Exactly one LLM call (Haiku); stored score is Haiku's.
+    """
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 40, "Обоснование": "weak fit"}')
+    item_id = _insert(conn, GOOD_POST)
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # score
+
+    item = store.get_item(conn, item_id)
+    assert item.relevance_score == 40.0
+
+    score_calls = [c for c in fake_llm.calls if "hiring-fit JUDGE" in c["system"]]
+    assert len(score_calls) == 1, f"expected 1 call (Haiku only, below corridor), got {len(score_calls)}"
+    assert score_calls[0]["model"] == deps.cheap_model
+
+
+def test_score_in_corridor_judge_rescore_is_final(conn, fake_llm, fake_fx):
+    """Haiku score in [corridor_lo, corridor_hi] (58 ∈ [50,70]): judge re-scores,
+    judge's score is stored as FINAL (not Haiku's).
+    """
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+    # Haiku says 58 (in corridor) → judge re-scores and returns 72.
+    fake_llm.responses = [
+        '{"relevance_score": 58, "Обоснование": "haiku: borderline"}',
+        '{"relevance_score": 72, "Обоснование": "judge: solid fit — 72/100 ✅ LLM role"}',
+    ]
+    item_id = _insert(conn, GOOD_POST)
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # score
+
+    item = store.get_item(conn, item_id)
+    # Judge's score (72) is final, NOT Haiku's (58).
+    assert item.relevance_score == 72.0, f"expected judge score 72, got {item.relevance_score}"
+    blob = json.loads(item.extracted_json)
+    assert "judge" in blob["Обоснование"], "stored Обоснование must be judge's"
+
+    score_calls = [c for c in fake_llm.calls if "hiring-fit JUDGE" in c["system"]]
+    assert len(score_calls) == 2, f"expected 2 calls (Haiku + judge re-score), got {len(score_calls)}"
+    assert score_calls[0]["model"] == deps.cheap_model, "first call must be Haiku"
+    assert score_calls[1]["model"] == deps.judge_model, "second call must be judge"
+    # Judge call is a full re-score (no score anchor in user prompt).
+    assert "IMPORTANT" not in score_calls[1]["user"], "corridor judge must NOT use score anchor"
+
+
+def test_score_corridor_judge_failure_fallback(conn, fake_llm, fake_fx):
+    """If judge call fails in corridor, fallback to Haiku score — no exception raised."""
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+
+    call_count = [0]
+
+    def _side_effect(system, user, **kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return '{"relevance_score": 58, "Обоснование": "haiku: borderline"}'
+        raise RuntimeError("judge timeout")
+
+    fake_llm.complete = _side_effect
+
+    item_id = _insert(conn, GOOD_POST)
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
+    res = pipeline.advance_by_id(conn, item_id, deps=deps)  # score — must not raise
+
+    assert res.to_state == SCORED, "corridor judge failure must NOT crash T2"
+    item = store.get_item(conn, item_id)
+    # Fallback: Haiku score stored (58), not a crash-default 0.
+    assert item.relevance_score == 58.0, f"expected haiku fallback 58, got {item.relevance_score}"
 
 
 def test_salary_guard_overrides_high_llm_score(conn, fake_llm, fake_fx):

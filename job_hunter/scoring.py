@@ -33,6 +33,14 @@ from .schema_extract import ExtractResult
 
 SURFACE_THRESHOLD = 60          # T: at/above -> surfaced, below -> rejected
 
+# Confidence corridor: Haiku scores in [SCORE_CORRIDOR_LO, SCORE_CORRIDOR_HI]
+# trigger a full judge re-score (score becomes final from judge model).
+# Intentionally wider than the threshold on both sides — catches vacancies Haiku
+# might mis-score in either direction near the decision boundary.
+# Overridable via SCORE_CORRIDOR_LO / SCORE_CORRIDOR_HI env vars (see config.py).
+SCORE_CORRIDOR_LO = 50
+SCORE_CORRIDOR_HI = 70
+
 # Hard salary floor (EUR / month GROSS equivalent). The ACTUAL floor is loaded
 # from the candidate profile (``Profile.salary_floor_eur`` in
 # config/profile.*.yaml) and flows through the pipeline to ``salary_guard_reject``

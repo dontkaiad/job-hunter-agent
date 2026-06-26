@@ -42,6 +42,10 @@ class Config:
     cheap_model: str = "claude-haiku-4-5"
     judge_model: str = "claude-sonnet-4-6"
     anthropic_model: str = "claude-haiku-4-5"
+    # Confidence corridor: Haiku scores in [score_corridor_lo, score_corridor_hi]
+    # trigger a full judge re-score. Defaults match scoring.SCORE_CORRIDOR_LO/HI.
+    score_corridor_lo: int = 50
+    score_corridor_hi: int = 70
 
     # Ingestion mode: "web" (default, public t.me/s/ over HTTP, NO auth) or
     # "telethon" (optional userbot fallback, requires api_id/hash/session).
@@ -162,12 +166,16 @@ def load_config(env: Optional[dict] = None) -> Config:
 
     cheap_model = get("ANTHROPIC_CHEAP_MODEL") or get("ANTHROPIC_MODEL") or "claude-haiku-4-5"
     judge_model = get("ANTHROPIC_JUDGE_MODEL") or "claude-sonnet-4-6"
+    score_corridor_lo = int(get("SCORE_CORRIDOR_LO") or 50)
+    score_corridor_hi = int(get("SCORE_CORRIDOR_HI") or 70)
 
     return Config(
         anthropic_api_key=get("ANTHROPIC_API_KEY") or None,
         cheap_model=cheap_model,
         judge_model=judge_model,
         anthropic_model=cheap_model,
+        score_corridor_lo=score_corridor_lo,
+        score_corridor_hi=score_corridor_hi,
         ingest_mode=(get("INGEST_MODE") or "web").lower(),
         telegram_api_id=_int_or_none(get("TELEGRAM_API_ID")),
         telegram_api_hash=get("TELEGRAM_API_HASH") or None,

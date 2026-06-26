@@ -1258,6 +1258,7 @@ def build_deps(cfg: Config) -> Deps:
     return Deps(
         llm_client=llm_client, fx=fx,
         cheap_model=cfg.cheap_model, judge_model=cfg.judge_model,
+        corridor_lo=cfg.score_corridor_lo, corridor_hi=cfg.score_corridor_hi,
         profile=profile,
     )
 

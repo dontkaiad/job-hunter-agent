@@ -60,6 +60,11 @@ class Deps:
     use_llm_extract: bool = True
     cheap_model: str = CHEAP_MODEL
     judge_model: str = JUDGE_MODEL
+    # Confidence corridor bounds (default: [50, 70]).
+    # Haiku scores in this range trigger a full judge re-score; judge's score
+    # becomes final. Overridable via Config.score_corridor_lo/hi → env vars.
+    corridor_lo: int = 50
+    corridor_hi: int = 70
     # Candidate profile (loaded from config/profile.*.yaml). Drives the rubric
     # profile block, the draft gender/honesty/signature, and the salary floor.
     # Defaults to the GENERIC example profile so deterministic-only / test runs
@@ -184,11 +189,14 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
     Cost-aware routing:
       1) LENIENT deterministic prefilter drops obvious non-jobs (score 0,
          no LLM call for junk).
-      2) Haiku scores ALL surviving vacancies (cheap first pass: score +
-         Обоснование). Score is final here — Haiku's number drives T3/T4.
-      3) If score >= SURFACE_THRESHOLD: Sonnet rewrites the Обоснование only
-         (second pass for vacancies the operator will actually read). The stored
-         score stays at Haiku's value so the threshold crossing is stable.
+      2) Haiku scores ALL surviving vacancies (cheap first pass).
+      3) Confidence routing on the Haiku score:
+         - In [corridor_lo, corridor_hi]: judge re-scores (full llm_score call);
+           judge's score becomes FINAL. Catches uncertain near-threshold cases.
+         - Above corridor_hi (confident surface): Haiku score final; Sonnet
+           refines the Обоснование only (text quality for items operator reads).
+         - Below corridor_lo (confident reject): Haiku score final, no second
+           call.
     """
     extracted = _load_extracted(item)
     if extracted is None:
@@ -200,6 +208,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         score = 0
         reasoning = f"prefilter: {pf.reason}"
         used = "prefilter-drop"
+        print(f"[score] id={item.id} haiku=0 final=0 (prefilter)", flush=True)
     else:
         reasoning = ""
         used = "haiku"
@@ -210,12 +219,41 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                     deps.llm_client, extracted, raw, model=deps.cheap_model,
                     profile=deps.profile,
                 )
-                score = scoring.clamp_score(verdict["score"])
-                reasoning = verdict.get("reasoning", "")
+                haiku_score = scoring.clamp_score(verdict["score"])
+                haiku_reasoning = verdict.get("reasoning", "")
 
-                # Second pass: Sonnet rewrites the Обоснование for high-scorers.
-                # Score stays at Haiku's value; only the display text improves.
-                if score >= scoring.SURFACE_THRESHOLD:
+                in_corridor = deps.corridor_lo <= haiku_score <= deps.corridor_hi
+
+                if in_corridor:
+                    # Uncertainty zone: judge re-scores; judge's score is final.
+                    try:
+                        judge_verdict = llm_score(
+                            deps.llm_client, extracted, raw,
+                            model=deps.judge_model, profile=deps.profile,
+                        )
+                        score = scoring.clamp_score(judge_verdict["score"])
+                        reasoning = judge_verdict.get("reasoning", "")
+                        used = "haiku+corridor-judge"
+                        print(
+                            f"[score] id={item.id} haiku={haiku_score}"
+                            f" → corridor → judge={score} final={score}",
+                            flush=True,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        score = haiku_score
+                        reasoning = haiku_reasoning
+                        used = "haiku+corridor-judge(err)"
+                        print(
+                            f"[score] id={item.id} haiku={haiku_score}"
+                            f" → corridor → judge FAILED ({exc!r}) fallback={score}",
+                            flush=True,
+                        )
+
+                elif haiku_score >= scoring.SURFACE_THRESHOLD:
+                    # Above corridor: Haiku score final; Sonnet refines text only.
+                    score = haiku_score
+                    reasoning = haiku_reasoning
+                    used = "haiku"
                     try:
                         sonnet_reasoning = llm_score_refine(
                             deps.llm_client, extracted, raw, score,
@@ -225,21 +263,37 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                             reasoning = sonnet_reasoning
                             used = "haiku+sonnet"
                     except Exception as exc:  # noqa: BLE001
-                        used = f"haiku+sonnet(err)"
-                        print(f"[score] id={item.id} sonnet refine failed: {exc!r}", flush=True)
+                        used = "haiku+sonnet(err)"
+                        print(
+                            f"[score] id={item.id} sonnet refine failed: {exc!r}",
+                            flush=True,
+                        )
+                    print(
+                        f"[score] id={item.id} haiku={score} final={score} (no corridor)",
+                        flush=True,
+                    )
+
+                else:
+                    # Below corridor: confident reject, Haiku score final.
+                    score = haiku_score
+                    reasoning = haiku_reasoning
+                    used = "haiku"
+                    print(
+                        f"[score] id={item.id} haiku={score} final={score} (no corridor)",
+                        flush=True,
+                    )
 
             except Exception as exc:  # noqa: BLE001 - degrade, never crash T2
                 score = 0
                 reasoning = f"score failed ({exc}); defaulted low"
                 used = "haiku(error)"
+                print(f"[score] id={item.id} haiku=err final=0 ({exc!r})", flush=True)
         else:
-            # No judge available: keep the item visible to a human rather than
-            # silently rejecting. Score at the surface threshold (lenient).
+            # No judge available: surface for manual review rather than silent reject.
             score = scoring.SURFACE_THRESHOLD
             reasoning = "no LLM judge configured; surfaced for manual review"
             used = "no-llm"
-
-    print(f"[score] id={item.id} score={score} used={used}", flush=True)
+            print(f"[score] id={item.id} final={score} (no-llm)", flush=True)
 
     extracted.relevance_score = float(score)
     extracted.reasons = [reasoning] if reasoning else []
