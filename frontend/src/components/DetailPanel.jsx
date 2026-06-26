@@ -125,7 +125,7 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
               т.е. тот же текст, что и в «Обоснование» ниже (см. pipeline._do_score).
               Показываем обоснование один раз — форматированным <pre>. */}
           <TextBlock label="Обоснование" value={detail.reasoning} />
-          <TextBlock label="Отклик (draft)" value={detail.draft} />
+          <TextBlock label="Отклик (draft)" value={detail.draft} copyable />
 
           <Research research={detail.research} />
 
@@ -189,11 +189,29 @@ function ListBlock({ label, items }) {
   );
 }
 
-function TextBlock({ label, value }) {
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+  return (
+    <button type="button" className="btn-copy" onClick={handleCopy}>
+      {copied ? "Скопировано ✓" : "Скопировать"}
+    </button>
+  );
+}
+
+function TextBlock({ label, value, copyable = false }) {
   if (!value) return null;
   return (
     <div className="block">
-      <h4>{label}</h4>
+      <h4 className="block-head">
+        {label}
+        {copyable && <CopyButton text={value} />}
+      </h4>
       <pre className="text-block">{value}</pre>
     </div>
   );
