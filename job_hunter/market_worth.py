@@ -231,12 +231,17 @@ def compute_from_pipeline(conn, cfg) -> MarketWorthResult:
 def get_or_refresh(conn, cfg) -> MarketWorthResult:
     """Compute a fresh MarketWorthResult from the pipeline DB."""
     result = compute_from_pipeline(conn, cfg)
-    _log(
+    msg = (
         f"📊 market_worth: RU {result.ru_min}–{result.ru_max} ₽ "
         f"(n={result.ru_sample_size}) | "
         f"intl {result.intl_min}–{result.intl_max} {result.intl_currency} "
         f"(n={result.intl_sample_size}) | degraded={result.degraded}"
     )
+    if result.degraded:
+        # Still accumulating — print locally, skip Telegram to avoid spam.
+        print(f"[market_worth] {msg}", flush=True)
+    else:
+        _log(msg)
     return result
 
 
