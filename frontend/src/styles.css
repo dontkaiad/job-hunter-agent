@@ -583,6 +583,11 @@ h1::before {
   margin: 0 0 6px;
   border-bottom: 1px solid var(--line-2);
   position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+.lane-title:hover .lane-arrow {
+  color: var(--teal);
 }
 .lane-title::before {
   content: "";
@@ -594,6 +599,14 @@ h1::before {
   background: var(--teal);
   transform: rotate(45deg);
   box-shadow: 0 0 8px rgba(84, 199, 182, 0.5);
+}
+.lane-arrow {
+  font-size: 10px;
+  color: var(--ink-3);
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s;
+  margin-left: auto;
 }
 .lane-count {
   font-family: var(--mono);
@@ -1296,13 +1309,6 @@ h1::before {
   letter-spacing: 0.04em;
 }
 
-/* Outer layout: main grid + right sidebar */
-.mw-layout {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-}
-
 /* 2-column grid of analytics cards */
 .mw-grid {
   flex: 1;
@@ -1349,12 +1355,11 @@ h1::before {
   margin-top: 6px;
 }
 
-/* Benchmark sidebar */
-.mw-sidebar-benchmark {
-  width: 210px;
-  flex-shrink: 0;
-  position: sticky;
-  top: 20px;
+/* Benchmark inside salary card */
+.mw-benchmark-incard {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 /* Tab stubs / empty states */
@@ -1762,15 +1767,8 @@ h1::before {
 }
 
 @media (max-width: 860px) {
-  .mw-layout {
-    flex-direction: column;
-  }
   .mw-grid {
     grid-template-columns: 1fr;
-  }
-  .mw-sidebar-benchmark {
-    width: 100%;
-    position: static;
   }
 }
 

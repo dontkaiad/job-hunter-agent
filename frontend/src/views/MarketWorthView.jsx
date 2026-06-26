@@ -101,6 +101,42 @@ function SalaryCard({ data }) {
       <div className="market-worth-meta">
         P25–P75 · скор 50–100 · пороговый пул: {minSample}
       </div>
+
+      <div className="market-worth-benchmark mw-benchmark-incard">
+        <div className="market-worth-benchmark-title">Ориентир по рынку</div>
+        <div className="market-worth-benchmark-subtitle">
+          applied AI / LLM · middle · 06.2026
+        </div>
+        <div className="market-worth-benchmark-rows">
+          <div className="market-worth-benchmark-row">
+            <span className="market-worth-benchmark-flag">🇷🇺</span>
+            <div>
+              <div className="market-worth-benchmark-range">200 000 – 300 000 ₽</div>
+              <div className="market-worth-benchmark-note">
+                не ниже 200к · целиться 250–300к
+              </div>
+            </div>
+          </div>
+          <div className="market-worth-benchmark-row">
+            <span className="market-worth-benchmark-flag">🌍</span>
+            <div>
+              <div className="market-worth-benchmark-range">$4 500 – 8 000</div>
+              <div className="market-worth-benchmark-note">
+                не ниже $4.5k · метить $5–7k<br />
+                fine-tuning/PyTorch — не нужен
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="market-worth-benchmark-sources">
+          enigmai.ru · vc.ru/ai · hirehi.ru<br />
+          ayautomate.com · kore1.com<br />
+          remotelytalents.com · lemon.io
+        </div>
+        <div className="market-worth-benchmark-footer">
+          26.06.2026 · обновлять раз в 2–3 мес
+        </div>
+      </div>
     </div>
   );
 }
@@ -193,50 +229,6 @@ function RequirementsCard({ ra }) {
 }
 
 // ---------------------------------------------------------------------------
-// Static benchmark sidebar
-// ---------------------------------------------------------------------------
-
-function Benchmark() {
-  return (
-    <aside className="market-worth-benchmark mw-sidebar-benchmark">
-      <div className="market-worth-benchmark-title">Ориентир по рынку</div>
-      <div className="market-worth-benchmark-subtitle">
-        applied AI / LLM · middle · 06.2026
-      </div>
-      <div className="market-worth-benchmark-rows">
-        <div className="market-worth-benchmark-row">
-          <span className="market-worth-benchmark-flag">🇷🇺</span>
-          <div>
-            <div className="market-worth-benchmark-range">200 000 – 300 000 ₽</div>
-            <div className="market-worth-benchmark-note">
-              не ниже 200к · целиться 250–300к
-            </div>
-          </div>
-        </div>
-        <div className="market-worth-benchmark-row">
-          <span className="market-worth-benchmark-flag">🌍</span>
-          <div>
-            <div className="market-worth-benchmark-range">$4 500 – 8 000</div>
-            <div className="market-worth-benchmark-note">
-              не ниже $4.5k · метить $5–7k<br />
-              fine-tuning/PyTorch — не нужен
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="market-worth-benchmark-sources">
-        enigmai.ru · vc.ru/ai · hirehi.ru<br />
-        ayautomate.com · kore1.com<br />
-        remotelytalents.com · lemon.io
-      </div>
-      <div className="market-worth-benchmark-footer">
-        26.06.2026 · обновлять раз в 2–3 мес
-      </div>
-    </aside>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Root view
 // ---------------------------------------------------------------------------
 
@@ -276,14 +268,11 @@ export default function MarketWorthView() {
         {error && <div className="error">{error}</div>}
 
         {data && (
-          <div className="mw-layout">
-            <div className="mw-grid">
-              <SalaryCard data={data} />
-              <StackCard sa={data.stack_analytics} />
-              <BenefitsCard ba={data.benefits_analytics} />
-              <RequirementsCard ra={data.requirements_analytics} />
-            </div>
-            <Benchmark />
+          <div className="mw-grid">
+            <SalaryCard data={data} />
+            <StackCard sa={data.stack_analytics} />
+            <BenefitsCard ba={data.benefits_analytics} />
+            <RequirementsCard ra={data.requirements_analytics} />
           </div>
         )}
       </div>

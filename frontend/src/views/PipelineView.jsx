@@ -21,6 +21,11 @@ export default function PipelineView() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [collapsed, setCollapsed] = useState({});
+
+  const toggleLane = useCallback((key) => {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -76,28 +81,35 @@ export default function PipelineView() {
 
         {LANES.map((lane) => (
           <section key={lane.key} className="lane">
-            <h2 className="lane-title">
-              {lane.title} <span className="lane-count">{grouped[lane.key].length}</span>
+            <h2 className="lane-title" onClick={() => toggleLane(lane.key)}>
+              <span className="lane-arrow">{collapsed[lane.key] ? "▸" : "▾"}</span>
+              {lane.title}
+              <span className="lane-count">{grouped[lane.key].length}</span>
             </h2>
-            <PipelineTable
-              items={grouped[lane.key]}
-              selectedId={selectedId}
-              onSelect={(itemId) => navigate(`/item/${itemId}`)}
-            />
+            {!collapsed[lane.key] && (
+              <PipelineTable
+                items={grouped[lane.key]}
+                selectedId={selectedId}
+                onSelect={(itemId) => navigate(`/item/${itemId}`)}
+              />
+            )}
           </section>
         ))}
 
         {grouped.other.length > 0 && (
           <section className="lane">
-            <h2 className="lane-title">
-              Прочее (по фильтру){" "}
+            <h2 className="lane-title" onClick={() => toggleLane("other")}>
+              <span className="lane-arrow">{collapsed.other ? "▸" : "▾"}</span>
+              Прочее (по фильтру)
               <span className="lane-count">{grouped.other.length}</span>
             </h2>
-            <PipelineTable
-              items={grouped.other}
-              selectedId={selectedId}
-              onSelect={(itemId) => navigate(`/item/${itemId}`)}
-            />
+            {!collapsed.other && (
+              <PipelineTable
+                items={grouped.other}
+                selectedId={selectedId}
+                onSelect={(itemId) => navigate(`/item/${itemId}`)}
+              />
+            )}
           </section>
         )}
       </div>
