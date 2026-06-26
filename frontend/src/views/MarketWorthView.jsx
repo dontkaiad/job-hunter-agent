@@ -22,6 +22,41 @@ function SampleBar({ current, min }) {
   );
 }
 
+function StackBlock({ sa }) {
+  if (!sa) return null;
+  const { top_tech, total_pool, vacancies_with_stack, small_sample, degraded_reason } = sa;
+  return (
+    <div className="stack-block">
+      <div className="stack-block-header">
+        <span className="stack-block-title">Что просит рынок</span>
+        <span className="stack-block-meta">n={vacancies_with_stack} вакансий · пул {total_pool}</span>
+      </div>
+      {small_sample && (
+        <div className="market-worth-warning">{degraded_reason}</div>
+      )}
+      {top_tech.length === 0 ? (
+        <div className="stack-block-empty">Стек пока не собран</div>
+      ) : (
+        <div className="stack-list">
+          {top_tech.map(({ tech, count, pct }) => (
+            <div className="stack-row" key={tech}>
+              <span className="stack-tech">{tech}</span>
+              <div className="stack-bar-wrap">
+                <div
+                  className="stack-bar-fill"
+                  style={{ width: `${Math.min(100, pct)}%` }}
+                />
+              </div>
+              <span className="stack-pct">{pct}%</span>
+              <span className="stack-count">{count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MarketWorthView() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -116,6 +151,8 @@ export default function MarketWorthView() {
                 <div className="market-worth-meta">
                   Диапазон P25–P75 по вакансиям со скором 50–100 · пороговый пул: {minSample}
                 </div>
+
+                <StackBlock sa={data.stack_analytics} />
               </>
             )}
           </div>

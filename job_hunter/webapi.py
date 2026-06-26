@@ -854,17 +854,19 @@ def get_market_worth(
     config: Config = Depends(get_config),
     conn: psycopg.Connection = Depends(get_conn),
 ) -> dict:
-    """Compute and return a salary benchmark from the pipeline's relevant vacancies.
+    """Compute and return a salary benchmark + stack analytics from the pipeline.
 
-    Aggregates salary data from work_items with score 50–100. No LLM call.
-    Returns degraded=true with reason when the sample is below market_min_sample.
+    Aggregates salary data from work_items with score 50–100 and tech stack
+    frequencies from score 25–100. No LLM call.
     """
     from dataclasses import asdict
 
     from .market_worth import get_or_refresh
+    from .stack_analytics import compute_from_pipeline as compute_stack
 
     result = get_or_refresh(conn, config)
-    return asdict(result)
+    stack = compute_stack(conn, config)
+    return {**asdict(result), "stack_analytics": asdict(stack)}
 
 
 @writer_router.post("/market-worth/refresh")
@@ -872,23 +874,26 @@ def refresh_market_worth(
     config: Config = Depends(get_config),
     conn: psycopg.Connection = Depends(get_conn),
 ) -> dict:
-    """Recompute the salary benchmark from the pipeline DB (instant, zero API).
+    """Recompute salary benchmark + stack analytics from the pipeline DB (instant, zero API).
 
-    Explicit user action — logs result to Telegram ops channel (degraded or not).
+    Explicit user action — logs salary result to Telegram ops channel.
     The GET endpoint is silent; only this POST endpoint sends ops notifications.
     """
     from dataclasses import asdict
 
     from .market_worth import get_or_refresh, _log
+    from .stack_analytics import compute_from_pipeline as compute_stack
 
     result = get_or_refresh(conn, config)
+    stack = compute_stack(conn, config)
     _log(
         f"📊 market_worth (refresh): RU {result.ru_min}–{result.ru_max} ₽ "
         f"(n={result.ru_sample_size}) | "
         f"intl {result.intl_min}–{result.intl_max} {result.intl_currency} "
-        f"(n={result.intl_sample_size}) | degraded={result.degraded}"
+        f"(n={result.intl_sample_size}) | degraded={result.degraded} | "
+        f"stack pool={stack.total_pool} tech={len(stack.tech_freq)}"
     )
-    return asdict(result)
+    return {**asdict(result), "stack_analytics": asdict(stack)}
 
 
 # --- Public auth routes (issue #5): NOT gated -------------------------------
