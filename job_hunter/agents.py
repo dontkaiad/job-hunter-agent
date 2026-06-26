@@ -47,14 +47,21 @@ def append_draft_signature(draft_text: str, profile: Optional[Profile] = None) -
     """Append the deterministic GitHub + резюме signature to a draft. PURE.
 
     Guarantees both literal references are present even if the LLM omitted or
-    mangled them. Idempotent: if the exact signature block is already at the end
-    it is not duplicated. The GitHub link and резюме placeholder are taken from
-    the loaded profile (generic example when None) — no real resume URL is ever
-    fabricated here.
+    mangled them. Idempotent: checks the tail of the body for both the github
+    link and resume placeholder — tolerates whitespace variations (LLMs sometimes
+    emit the signature with \\n\\n between lines instead of \\n, causing exact
+    endswith() to miss and duplicate the block). The GitHub link and резюме
+    placeholder are taken from the loaded profile (generic example when None) —
+    no real resume URL is ever fabricated here.
     """
-    block = signature_block(profile)
+    sig = (profile or example_profile()).draft_signature
+    block = sig.block()
     body = (draft_text or "").rstrip()
-    if body.endswith(block):
+    # Idempotency: scan the tail (2× block length) for both signature tokens so
+    # minor whitespace differences don't trigger a duplicate append.
+    tail_len = max(len(block) * 2, 120)
+    tail = body[-tail_len:]
+    if sig.github in tail and sig.resume in tail:
         return body
     if not body:
         return block

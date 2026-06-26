@@ -1195,6 +1195,55 @@ h1::before {
     padding: 11px 15px;
     font-size: 12px;
   }
+  /* action buttons need explicit override — .btn-action has its own padding */
+  .btn-action {
+    padding: 13px 18px;
+    font-size: 12px;
+    width: 100%;
+    text-align: center;
+    box-sizing: border-box;
+  }
+  .actions {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .btn-copy {
+    padding: 5px 12px;
+    font-size: 11px;
+  }
+
+  /* profile section: keep avatar+text side-by-side but tighter */
+  .profile {
+    padding-bottom: 14px;
+  }
+  .profile-avatar {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+  .profile-avatar-img {
+    width: 44px;
+    height: 44px;
+  }
+  .profile-salary {
+    font-size: 12px;
+    margin-top: 4px;
+  }
+
+  /* market-worth two-column collapses at 768px too */
+  .market-worth-layout {
+    grid-template-columns: 1fr;
+  }
+  .market-worth-benchmark {
+    position: static;
+    order: 1;
+  }
+  .market-worth-main {
+    order: 0;
+  }
+  .market-worth-view .view-list {
+    max-width: 100%;
+  }
 
   /* DETAIL PANEL -> full-screen sheet overlay (was an off-screen side column) */
   .detail-panel {
@@ -1514,18 +1563,6 @@ h1::before {
   color: var(--teal);
 }
 
-@media (max-width: 700px) {
-  .market-worth-layout {
-    grid-template-columns: 1fr;
-  }
-  .market-worth-benchmark {
-    position: static;
-    order: 1;
-  }
-  .market-worth-main {
-    order: 0;
-  }
-}
 @media (max-width: 640px) {
   .market-worth-grid {
     grid-template-columns: 1fr;
