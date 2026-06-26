@@ -7,9 +7,21 @@ function fmtRange(min, max, currency) {
   const fmt = (n) =>
     n == null ? null : n.toLocaleString("ru-RU");
   if (min != null && max != null) return `${fmt(min)}–${fmt(max)} ${sym}/мес`;
-  if (min != null) return `от ${fmt(min)} ${sym}/мес (потолок не найден)`;
+  if (min != null) return `от ${fmt(min)} ${sym}/мес (потолок не найден)`;
   if (max != null) return `до ${fmt(max)} ${sym}/мес`;
   return "нет данных";
+}
+
+function SampleBar({ current, min }) {
+  const pct = Math.min(100, (current / min) * 100);
+  return (
+    <div className="sample-bar-wrap">
+      <div className="sample-bar">
+        <div className="sample-bar-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="sample-bar-label">{current} из {min}</span>
+    </div>
+  );
 }
 
 export default function MarketWorthView() {
@@ -25,11 +37,7 @@ export default function MarketWorthView() {
       const result = await api.getMarketWorth();
       setData(result);
     } catch (e) {
-      if (e.status === 404) {
-        setData(null); // no cache yet — show prompt
-      } else {
-        setError(e.message || "Ошибка загрузки");
-      }
+      setError(e.message || "Ошибка загрузки");
     } finally {
       setLoading(false);
     }
@@ -52,6 +60,8 @@ export default function MarketWorthView() {
     }
   }, []);
 
+  const minSample = data?.min_sample ?? 3;
+
   return (
     <div className="view market-worth-view">
       <div className="view-list">
@@ -62,54 +72,68 @@ export default function MarketWorthView() {
             onClick={handleRefresh}
             disabled={refreshing || loading}
           >
-            {refreshing ? "Обновляю…" : "Обновить"}
+            {refreshing ? "Пересчитываю…" : "Пересчитать"}
           </button>
         </div>
 
         {(loading || refreshing) && !data && (
-          <div className="loading">
-            {refreshing
-              ? "Ищу данные по рынку (10–30 сек)…"
-              : "Загрузка…"}
-          </div>
+          <div className="loading">Загрузка…</div>
         )}
 
         {error && <div className="error">{error}</div>}
 
-        {!loading && !data && !error && (
-          <div className="market-worth-empty">
-            <p>Данные ещё не собирались.</p>
-            <p>
-              Нажмите <strong>Обновить</strong> для первого поиска (~30 сек).
-            </p>
-          </div>
-        )}
-
         {data && (
           <div className="market-worth-body">
-            {(data.stale || data.degraded) && (
+            {/* Pipeline pool stats */}
+            <div className="market-worth-stats">
+              <div className="market-worth-stat">
+                <span className="market-worth-stat-val">{data.total_relevant_vacancies}</span>
+                <span className="market-worth-stat-label">вакансий со скором 50–100</span>
+              </div>
+              <div className="market-worth-stat">
+                <span className="market-worth-stat-val">{data.ru_sample_size}</span>
+                <span className="market-worth-stat-label">с зарплатой РФ</span>
+              </div>
+              <div className="market-worth-stat">
+                <span className="market-worth-stat-val">{data.intl_sample_size}</span>
+                <span className="market-worth-stat-label">с зарплатой интл</span>
+              </div>
+            </div>
+
+            {/* Degraded warning */}
+            {data.degraded && (
               <div className="market-worth-warning">
-                {data.degraded && (
-                  <span>⚠️ {data.degraded_reason}</span>
-                )}
-                {data.stale && !data.degraded && (
-                  <span>Данные устарели — рекомендуется обновить</span>
-                )}
+                ⚠️ {data.degraded_reason}
               </div>
             )}
 
+            {/* Salary ranges */}
             <div className="market-worth-grid">
               <div className="market-worth-card">
                 <div className="market-worth-label">🇷🇺 Россия</div>
-                <div className="market-worth-range">
-                  {fmtRange(data.ru_min, data.ru_max, data.ru_currency)}
-                </div>
+                {data.ru_sample_size >= minSample ? (
+                  <div className="market-worth-range">
+                    {fmtRange(data.ru_min, data.ru_max, data.ru_currency)}
+                  </div>
+                ) : (
+                  <div className="market-worth-accumulating">
+                    <div className="market-worth-range">копится…</div>
+                    <SampleBar current={data.ru_sample_size} min={minSample} />
+                  </div>
+                )}
               </div>
               <div className="market-worth-card">
                 <div className="market-worth-label">🌍 Международный</div>
-                <div className="market-worth-range">
-                  {fmtRange(data.intl_min, data.intl_max, data.intl_currency)}
-                </div>
+                {data.intl_sample_size >= minSample ? (
+                  <div className="market-worth-range">
+                    {fmtRange(data.intl_min, data.intl_max, data.intl_currency)}
+                  </div>
+                ) : (
+                  <div className="market-worth-accumulating">
+                    <div className="market-worth-range">копится…</div>
+                    <SampleBar current={data.intl_sample_size} min={minSample} />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -117,29 +141,8 @@ export default function MarketWorthView() {
               <p className="market-worth-reasoning">{data.reasoning_short}</p>
             )}
 
-            {data.sources && data.sources.length > 0 && (
-              <div className="market-worth-sources">
-                <div className="market-worth-sources-title">Источники</div>
-                <ul>
-                  {data.sources.map((s, i) => (
-                    <li key={i}>
-                      {s.startsWith("http") ? (
-                        <a href={s} target="_blank" rel="noreferrer">
-                          {s}
-                        </a>
-                      ) : (
-                        s
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
             <div className="market-worth-meta">
-              {data.age_days === 0
-                ? "Обновлено сегодня"
-                : `Обновлено ${data.age_days} д. назад`}
+              Диапазон P25–P75 по вакансиям со скором 50–100 · пороговый пул: {minSample}
             </div>
           </div>
         )}

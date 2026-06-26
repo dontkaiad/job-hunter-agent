@@ -523,7 +523,7 @@ def render_borderline(items: List[store.WorkItem]) -> str:
     return "\n".join(blocks)
 
 
-def _render_worth(result, age: int) -> str:
+def _render_worth(result) -> str:
     """Render a MarketWorthResult as a Telegram-ready text block. PURE."""
     from .market_worth import fmt_range
 
@@ -531,21 +531,16 @@ def _render_worth(result, age: int) -> str:
     intl = fmt_range(result.intl_min, result.intl_max, result.intl_currency)
 
     lines = [
-        "📊 <b>Зарплата по рынку</b>",
+        "📊 <b>Зарплаты по рынку</b> (из пайплайна)",
         "",
-        f"🇷🇺 Россия:       {ru}",
-        f"🌍 Международный: {intl}",
+        f"🇷🇺 Россия:       {ru}  <i>(n={result.ru_sample_size})</i>",
+        f"🌍 Международный: {intl}  <i>(n={result.intl_sample_size})</i>",
+        f"📋 Всего вакансий со скором 50–100: {result.total_relevant_vacancies}",
         "",
         result.reasoning_short,
     ]
-    if result.sources:
-        lines += ["", "<b>Источники:</b>"]
-        for s in result.sources[:5]:
-            lines.append(f"  • {s}")
-    freshness = f"обновлено {age} д. назад" if age > 0 else "обновлено сегодня"
     if result.degraded:
-        freshness += f" | ⚠️ {result.degraded_reason}"
-    lines += ["", f"<i>{freshness}</i>"]
+        lines += ["", f"⚠️ <i>{result.degraded_reason}</i>"]
     return "\n".join(lines)
 
 
@@ -914,45 +909,19 @@ class JobHunterBot:
         )
 
     async def handle_worth(self, message) -> None:  # noqa: ANN001
-        """/worth [refresh] — show (or force-refresh) the market salary benchmark.
+        """/worth — show salary benchmark computed from the pipeline vacancies."""
+        from .market_worth import get_or_refresh
 
-        /worth          → return cached result, or refresh if no cache exists.
-        /worth refresh  → force a web-search refresh regardless of cache age.
-
-        The refresh call is slow (~10-30 s); bot sends a "loading…" message
-        first and edits it with the result when the search completes.
-        """
-        from .market_worth import age_days, fmt_range, get_or_refresh, is_stale, load_cache
-        from .profile import load_profile
-
-        text = getattr(message, "text", "") or ""
-        force = text.strip().lower().endswith("refresh")
-
-        profile = load_profile()
-
-        if not force:
-            cached = load_cache(self.cfg.market_worth_cache_path)
-            if cached is not None and not is_stale(cached, self.cfg.market_worth_cache_days):
-                await message.answer(
-                    _render_worth(cached, age_days(cached)),
-                    parse_mode="HTML",
-                    link_preview_options=_no_preview(),
-                )
-                return
-
-        sent = await message.answer("⏳ Ищу данные по рынку…")
+        sent = await message.answer("⏳ Считаю вилку из пайплайна…")
         try:
             import asyncio as _asyncio
             result = await _asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: get_or_refresh(self.cfg, profile, force=True),
+                lambda: get_or_refresh(self.conn, self.cfg),
             )
-            reply = _render_worth(result, age_days(result))
+            reply = _render_worth(result)
         except Exception as exc:
-            if "credit balance" in str(exc) or "402" in str(exc):
-                reply = "⚠️ Anthropic API: кончился баланс — пополни на console.anthropic.com → Billing"
-            else:
-                reply = f"⚠️ Не удалось получить данные о рынке: {exc}"
+            reply = f"⚠️ Не удалось посчитать данные о рынке: {exc}"
         await sent.edit_text(reply, parse_mode="HTML")
 
     async def handle_url_message(self, message) -> None:  # noqa: ANN001
@@ -1333,6 +1302,7 @@ def build_deps(cfg: Config) -> Deps:
         cheap_model=cfg.cheap_model, judge_model=cfg.judge_model,
         corridor_lo=cfg.score_corridor_lo, corridor_hi=cfg.score_corridor_hi,
         profile=profile,
+        min_persist_score=cfg.min_persist_score,
     )
 
 

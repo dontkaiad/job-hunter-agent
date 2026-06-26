@@ -70,6 +70,10 @@ class Deps:
     # Defaults to the GENERIC example profile so deterministic-only / test runs
     # work without personal data; live runs inject the loaded local profile.
     profile: Profile = field(default_factory=example_profile)
+    # Minimum score to persist a vacancy in work_items permanently.
+    # Items scoring below this threshold are DELETED from work_items after
+    # scoring — they never reach a terminal 'rejected' row. 0 = disabled.
+    min_persist_score: int = 0
 
 
 @dataclass
@@ -322,6 +326,20 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
     extracted = _load_extracted(item)
     if extracted is None:
         return AdvanceResult("noop", item.id, item.state, reason="missing extracted_json")
+
+    score = extracted.relevance_score if extracted.relevance_score is not None else 0
+    min_persist = deps.min_persist_score if deps is not None else 0
+    if min_persist > 0 and score < min_persist:
+        store.delete_item(conn, item.id)
+        print(
+            f"[harvest] dropped id={item.id} url={item.source_link!r} "
+            f"score={score} < {min_persist}",
+            flush=True,
+        )
+        return AdvanceResult(
+            "noop", item.id, item.state,
+            reason=f"dropped: score {score} < min_persist {min_persist}",
+        )
 
     salary_rub = _salary_max_rub(extracted, deps)
     floor_rub = _salary_floor_rub(deps)

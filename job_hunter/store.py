@@ -368,6 +368,18 @@ def update_state(
         conn.commit()
 
 
+def delete_item(conn: psycopg.Connection, item_id: int) -> None:
+    """Delete a work_item and its transition audit log.
+
+    Used to drop low-score vacancies after scoring so they never persist in a
+    terminal state (rejected). The item briefly existed in discovered/extracted/
+    scored states during processing — this cleans it up completely.
+    """
+    conn.execute("DELETE FROM state_transitions WHERE item_id = %s", (item_id,))
+    conn.execute("DELETE FROM work_items WHERE id = %s", (item_id,))
+    conn.commit()
+
+
 def set_extracted(
     conn: psycopg.Connection, item_id: int, extracted_json: str, commit: bool = True
 ) -> None:

@@ -1,21 +1,19 @@
-"""Market Worth — web-grounded salary benchmark for the candidate.
+"""Market Worth — salary benchmark derived from the collected vacancy pipeline.
 
-Fetches current salary data via a web-search-enabled model, validates the
-result, caches it locally (JSON file), and serves it to the bot (/worth) and
-the dashboard (/market-worth).
+Aggregates salary data from work_items with relevance_score 50–100 (the
+relevant pool). Splits by market: Russian (RUB) vs international (EUR/USD or
+Jobicy source). Returns honest null / degraded when the sample is too small.
 
-Entry point: ``get_or_refresh(cfg, profile, force=False, _caller=None)``
+Entry point: ``compute_from_pipeline(conn, cfg)``
 
-``_caller`` is a test seam: pass a ``callable(prompt) -> str`` to bypass the
-real Anthropic web_search call in unit tests.
+For tests: ``_aggregate_salaries(salary_rows, min_sample)`` is pure (no DB).
 """
 
 from __future__ import annotations
 
 import json
-import re
 import threading
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from typing import List, Optional
 
 
@@ -26,401 +24,228 @@ from typing import List, Optional
 
 @dataclass
 class MarketWorthResult:
-    """Structured salary benchmark, validated and cache-ready."""
+    """Salary benchmark computed from the pipeline's relevant vacancy pool."""
 
-    ru_min: Optional[int]           # ₽ / month lower bound
-    ru_max: Optional[int]           # ₽ / month upper bound
+    ru_min: Optional[int]           # ₽/month P25 across RU vacancies
+    ru_max: Optional[int]           # ₽/month P75 across RU vacancies
     ru_currency: str                # always "RUB"
-    intl_min: Optional[int]         # € or $ / month lower bound
-    intl_max: Optional[int]         # € or $ / month upper bound
+    intl_min: Optional[int]         # €/month or $/month P25
+    intl_max: Optional[int]         # €/month or $/month P75
     intl_currency: str              # "EUR" or "USD"
-    sources: List[str]              # URLs or "Site: title" strings
-    reasoning_short: str            # 2-3 sentence summary
+    ru_sample_size: int             # vacancies with RU salary data
+    intl_sample_size: int           # vacancies with intl salary data
+    min_sample: int                 # threshold to show a range
+    total_relevant_vacancies: int   # vacancies with score 50–100
+    sources: List[str]              # always ["work_items pipeline"]
+    reasoning_short: str            # human-readable summary
     computed_at: str                # ISO-8601 timestamp
     degraded: bool = False
     degraded_reason: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# Sanity-check bounds (overridable via Config)
-# ---------------------------------------------------------------------------
-
-DEFAULT_RU_MIN_FLOOR    = 50_000
-DEFAULT_RU_MAX_CEILING  = 700_000
-DEFAULT_INTL_MIN_FLOOR  = 1_000
-DEFAULT_INTL_MAX_CEILING = 15_000
-
-
-# ---------------------------------------------------------------------------
-# Prompt
+# Pure aggregation (testable without DB)
 # ---------------------------------------------------------------------------
 
 
-def _build_prompt(profile) -> str:
-    """Render the web-search prompt from the candidate profile."""
-    def _bullets(items):
-        if not items:
-            return "  - (unspecified)"
-        return "\n".join(f"  - {x}" for x in items)
-
-    return (
-        "You are a salary research assistant. Search the web to find CURRENT (2025-2026) "
-        "salary data for the candidate profile below.\n\n"
-        "CANDIDATE PROFILE:\n"
-        f"- Role: {profile.role}\n"
-        f"- Grade: {profile.target_grade}\n"
-        "- Skills: "
-        f"{', '.join(profile.hands_on) if profile.hands_on else 'AI/LLM engineering'}\n"
-        "- Stack: "
-        f"{', '.join(profile.stack) if profile.stack else 'Python'}\n\n"
-        "SEARCH BOTH MARKETS SEPARATELY and report each:\n\n"
-        "MARKET 1 — Russia (₽/month):\n"
-        "  Search: AI инженер зарплата 2025, Prompt Engineer зарплата hh.ru, "
-        "LLM инженер оклад, ИИ инженер Хабр Карьера зарплаты.\n"
-        "  Sources to try: hh.ru/vacancy statistics, habr.com career survey, "
-        "getmatch.ru, zarplata.ru, moikrug.ru.\n"
-        "  Give a typical RANGE (lower bound AND upper bound) for this grade.\n\n"
-        "MARKET 2 — International remote (€/month or $/month):\n"
-        "  Search: AI/Prompt/LLM Engineer remote salary Europe 2025, "
-        "middle-level AI engineer compensation international.\n"
-        "  Sources to try: levels.fyi, glassdoor, LinkedIn salary insights, "
-        "Eurostat IT salaries, EU job boards, remote.com.\n"
-        "  Give a typical RANGE (lower bound AND upper bound) for this grade.\n\n"
-        "RULES:\n"
-        "- For EACH market give BOTH a minimum AND a maximum (e.g. '150 000–280 000 ₽').\n"
-        "- If a market has limited data, give a wide honest range rather than leaving it empty.\n"
-        "- Mention each source by name or URL when you cite a number.\n"
-        "- Be ACCURATE — the candidate will make career decisions from this.\n\n"
-        "Write a clear prose summary covering both markets. Cite sources explicitly."
-    )
+def _percentile(sorted_vals: list, pct: float) -> Optional[float]:
+    """Linear interpolation percentile. pct in [0, 100]."""
+    if not sorted_vals:
+        return None
+    idx = (len(sorted_vals) - 1) * pct / 100
+    lo = int(idx)
+    hi = lo + 1
+    if hi >= len(sorted_vals):
+        return sorted_vals[lo]
+    return sorted_vals[lo] * (1 - idx + lo) + sorted_vals[hi] * (idx - lo)
 
 
-# ---------------------------------------------------------------------------
-# Web-search call (Anthropic tool_use)
-# ---------------------------------------------------------------------------
-
-
-def _extract_urls_from_text(text: str) -> list:
-    """Pull URLs and known job-board domains from prose. Used to populate
-    sources[] reliably without relying on the structuring model to find them."""
-    urls = re.findall(r'https?://[^\s\)\]\",<>]+', text)
-    domains = re.findall(
-        r'\b(?:hh\.ru|habr\.com|glassdoor\.com|linkedin\.com|levels\.fyi'
-        r'|getmatch\.ru|zarplata\.ru|moikrug\.ru|remote\.com|salary\.ru'
-        r'|weworkremotely\.com|indeed\.com|euremotejobs\.com|jobspresso\.co)\b',
-        text, re.IGNORECASE,
-    )
-    seen: set = set()
-    result = []
-    for s in urls + domains:
-        s = s.rstrip('.,;:)\'"')
-        if s and s not in seen:
-            seen.add(s)
-            result.append(s)
-    return result[:12]
-
-
-def _build_extraction_prompt(research_text: str, detected_sources: list) -> str:
-    sources_hint = (
-        "\n\nSOURCES DETECTED IN TEXT — include ALL of these verbatim in sources[]:\n"
-        + "\n".join(f"  - {s}" for s in detected_sources)
-        if detected_sources else ""
-    )
-    return (
-        "Extract salary benchmark data from the research text below.\n"
-        "Return ONLY valid JSON, no markdown fences, no prose.\n\n"
-        "EXTRACTION RULES — NO estimation or fabrication allowed:\n\n"
-        "ru_min, ru_max (Russian salary, ₽/month):\n"
-        "  - Text gives a range (e.g. '150 000–280 000 ₽') → extract both as integers.\n"
-        "  - Text gives one value → set ru_min to that value, ru_max to null.\n"
-        "  - Text gives no Russian salary data → set BOTH to null.\n"
-        "  - NEVER invent, estimate, or calculate a value not in the text.\n\n"
-        "intl_min, intl_max (international remote salary, €/month or $/month):\n"
-        "  - Same rules as above.\n"
-        "  - NEVER multiply or extrapolate a missing bound.\n\n"
-        "ru_currency: always \"RUB\".\n"
-        "intl_currency: \"EUR\" if euros mentioned or currency unclear, "
-        "\"USD\" only if dollars explicitly stated.\n\n"
-        "sources: include ALL entries from the detected-sources list below, "
-        "plus any other URLs or site names you see cited in the text.\n\n"
-        "reasoning_short: 2-3 sentences. If data for a market is missing or "
-        "incomplete, say so explicitly (e.g. 'Russian market data was not found "
-        "in the searched sources.').\n"
-        f"{sources_hint}\n\n"
-        "JSON schema — null is valid for missing salary bounds:\n"
-        '{"ru_min": 150000, "ru_max": 280000, "ru_currency": "RUB", '
-        '"intl_min": 4500, "intl_max": null, "intl_currency": "EUR", '
-        '"sources": ["hh.ru", "glassdoor.com"], '
-        '"reasoning_short": "..."}\n\n'
-        "Research text:\n"
-        + research_text
-    )
-
-
-def _call_with_web_search(
-    api_key: str,
-    model: str,
-    prompt: str,
+def _aggregate_salaries(
+    salary_rows: list,
+    min_sample: int,
     *,
-    _caller=None,
-) -> str:
-    """Two-step call: web-grounded research → JSON extraction.
+    total_relevant: int = 0,
+) -> MarketWorthResult:
+    """Pure function: aggregate salary_rows into a MarketWorthResult.
 
-    Step 1 (model + web_search_20250305): search the web and produce prose with
-    citations. Asking for JSON here is futile — web_search mode makes the model
-    write narrative answers with inline citations and ignore format instructions.
+    salary_rows: list of dicts with keys salary_min, salary_max, currency,
+    source_channel. None is allowed for missing bounds.
 
-    Step 2 (claude-haiku-4-5, no tools): structure the prose into the required
-    JSON schema. No web access needed; the grounded data is already in the prose.
-
-    ``_caller(prompt) -> str`` is a test seam that bypasses both API calls.
+    RU:   currency == "RUB"
+    Intl: currency in ("EUR", "USD") OR source_channel starts with "jobicy"
     """
-    if _caller is not None:
-        return _caller(prompt)
+    from .clock import now_iso
 
-    import anthropic as _anthropic
+    ru_vals: list = []    # flat list of non-None salary numbers from RU vacancies
+    intl_vals: list = []  # flat list from intl vacancies
+    intl_currencies: list = []
 
-    client = _anthropic.Anthropic(api_key=api_key)
+    for row in salary_rows:
+        s_min = row.get("salary_min")
+        s_max = row.get("salary_max")
+        currency = (row.get("currency") or "").upper().strip()
+        source_ch = (row.get("source_channel") or "").lower()
 
-    # --- step 1: grounded research ---
-    research_resp = client.messages.create(
-        model=model,
-        max_tokens=3000,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content": prompt}],
+        if not currency:
+            continue
+
+        is_ru = currency == "RUB"
+        is_intl = currency in ("EUR", "USD") or source_ch.startswith("jobicy")
+
+        nums = [v for v in (s_min, s_max) if v is not None]
+        if not nums:
+            continue
+
+        if is_ru:
+            ru_vals.extend(nums)
+        elif is_intl:
+            intl_vals.extend(nums)
+            intl_currencies.append(currency)
+
+    # Sample sizes = vacancies that contributed at least one value
+    ru_sample = sum(
+        1 for row in salary_rows
+        if (row.get("currency") or "").upper() == "RUB"
+        and (row.get("salary_min") is not None or row.get("salary_max") is not None)
     )
-    research_text = next(
-        (b.text for b in reversed(research_resp.content)
-         if getattr(b, "type", None) == "text"),
-        None,
+    intl_currency = (
+        max(set(intl_currencies), key=intl_currencies.count)
+        if intl_currencies else "EUR"
     )
-    if not research_text:
-        raise ValueError("web_search response contained no text block")
-
-    print(f"[market_worth] research_text[:600]={research_text[:600]!r}", flush=True)
-
-    # Extract URLs / domain names from prose directly — more reliable than
-    # asking Haiku to find them, since Haiku tends to skip citation mining.
-    detected_sources = _extract_urls_from_text(research_text)
-    print(f"[market_worth] detected_sources={detected_sources}", flush=True)
-
-    # --- step 2: JSON extraction (cheap, deterministic) ---
-    # Assistant prefill ("{") forces Haiku to start with "{" — cannot write
-    # "Here is the JSON:" or any other preamble. Prepend the brace back after.
-    extraction_prompt = _build_extraction_prompt(research_text, detected_sources)
-    extraction_resp = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=1000,
-        messages=[
-            {"role": "user", "content": extraction_prompt},
-            {"role": "assistant", "content": "{"},
-        ],
+    intl_sample = sum(
+        1 for row in salary_rows
+        if (
+            (row.get("currency") or "").upper() in ("EUR", "USD")
+            or (row.get("source_channel") or "").lower().startswith("jobicy")
+        )
+        and (row.get("salary_min") is not None or row.get("salary_max") is not None)
     )
-    continuation = next(
-        (b.text for b in reversed(extraction_resp.content)
-         if getattr(b, "type", None) == "text"),
-        None,
+
+    # Compute ranges (P25–P75 across all salary values in the pool)
+    ru_min = ru_max = None
+    if ru_sample >= min_sample and ru_vals:
+        sv = sorted(ru_vals)
+        ru_min = int(round(_percentile(sv, 25)))
+        ru_max = int(round(_percentile(sv, 75)))
+        if ru_min == ru_max:
+            ru_max = None  # single-cluster — show min only
+
+    intl_min = intl_max = None
+    if intl_sample >= min_sample and intl_vals:
+        sv = sorted(intl_vals)
+        intl_min = int(round(_percentile(sv, 25)))
+        intl_max = int(round(_percentile(sv, 75)))
+        if intl_min == intl_max:
+            intl_max = None
+
+    # Build degraded reasons
+    reasons: list = []
+    if ru_sample < min_sample:
+        reasons.append(
+            f"Россия: {ru_sample} из {min_sample} вакансий с данными о зарплате"
+        )
+    if intl_sample < min_sample:
+        reasons.append(
+            f"Международный: {intl_sample} из {min_sample} вакансий с данными о зарплате"
+        )
+
+    degraded = bool(reasons)
+
+    # Summary
+    if degraded:
+        reasoning = (
+            "Данных пока недостаточно для надёжной оценки. "
+            + " | ".join(reasons)
+            + ". Продолжаем собирать."
+        )
+    else:
+        reasoning = (
+            f"По {ru_sample} РФ и {intl_sample} международным вакансиям "
+            f"со скором 50–100 (диапазон P25–P75)."
+        )
+
+    return MarketWorthResult(
+        ru_min=ru_min,
+        ru_max=ru_max,
+        ru_currency="RUB",
+        intl_min=intl_min,
+        intl_max=intl_max,
+        intl_currency=intl_currency,
+        ru_sample_size=ru_sample,
+        intl_sample_size=intl_sample,
+        min_sample=min_sample,
+        total_relevant_vacancies=total_relevant,
+        sources=["work_items pipeline"],
+        reasoning_short=reasoning,
+        computed_at=now_iso(),
+        degraded=degraded,
+        degraded_reason="; ".join(reasons) if reasons else None,
     )
-    if not continuation:
-        raise ValueError("JSON extraction response contained no text block")
-    json_text = "{" + continuation
-    print(f"[market_worth] json_text[:400]={json_text[:400]!r}", flush=True)
-    return json_text
 
 
 # ---------------------------------------------------------------------------
-# Parse & validate
+# DB computation
 # ---------------------------------------------------------------------------
 
 
-def _extract_json(raw: str) -> dict:
-    """Extract the first JSON object from raw model text."""
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-    if m:
-        return json.loads(m.group(1))
-    m = re.search(r"\{.*\}", raw, re.DOTALL)
-    if m:
-        return json.loads(m.group(0))
-    raise ValueError("no JSON object in model response")
+def compute_from_pipeline(conn, cfg) -> MarketWorthResult:
+    """Query work_items with score 50–100 and aggregate salary data.
+
+    Pure-SQL aggregation — zero API calls.
+    """
+    min_sample = getattr(cfg, "market_min_sample", 3)
+
+    rows = conn.execute(
+        """
+        SELECT extracted_json, relevance_score, source_channel
+        FROM work_items
+        WHERE relevance_score >= 50
+          AND extracted_json IS NOT NULL
+          AND state NOT IN ('rejected', 'closed', 'declined')
+        """,
+    ).fetchall()
+
+    total_relevant = len(rows)
+
+    salary_rows: list = []
+    for row in rows:
+        try:
+            e = json.loads(row["extracted_json"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        salary_rows.append({
+            "salary_min": e.get("salary_min"),
+            "salary_max": e.get("salary_max"),
+            "currency": e.get("currency"),
+            "source_channel": row["source_channel"] or "",
+        })
+
+    return _aggregate_salaries(salary_rows, min_sample, total_relevant=total_relevant)
 
 
-def _validate(result: MarketWorthResult, cfg) -> MarketWorthResult:
-    """Return result with degraded=True if any sanity check fails."""
-    reasons: list[str] = []
+# ---------------------------------------------------------------------------
+# Main entry point (compatibility wrapper — no cache, always fresh from DB)
+# ---------------------------------------------------------------------------
 
-    # sources presence is checked, but authenticity is not verified —
-    # relies on web_search grounding (the tool forces real fetches before the
-    # model writes). A model that ignores web results and invents citations
-    # would still pass this check; the only mitigation is the tool being enabled.
-    if not result.sources:
-        reasons.append("no sources returned — result may be hallucinated")
 
-    ru_floor   = getattr(cfg, "market_worth_ru_min",   DEFAULT_RU_MIN_FLOOR)
-    ru_ceil    = getattr(cfg, "market_worth_ru_max",   DEFAULT_RU_MAX_CEILING)
-    intl_floor = getattr(cfg, "market_worth_intl_min", DEFAULT_INTL_MIN_FLOOR)
-    intl_ceil  = getattr(cfg, "market_worth_intl_max", DEFAULT_INTL_MAX_CEILING)
-
-    if result.ru_min is None and result.ru_max is None:
-        reasons.append("Russian salary data not found in research")
-    elif result.ru_min is not None and result.ru_max is not None:
-        if result.ru_min > result.ru_max:
-            reasons.append(f"ru_min ({result.ru_min}) > ru_max ({result.ru_max})")
-        elif not (ru_floor <= result.ru_min and result.ru_max <= ru_ceil):
-            reasons.append(
-                f"RU range {result.ru_min}–{result.ru_max} outside bounds "
-                f"[{ru_floor}, {ru_ceil}]"
-            )
-    elif result.ru_max is None:
-        reasons.append("Russian salary upper bound not confirmed by sources")
-
-    if result.intl_min is None and result.intl_max is None:
-        reasons.append("International salary data not found in research")
-    elif result.intl_min is not None and result.intl_max is not None:
-        if result.intl_min > result.intl_max:
-            reasons.append(f"intl_min ({result.intl_min}) > intl_max ({result.intl_max})")
-        elif not (intl_floor <= result.intl_min and result.intl_max <= intl_ceil):
-            reasons.append(
-                f"intl range {result.intl_min}–{result.intl_max} outside bounds "
-                f"[{intl_floor}, {intl_ceil}]"
-            )
-    elif result.intl_max is None:
-        reasons.append("International salary upper bound not confirmed by sources")
-
-    if reasons:
-        return replace(result, degraded=True, degraded_reason="; ".join(reasons))
+def get_or_refresh(conn, cfg) -> MarketWorthResult:
+    """Compute a fresh MarketWorthResult from the pipeline DB."""
+    result = compute_from_pipeline(conn, cfg)
+    _log(
+        f"📊 market_worth: RU {result.ru_min}–{result.ru_max} ₽ "
+        f"(n={result.ru_sample_size}) | "
+        f"intl {result.intl_min}–{result.intl_max} {result.intl_currency} "
+        f"(n={result.intl_sample_size}) | degraded={result.degraded}"
+    )
     return result
 
 
-def _parse_and_validate(raw: str, cfg) -> MarketWorthResult:
-    """Parse model text → validated MarketWorthResult."""
-    from .clock import now_iso
-
-    data = _extract_json(raw)
-    result = MarketWorthResult(
-        ru_min=data.get("ru_min"),
-        ru_max=data.get("ru_max"),
-        ru_currency=data.get("ru_currency", "RUB"),
-        intl_min=data.get("intl_min"),
-        intl_max=data.get("intl_max"),
-        intl_currency=data.get("intl_currency", "EUR"),
-        sources=list(data.get("sources") or []),
-        reasoning_short=str(data.get("reasoning_short") or ""),
-        computed_at=now_iso(),
-    )
-    return _validate(result, cfg)
-
-
 # ---------------------------------------------------------------------------
-# Cache (JSON file)
-# ---------------------------------------------------------------------------
-
-
-def load_cache(path: str) -> Optional[MarketWorthResult]:
-    """Load the last cached result; return None on miss or corrupt file."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return MarketWorthResult(**data)
-    except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
-        return None
-
-
-def save_cache(result: MarketWorthResult, path: str) -> None:
-    """Persist result to disk."""
-    import os
-    parent = os.path.dirname(os.path.abspath(path))
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(asdict(result), f, ensure_ascii=False, indent=2)
-
-
-def is_stale(result: MarketWorthResult, max_age_days: int) -> bool:
-    """True if result is older than max_age_days."""
-    from datetime import datetime, timezone
-
-    try:
-        computed = datetime.fromisoformat(result.computed_at)
-        if computed.tzinfo is None:
-            computed = computed.replace(tzinfo=timezone.utc)
-        age = (datetime.now(timezone.utc) - computed).days
-        return age >= max_age_days
-    except (ValueError, TypeError):
-        return True
-
-
-def age_days(result: MarketWorthResult) -> int:
-    """Return how many full days old result is (0 if < 1 day)."""
-    from datetime import datetime, timezone
-
-    try:
-        computed = datetime.fromisoformat(result.computed_at)
-        if computed.tzinfo is None:
-            computed = computed.replace(tzinfo=timezone.utc)
-        return max(0, (datetime.now(timezone.utc) - computed).days)
-    except (ValueError, TypeError):
-        return 0
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-
-def get_or_refresh(
-    cfg,
-    profile,
-    *,
-    force: bool = False,
-    _caller=None,
-) -> MarketWorthResult:
-    """Return a fresh-or-cached MarketWorthResult.
-
-    - Returns cached result if within max_age_days and not forced.
-    - Fetches via web_search otherwise.
-    - On fetch failure: returns stale cache marked degraded, or re-raises if
-      no cache exists.
-    """
-    cache_path = cfg.market_worth_cache_path
-    max_age = cfg.market_worth_cache_days
-    cached = load_cache(cache_path)
-
-    if cached is not None and not force and not is_stale(cached, max_age):
-        return cached
-
-    try:
-        prompt = _build_prompt(profile)
-        raw = _call_with_web_search(
-            cfg.anthropic_api_key or "",
-            cfg.market_model,
-            prompt,
-            _caller=_caller,
-        )
-        result = _parse_and_validate(raw, cfg)
-        save_cache(result, cache_path)
-        _log(
-            f"📊 market_worth: RU {result.ru_min}–{result.ru_max} ₽ | "
-            f"intl {result.intl_min}–{result.intl_max} {result.intl_currency} | "
-            f"degraded={result.degraded}"
-        )
-        return result
-    except Exception as exc:
-        _log(f"⚠️ market_worth refresh failed: {exc!r}")
-        if cached is not None:
-            return replace(
-                cached, degraded=True,
-                degraded_reason=f"refresh failed: {exc}",
-            )
-        raise
-
-
-# ---------------------------------------------------------------------------
-# Logging (fire-and-forget from sync context)
+# Logging
 # ---------------------------------------------------------------------------
 
 
 def _log(msg: str) -> None:
-    """Print to stdout (visible in docker logs); best-effort send to tg_logger."""
     print(f"[market_worth] {msg}", flush=True)
 
     def _bg():

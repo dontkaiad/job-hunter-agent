@@ -70,7 +70,7 @@ export default function Sidebar() {
           <div className="profile-name">{profileName}</div>
           <div className="profile-role">{profileRole}</div>
           <NavLink to="/market-worth" className="profile-salary">
-            {mw && !mw.degraded && (mw.ru_min || mw.intl_min) ? (
+            {mw && !mw.degraded && (mw.ru_min != null || mw.intl_min != null) ? (
               <>
                 {mw.ru_min != null && (
                   <span className="profile-salary-line">

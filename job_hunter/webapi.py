@@ -845,75 +845,40 @@ def add_item(
 
 # --- Market Worth endpoints --------------------------------------------------
 #
-# GET  /api/market-worth   — return cached result (fresh or stale-with-flag).
-#                            404 if no cache exists at all.
-# POST /api/market-worth/refresh — force web-search refresh, return new result.
-#                            Slow (~10-30s); runs synchronously in a thread
-#                            (FastAPI wraps sync routes automatically).
-
-
-def _get_profile():
-    """Load the candidate profile (local real profile if present, else example)."""
-    from .profile import load_profile
-
-    return load_profile()
+# GET  /api/market-worth   — compute salary benchmark from pipeline DB and return.
+# POST /api/market-worth/refresh — same (recomputes from DB, instant, zero API).
 
 
 @router.get("/market-worth")
 def get_market_worth(
     config: Config = Depends(get_config),
+    conn: psycopg.Connection = Depends(get_conn),
 ) -> dict:
-    """Return the cached MarketWorthResult as JSON.
+    """Compute and return a salary benchmark from the pipeline's relevant vacancies.
 
-    Returns 200 with the cached data (which may be stale or degraded).
-    Returns 404 when no cache file exists yet (first run before any refresh).
+    Aggregates salary data from work_items with score 50–100. No LLM call.
+    Returns degraded=true with reason when the sample is below market_min_sample.
     """
-    from .market_worth import age_days, is_stale, load_cache
-
-    result = load_cache(config.market_worth_cache_path)
-    if result is None:
-        raise HTTPException(status_code=404, detail="no market worth data yet — run refresh")
-
     from dataclasses import asdict
 
-    data = asdict(result)
-    data["age_days"] = age_days(result)
-    data["stale"] = is_stale(result, config.market_worth_cache_days)
-    return data
+    from .market_worth import get_or_refresh
+
+    result = get_or_refresh(conn, config)
+    return asdict(result)
 
 
 @writer_router.post("/market-worth/refresh")
 def refresh_market_worth(
     config: Config = Depends(get_config),
+    conn: psycopg.Connection = Depends(get_conn),
 ) -> dict:
-    """Force a web-search refresh of the salary benchmark.
-
-    Slow endpoint (~10-30s) — calls Anthropic with the web_search tool.
-    Returns the new MarketWorthResult as JSON.
-    """
+    """Recompute the salary benchmark from the pipeline DB (instant, zero API)."""
     from dataclasses import asdict
 
-    from .market_worth import age_days, get_or_refresh, is_stale
-    from .profile import load_profile
+    from .market_worth import get_or_refresh
 
-    profile = load_profile()
-    try:
-        result = get_or_refresh(config, profile, force=True)
-    except Exception as exc:
-        # Surface Anthropic billing errors as 503 instead of 500 so the
-        # frontend can show a human-readable message.
-        msg = str(exc)
-        if "credit balance" in msg or "402" in msg:
-            raise HTTPException(
-                status_code=503,
-                detail="Anthropic API: insufficient credits — go to console.anthropic.com → Billing",
-            )
-        raise
-
-    data = asdict(result)
-    data["age_days"] = age_days(result)
-    data["stale"] = is_stale(result, config.market_worth_cache_days)
-    return data
+    result = get_or_refresh(conn, config)
+    return asdict(result)
 
 
 # --- Public auth routes (issue #5): NOT gated -------------------------------
