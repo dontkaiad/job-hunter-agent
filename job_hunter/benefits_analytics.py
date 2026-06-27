@@ -23,6 +23,10 @@ from typing import Dict, List, Optional
 # Mirrors extract._BENEFIT_LABELS exactly — kept in sync manually.
 # RU label is used for display in the analytics block.
 # ---------------------------------------------------------------------------
+# Keys excluded from the analytics display (tracked in data but not surfaced
+# to the UI — e.g. remote_perk is redundant with the dedicated Format block).
+BENEFITS_DISPLAY_EXCLUDE: set = {"remote_perk"}
+
 BENEFIT_REGISTRY: Dict[str, tuple] = {
     "health_insurance": ("ДМС / медстраховка", "Health insurance"),
     "remote_perk": ("Удалёнка", "Remote work"),
@@ -133,6 +137,7 @@ def _aggregate_benefits(
             "pct": round(c / base * 100, 1),
         }
         for k, c in sorted_freq
+        if k not in BENEFITS_DISPLAY_EXCLUDE
     ]
     benefits_freq = {k: c for k, c in sorted_freq}
 
