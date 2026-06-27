@@ -47,18 +47,23 @@ function SalaryScale({ p25, p75, currency, sampleSize, total, minSample }) {
   const hasData = p25 != null;
   const scaleMax = SCALE_MAX[currency] ?? 600000;
   const p75real = p75 ?? p25;
+  const shortSym = currency === "RUB" ? "к₽" : currency === "USD" ? "k$" : "k€";
+
+  // When accumulating: bar shows data-collection progress (sampleSize/minSample)
+  const accPct = minSample > 0 ? Math.min(100, (sampleSize / minSample) * 100) : 0;
+
   const leftPct = hasData ? Math.max(0, Math.min(100, (p25 / scaleMax) * 100)) : 0;
   const widthPct = hasData
     ? Math.max(2, Math.min(100 - leftPct, ((p75real - p25) / scaleMax) * 100))
     : 0;
-  const shortSym = currency === "RUB" ? "к₽" : currency === "USD" ? "k$" : "k€";
 
   return (
     <div className="mw-salary-scale-wrap">
-      <div className={`mw-salary-scale${hasData ? "" : " mw-salary-scale--empty"}`}>
-        {hasData && (
-          <div className="mw-salary-scale-seg" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
-        )}
+      <div className="mw-salary-scale">
+        {hasData
+          ? <div className="mw-salary-scale-seg" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
+          : <div className="mw-salary-scale-seg mw-salary-scale-seg--acc" style={{ left: "0%", width: `${accPct}%` }} />
+        }
       </div>
       <div className={`mw-salary-caption${hasData ? "" : " mw-salary-caption--acc"}`}>
         {hasData
