@@ -56,10 +56,10 @@ export default function Sidebar() {
           <div className="profile-role">{profileRole}</div>
           <NavLink to="/market-worth" className="profile-salary">
             <span className="profile-salary-line">
-              🇷🇺 <span className="profile-salary-val">200–300к ₽</span>
+              🇷🇺 <span className="profile-salary-val">200–300к</span>
             </span>
             <span className="profile-salary-line">
-              🌍 <span className="profile-salary-val">$4.5–8k</span>
+              🌍 <span className="profile-salary-val">4.5–8k</span>
             </span>
           </NavLink>
         </div>
