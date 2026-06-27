@@ -601,7 +601,7 @@ h1::before {
   box-shadow: 0 0 8px rgba(84, 199, 182, 0.5);
 }
 .lane-arrow {
-  font-size: 10px;
+  font-size: 16px;
   color: var(--ink-3);
   line-height: 1;
   flex-shrink: 0;
