@@ -606,7 +606,6 @@ h1::before {
   line-height: 1;
   flex-shrink: 0;
   transition: color 0.15s;
-  margin-left: auto;
 }
 .lane-count {
   font-family: var(--mono);
@@ -618,6 +617,7 @@ h1::before {
   border: 1px solid var(--line-2);
   border-radius: var(--radius);
   padding: 1px 7px;
+  margin-left: auto;
 }
 
 /* ============================ TABLE ==================================== */
