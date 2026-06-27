@@ -1289,18 +1289,18 @@ h1::before {
 
 /* ============================ MARKET WORTH ================================= */
 .market-worth-view .view-list {
-  max-width: 1100px;
+  max-width: 1060px;
 }
 .market-worth-view h1 {
   margin-bottom: 0;
 }
 
-/* Header row: title + n=X */
+/* Header row */
 .mw-header {
   display: flex;
   align-items: baseline;
   gap: 14px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 .mw-header-n {
   font-family: var(--mono);
@@ -1309,96 +1309,7 @@ h1::before {
   letter-spacing: 0.04em;
 }
 
-/* 2-column grid of analytics cards */
-.mw-grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-items: start;
-  min-width: 0;
-}
-
-/* Individual analytics card */
-.mw-block-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 18px 20px;
-}
-
-/* Card title row */
-.mw-card-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-.mw-card-title {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-.mw-card-meta {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-4);
-}
-
-/* Sample count note inside salary cards */
-.mw-sample-note {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-4);
-  margin-top: 6px;
-}
-
-/* Benchmark inside salary card */
-.mw-benchmark-incard {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-/* Tab stubs / empty states */
-.tab-empty {
-  font-size: 13px;
-  color: var(--ink-3);
-  padding: 32px 0;
-}
-.tab-stub {
-  padding: 32px 0;
-}
-.tab-stub-label {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  display: inline-block;
-  padding: 3px 8px;
-  margin-bottom: 12px;
-}
-.tab-stub-text {
-  font-size: 13px;
-  color: var(--ink-3);
-  line-height: 1.6;
-  margin: 0;
-}
-.tab-stub-text code {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-2);
-  background: var(--panel-2);
-  padding: 1px 5px;
-  border-radius: var(--radius);
-}
-
-
+/* Warning box */
 .market-worth-warning {
   font-family: var(--mono);
   font-size: 12px;
@@ -1407,354 +1318,225 @@ h1::before {
   background: rgba(224, 138, 43, 0.06);
   border-radius: var(--radius);
   padding: 8px 12px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
-.market-worth-grid {
+/* ── TOP CARD ─────────────────────────────────────────────────────────────── */
+.mw-top-card {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-.market-worth-card {
-  background: var(--panel-2);
+  grid-template-columns: 1.6fr auto 1fr;
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 18px 20px;
-  position: relative;
-}
-.market-worth-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  background: var(--teal-dim);
-  border-radius: 0 var(--radius) var(--radius) 0;
-}
-.market-worth-label {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin-bottom: 10px;
-}
-.market-worth-range {
-  font-family: var(--mono);
-  font-size: 19px;
-  font-weight: 600;
-  color: var(--teal-bri);
-  letter-spacing: -0.01em;
-  line-height: 1.1;
-}
-
-.market-worth-reasoning {
-  font-size: 13px;
-  color: var(--ink-2);
-  line-height: 1.6;
-  margin: 0 0 20px;
-  padding: 14px 16px;
-  background: var(--panel);
-  border-left: 2px solid var(--teal-dim);
-  border-radius: 0 var(--radius) var(--radius) 0;
-}
-
-.market-worth-sources {
-  margin-bottom: 20px;
-}
-.market-worth-sources-title {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin-bottom: 8px;
-}
-.market-worth-sources ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.market-worth-sources li {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.market-worth-sources li::before {
-  content: "· ";
-  color: var(--teal-dim);
-}
-.market-worth-sources a {
-  color: var(--teal);
-  text-decoration: none;
-}
-.market-worth-sources a:hover {
-  color: var(--teal-bri);
-  text-decoration: underline;
-}
-
-.market-worth-meta {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-4);
-  letter-spacing: 0.04em;
-}
-
-/* Pipeline stats row */
-.market-worth-stats {
-  display: flex;
-  gap: 24px;
-  margin-bottom: 24px;
-  padding: 14px 18px;
-  background: var(--panel);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius);
-}
-.market-worth-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.market-worth-stat-val {
-  font-family: var(--mono);
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--teal-bri);
-  line-height: 1;
-}
-.market-worth-stat-label {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
-/* Accumulating indicator inside salary card */
-.market-worth-accumulating .market-worth-range {
-  font-size: 15px;
-  color: var(--ink-3);
-  margin-bottom: 10px;
-}
-.sample-bar-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.sample-bar {
-  flex: 1;
-  height: 4px;
-  background: var(--line);
-  border-radius: 2px;
+  margin-bottom: 16px;
   overflow: hidden;
 }
-.sample-bar-fill {
-  height: 100%;
-  background: var(--teal-dim);
-  border-radius: 2px;
-  transition: width 0.3s ease;
+.mw-salary-col {
+  padding: 22px 26px;
 }
-.sample-bar-label {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-3);
-  white-space: nowrap;
+.mw-vdivider {
+  width: 1px;
+  background: var(--line);
+}
+.mw-benchmark-col {
+  padding: 22px 22px;
 }
 
-.market-worth-empty {
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--ink-3);
-  padding: 32px 0;
-}
-.market-worth-empty p {
-  margin: 0 0 8px;
-}
-.market-worth-empty strong {
-  color: var(--teal-bri);
-}
-
-/* Static manual benchmark */
-.market-worth-benchmark {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--teal-dim);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-}
-.market-worth-benchmark-title {
+/* Section labels */
+.mw-section-label {
   font-family: var(--mono);
   font-size: 10px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: var(--teal);
-  margin-bottom: 2px;
+  color: var(--ink-3);
+  margin-bottom: 18px;
 }
-.market-worth-benchmark-subtitle {
+
+/* Salary rows */
+.mw-salary-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+.mw-salary-row:last-child {
+  margin-bottom: 0;
+}
+.mw-salary-flag {
+  font-size: 16px;
+  line-height: 1;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.mw-salary-body {
+  flex: 1;
+  min-width: 0;
+}
+.mw-salary-range {
+  font-family: var(--mono);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--teal-bri);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 8px;
+  white-space: nowrap;
+}
+.mw-salary-accumulating {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-4);
+  padding: 6px 0 4px;
+}
+
+/* Salary scale bar */
+.mw-salary-scale {
+  position: relative;
+  height: 5px;
+  background: var(--line);
+  border-radius: 3px;
+  margin-bottom: 5px;
+  overflow: hidden;
+}
+.mw-salary-scale-seg {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--teal);
+  opacity: 0.7;
+  border-radius: 3px;
+}
+.mw-salary-caption {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  letter-spacing: 0.02em;
+}
+
+/* Benchmark column */
+.mw-bench-subtitle {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-4);
   letter-spacing: 0.03em;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
-.market-worth-benchmark-rows {
+.mw-bench-row {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.market-worth-benchmark-row {
-  display: flex;
+  gap: 8px;
   align-items: flex-start;
-  gap: 7px;
+  margin-bottom: 12px;
 }
-.market-worth-benchmark-flag {
+.mw-bench-flag {
   font-size: 14px;
   line-height: 1.4;
   flex-shrink: 0;
 }
-.market-worth-benchmark-range {
+.mw-bench-range {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--teal-bri);
   letter-spacing: -0.01em;
   margin-bottom: 2px;
 }
-.market-worth-benchmark-note {
+.mw-bench-note {
   font-size: 10.5px;
   color: var(--ink-3);
   line-height: 1.45;
 }
-.market-worth-benchmark-sources {
+.mw-bench-aside {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  margin: 2px 0 12px 22px;
+}
+.mw-bench-sources {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-4);
   line-height: 1.55;
   border-top: 1px solid var(--line-2);
   padding-top: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
-.market-worth-benchmark-footer {
+.mw-bench-footer {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-4);
   font-style: italic;
 }
 
-/* Stack analytics block */
-.stack-block {
-  margin-top: 28px;
-  padding-top: 24px;
-  border-top: 1px solid var(--line);
+/* ── BOTTOM TILE GRID ─────────────────────────────────────────────────────── */
+.mw-bottom-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
 }
-.stack-block-header {
+.mw-ftblock {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.mw-ftblock-head {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
-.stack-block-title {
+.mw-ftblock-title {
   font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.07em;
+  font-size: 10px;
+  letter-spacing: 0.10em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.stack-block-meta {
+.mw-ftblock-n {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-4);
 }
-.stack-block-empty {
-  font-size: 13px;
-  color: var(--ink-3);
+.mw-tile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
 }
-.stack-list {
+.mw-tile {
+  height: 46px;
+  border-radius: calc(var(--radius) - 1px);
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-.stack-row {
-  display: grid;
-  grid-template-columns: 120px 1fr 40px 28px;
-  align-items: center;
-  gap: 8px;
-}
-.stack-tech {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--ink-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.stack-bar-wrap {
-  height: 5px;
-  background: var(--panel-2);
-  border-radius: 3px;
+  justify-content: space-between;
   overflow: hidden;
 }
-.stack-bar-fill {
-  height: 100%;
-  background: var(--teal-dim);
-  border-radius: 3px;
-  transition: width 0.3s ease;
+.mw-tile--empty {
+  background: var(--panel-2) !important;
+  border: 1px dashed var(--line-2);
 }
-.stack-pct {
+.mw-tile-label {
   font-family: var(--mono);
   font-size: 10px;
-  color: var(--ink-3);
-  text-align: right;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
 }
-.stack-count {
+.mw-tile-pct {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.mw-tile-more {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-4);
-  text-align: right;
-}
-
-/* Requirements tab */
-.req-relocation-card {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  background: var(--teal-deep);
-  border: 1px solid var(--teal-dim);
-  border-left: 3px solid var(--teal);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-  margin-bottom: 28px;
-}
-.req-relocation-val {
-  font-family: var(--mono);
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--teal-bri);
-  line-height: 1;
-  letter-spacing: -0.02em;
-}
-.req-relocation-label {
-  font-size: 13px;
-  color: var(--ink-2);
-  line-height: 1.4;
-}
-.req-relocation-abs {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-3);
-  margin-left: 4px;
-}
-.req-section {
-  margin-bottom: 28px;
-}
-.req-section:last-child {
-  margin-bottom: 0;
+  margin-top: 7px;
 }
 
 /* Compact salary under avatar in sidebar */
@@ -1766,14 +1548,21 @@ h1::before {
   color: var(--teal);
 }
 
-@media (max-width: 860px) {
-  .mw-grid {
+/* ── MOBILE ───────────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .mw-top-card {
     grid-template-columns: 1fr;
   }
+  .mw-vdivider {
+    width: auto;
+    height: 1px;
+  }
+  .mw-bottom-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
-
-@media (max-width: 640px) {
-  .market-worth-grid {
+@media (max-width: 560px) {
+  .mw-bottom-grid {
     grid-template-columns: 1fr;
   }
 }

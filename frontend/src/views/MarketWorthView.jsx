@@ -2,228 +2,204 @@ import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
 
 // ---------------------------------------------------------------------------
-// Shared helpers
+// Color scale for tiles — darkest = highest normalized value
 // ---------------------------------------------------------------------------
 
-function fmtRange(min, max, currency) {
-  const sym = { RUB: "₽", EUR: "€", USD: "$" }[currency] ?? currency;
-  const fmt = (n) => n == null ? null : n.toLocaleString("ru-RU");
-  if (min != null && max != null) return `${fmt(min)}–${fmt(max)} ${sym}/мес`;
-  if (min != null) return `от ${fmt(min)} ${sym}/мес (потолок не найден)`;
-  if (max != null) return `до ${fmt(max)} ${sym}/мес`;
-  return "нет данных";
+const TEAL_STOPS = [
+  { bg: "#C3EBDC", text: "#04342C" },
+  { bg: "#7FD3B5", text: "#04342C" },
+  { bg: "#5DAE91", text: "#04342C" },
+  { bg: "#2E8B6E", text: "#E1F5EE" },
+  { bg: "#0F6E56", text: "#E1F5EE" },
+];
+
+function tileColor(pct, maxPct) {
+  if (!maxPct) return TEAL_STOPS[0];
+  const t = pct / maxPct;
+  return TEAL_STOPS[Math.min(4, Math.floor(t * 5))];
 }
 
-function SampleBar({ current, min }) {
-  const pct = Math.min(100, (current / min) * 100);
+// ---------------------------------------------------------------------------
+// Salary formatting helpers
+// ---------------------------------------------------------------------------
+
+// Fixed scale max per currency for the P25-P75 bar positioning
+const SCALE_MAX = { RUB: 600000, USD: 12000, EUR: 10000 };
+
+function fmtRange(p25, p75, currency) {
+  const sym = { RUB: "₽", USD: "$", EUR: "€" }[currency] ?? currency;
+  const loc = (n) => n?.toLocaleString("ru-RU") ?? "?";
+  if (currency === "RUB") return `${loc(p25)} – ${loc(p75 ?? p25)} ${sym}`;
+  return `${sym}${loc(p25)} – ${sym}${loc(p75 ?? p25)}`;
+}
+
+function fmtShort(n, currency) {
+  if (n == null) return "?";
+  if (currency === "RUB") return n >= 1000 ? `${Math.round(n / 1000)}к` : String(n);
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+// ---------------------------------------------------------------------------
+// Salary scale bar — positions P25-P75 segment on a fixed reference scale
+// ---------------------------------------------------------------------------
+
+function SalaryScale({ p25, p75, currency, sampleSize, total }) {
+  const scaleMax = SCALE_MAX[currency] ?? 600000;
+  const p75real = p75 ?? p25;
+  const leftPct = Math.max(0, Math.min(100, (p25 / scaleMax) * 100));
+  const widthPct = Math.max(2, Math.min(100 - leftPct, ((p75real - p25) / scaleMax) * 100));
+  const sym = { RUB: "₽", USD: "$", EUR: "€" }[currency] ?? currency;
+  const shortSym = currency === "RUB" ? "к₽" : (currency === "USD" ? "k$" : "k€");
+
   return (
-    <div className="sample-bar-wrap">
-      <div className="sample-bar">
-        <div className="sample-bar-fill" style={{ width: `${pct}%` }} />
+    <div className="mw-salary-scale-wrap">
+      <div className="mw-salary-scale">
+        <div className="mw-salary-scale-seg" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
       </div>
-      <span className="sample-bar-label">{current} из {min}</span>
+      <div className="mw-salary-caption">
+        P25 {fmtShort(p25, currency)}{shortSym} · P75 {fmtShort(p75real, currency)}{shortSym}
+        {" · "}{sampleSize} из {total} с зарплатой
+      </div>
     </div>
   );
 }
 
-function FreqList({ items, countKey = "count", nameKey = "tech", pctKey = "pct" }) {
-  return (
-    <div className="stack-list">
-      {items.map((item) => (
-        <div className="stack-row" key={item[nameKey]}>
-          <span className="stack-tech">{item[nameKey]}</span>
-          <div className="stack-bar-wrap">
-            <div className="stack-bar-fill" style={{ width: `${Math.min(100, item[pctKey])}%` }} />
-          </div>
-          <span className="stack-pct">{item[pctKey]}%</span>
-          <span className="stack-count">{item[countKey]}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CardTitle({ title, meta }) {
-  return (
-    <div className="mw-card-head">
-      <span className="mw-card-title">{title}</span>
-      {meta && <span className="mw-card-meta">{meta}</span>}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Analytics cards
+// Top block: salary (left) + divider + benchmark (right)
 // ---------------------------------------------------------------------------
 
-function SalaryCard({ data }) {
-  const minSample = data?.min_sample ?? 3;
-  if (!data) return null;
-  return (
-    <div className="mw-block-card">
-      <CardTitle title="Зарплата" />
-      {data.degraded && (
-        <div className="market-worth-warning">⚠️ {data.degraded_reason}</div>
-      )}
-      <div className="market-worth-grid">
-        <div className="market-worth-card">
-          <div className="market-worth-label">🇷🇺 Россия</div>
-          {data.ru_sample_size >= minSample ? (
-            <div className="market-worth-range">
-              {fmtRange(data.ru_min, data.ru_max, data.ru_currency)}
-            </div>
-          ) : (
-            <div className="market-worth-accumulating">
-              <div className="market-worth-range">копится…</div>
-              <SampleBar current={data.ru_sample_size} min={minSample} />
-            </div>
-          )}
-          <div className="mw-sample-note">n={data.ru_sample_size}</div>
-        </div>
-        <div className="market-worth-card">
-          <div className="market-worth-label">🌍 Международный</div>
-          {data.intl_sample_size >= minSample ? (
-            <div className="market-worth-range">
-              {fmtRange(data.intl_min, data.intl_max, data.intl_currency)}
-            </div>
-          ) : (
-            <div className="market-worth-accumulating">
-              <div className="market-worth-range">копится…</div>
-              <SampleBar current={data.intl_sample_size} min={minSample} />
-            </div>
-          )}
-          <div className="mw-sample-note">n={data.intl_sample_size}</div>
-        </div>
-      </div>
-      {data.reasoning_short && (
-        <p className="market-worth-reasoning">{data.reasoning_short}</p>
-      )}
-      <div className="market-worth-meta">
-        P25–P75 · скор 50–100 · пороговый пул: {minSample}
-      </div>
+function TopBlock({ data }) {
+  const minSample = data.min_sample ?? 3;
+  const hasRu = data.ru_sample_size >= minSample && data.ru_min != null;
+  const hasIntl = data.intl_sample_size >= minSample && data.intl_min != null;
 
-      <div className="market-worth-benchmark mw-benchmark-incard">
-        <div className="market-worth-benchmark-title">Ориентир по рынку</div>
-        <div className="market-worth-benchmark-subtitle">
-          applied AI / LLM · middle · 06.2026
-        </div>
-        <div className="market-worth-benchmark-rows">
-          <div className="market-worth-benchmark-row">
-            <span className="market-worth-benchmark-flag">🇷🇺</span>
-            <div>
-              <div className="market-worth-benchmark-range">200 000 – 300 000 ₽</div>
-              <div className="market-worth-benchmark-note">
-                не ниже 200к · целиться 250–300к
+  return (
+    <div className="mw-top-card">
+
+      {/* ── Left: salary ── */}
+      <div className="mw-salary-col">
+        <div className="mw-section-label">Зарплата</div>
+
+        {data.degraded && !hasRu && !hasIntl && (
+          <div className="market-worth-warning">{data.degraded_reason}</div>
+        )}
+
+        {/* RU row */}
+        <div className="mw-salary-row">
+          <span className="mw-salary-flag">🇷🇺</span>
+          <div className="mw-salary-body">
+            {hasRu ? (
+              <>
+                <div className="mw-salary-range">{fmtRange(data.ru_min, data.ru_max, data.ru_currency)}</div>
+                <SalaryScale
+                  p25={data.ru_min}
+                  p75={data.ru_max}
+                  currency={data.ru_currency}
+                  sampleSize={data.ru_sample_size}
+                  total={data.total_relevant_vacancies}
+                />
+              </>
+            ) : (
+              <div className="mw-salary-accumulating">
+                копится… ({data.ru_sample_size} / {minSample})
               </div>
-            </div>
-          </div>
-          <div className="market-worth-benchmark-row">
-            <span className="market-worth-benchmark-flag">🌍</span>
-            <div>
-              <div className="market-worth-benchmark-range">$4 500 – 8 000</div>
-              <div className="market-worth-benchmark-note">
-                не ниже $4.5k · метить $5–7k<br />
-                fine-tuning/PyTorch — не нужен
-              </div>
-            </div>
+            )}
           </div>
         </div>
-        <div className="market-worth-benchmark-sources">
+
+        {/* Intl row */}
+        <div className="mw-salary-row">
+          <span className="mw-salary-flag">🌍</span>
+          <div className="mw-salary-body">
+            {hasIntl ? (
+              <>
+                <div className="mw-salary-range">{fmtRange(data.intl_min, data.intl_max, data.intl_currency)}</div>
+                <SalaryScale
+                  p25={data.intl_min}
+                  p75={data.intl_max}
+                  currency={data.intl_currency}
+                  sampleSize={data.intl_sample_size}
+                  total={data.total_relevant_vacancies}
+                />
+              </>
+            ) : (
+              <div className="mw-salary-accumulating">
+                копится… ({data.intl_sample_size} / {minSample})
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mw-vdivider" />
+
+      {/* ── Right: benchmark ── */}
+      <div className="mw-benchmark-col">
+        <div className="mw-section-label">Ориентир по рынку</div>
+        <div className="mw-bench-subtitle">applied AI / LLM · middle · 06.2026</div>
+
+        <div className="mw-bench-row">
+          <span className="mw-bench-flag">🇷🇺</span>
+          <div>
+            <div className="mw-bench-range">200 000 – 300 000 ₽</div>
+            <div className="mw-bench-note">не ниже 200к · целиться 250–300к</div>
+          </div>
+        </div>
+
+        <div className="mw-bench-row">
+          <span className="mw-bench-flag">🌍</span>
+          <div>
+            <div className="mw-bench-range">$4 500 – 8 000</div>
+            <div className="mw-bench-note">не ниже $4.5k · метить $5–7k</div>
+          </div>
+        </div>
+
+        <div className="mw-bench-aside">fine-tuning / PyTorch — не нужен</div>
+
+        <div className="mw-bench-sources">
           enigmai.ru · vc.ru/ai · hirehi.ru<br />
           ayautomate.com · kore1.com<br />
           remotelytalents.com · lemon.io
         </div>
-        <div className="market-worth-benchmark-footer">
-          26.06.2026 · обновлять раз в 2–3 мес
-        </div>
+        <div className="mw-bench-footer">26.06.2026 · обновлять раз в 2–3 мес</div>
       </div>
+
     </div>
   );
 }
 
-function StackCard({ sa }) {
-  if (!sa) return (
-    <div className="mw-block-card">
-      <CardTitle title="Стек" />
-      <div className="tab-empty">Нет данных</div>
-    </div>
-  );
-  const { top_tech, total_pool, vacancies_with_stack, small_sample, degraded_reason } = sa;
-  return (
-    <div className="mw-block-card">
-      <CardTitle title="Стек" meta={`n=${vacancies_with_stack} / пул ${total_pool}`} />
-      {small_sample && <div className="market-worth-warning">{degraded_reason}</div>}
-      {top_tech.length === 0
-        ? <div className="stack-block-empty">Стек пока не собран</div>
-        : <FreqList items={top_tech} nameKey="tech" pctKey="pct" countKey="count" />
-      }
-    </div>
-  );
-}
+// ---------------------------------------------------------------------------
+// Frequency tile block — 2×2 grid of top-4 items
+// ---------------------------------------------------------------------------
 
-function BenefitsCard({ ba }) {
-  if (!ba) return (
-    <div className="mw-block-card">
-      <CardTitle title="Бенефиты" />
-      <div className="tab-empty">Нет данных</div>
-    </div>
-  );
-  const { top_benefits, total_pool, vacancies_with_benefits, small_sample, degraded_reason } = ba;
-  return (
-    <div className="mw-block-card">
-      <CardTitle title="Бенефиты" meta={`n=${vacancies_with_benefits} / пул ${total_pool}`} />
-      {small_sample && <div className="market-worth-warning">{degraded_reason}</div>}
-      {top_benefits.length === 0
-        ? <div className="stack-block-empty">Бенефиты пока не собраны</div>
-        : <FreqList items={top_benefits} nameKey="benefit" pctKey="pct" countKey="count" />
-      }
-    </div>
-  );
-}
+function FreqTileBlock({ title, n, items }) {
+  const top4 = items.slice(0, 4);
+  const rest = items.length - 4;
+  const maxPct = top4.length > 0 ? top4[0].pct : 0;
 
-function RequirementsCard({ ra }) {
-  if (!ra) return (
-    <div className="mw-block-card">
-      <CardTitle title="Требования" />
-      <div className="tab-empty">Нет данных</div>
-    </div>
-  );
-  const {
-    seniority_dist, remote_dist,
-    relocation_count, relocation_pct,
-    total_pool, vacancies_with_seniority,
-    small_sample, degraded_reason,
-  } = ra;
   return (
-    <div className="mw-block-card">
-      <CardTitle title="Требования" meta={`пул ${total_pool}`} />
-      {small_sample && <div className="market-worth-warning">{degraded_reason}</div>}
-
-      <div className="req-relocation-card">
-        <div className="req-relocation-val">{relocation_pct}%</div>
-        <div className="req-relocation-label">
-          вакансий с релокацией
-          <span className="req-relocation-abs"> ({relocation_count} из {total_pool})</span>
-        </div>
+    <div className="mw-ftblock">
+      <div className="mw-ftblock-head">
+        <span className="mw-ftblock-title">{title}</span>
+        {n != null && <span className="mw-ftblock-n">n={n}</span>}
       </div>
 
-      <div className="req-section">
-        <div className="stack-block-header">
-          <span className="stack-block-title">Грейд</span>
-          <span className="stack-block-meta">n={vacancies_with_seniority}</span>
-        </div>
-        {seniority_dist.length === 0
-          ? <div className="stack-block-empty">Данных о грейде нет</div>
-          : <FreqList items={seniority_dist} nameKey="grade" pctKey="pct" countKey="count" />
-        }
+      <div className="mw-tile-grid">
+        {top4.map((item) => {
+          const { bg, text } = tileColor(item.pct, maxPct);
+          return (
+            <div key={item.name} className="mw-tile" style={{ backgroundColor: bg, color: text }}>
+              <span className="mw-tile-label">{item.name}</span>
+              <span className="mw-tile-pct">{item.pct}%</span>
+            </div>
+          );
+        })}
+        {Array.from({ length: Math.max(0, 4 - top4.length) }).map((_, i) => (
+          <div key={`empty-${i}`} className="mw-tile mw-tile--empty" />
+        ))}
       </div>
 
-      <div className="req-section">
-        <div className="stack-block-header">
-          <span className="stack-block-title">Формат работы</span>
-        </div>
-        <FreqList items={remote_dist.filter(d => d.count > 0)} nameKey="label" pctKey="pct" countKey="count" />
-      </div>
+      {rest > 0 && <div className="mw-tile-more">+ ещё {rest}</div>}
     </div>
   );
 }
@@ -250,30 +226,73 @@ export default function MarketWorthView() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const stackItems = data?.stack_analytics?.top_tech
+    ?.map((t) => ({ name: t.tech, pct: t.pct })) ?? [];
+
+  // seniority_dist is sorted by grade order; re-sort by pct desc for tiles
+  const gradeItems = (data?.requirements_analytics?.seniority_dist ?? [])
+    .slice()
+    .sort((a, b) => b.pct - a.pct)
+    .map((t) => ({ name: t.grade, pct: t.pct }));
+
+  const benefitsItems = data?.benefits_analytics?.top_benefits
+    ?.map((t) => ({ name: t.benefit, pct: t.pct })) ?? [];
+
+  // Format block: independent frequency counts per vacancy pool.
+  // remote/hybrid/office from remote_dist; relocation from relocation_pct.
+  // Each is count/total_pool — sums don't add to 100%.
+  const formatItems = (() => {
+    const ra = data?.requirements_analytics;
+    if (!ra) return [];
+    const byKey = Object.fromEntries((ra.remote_dist ?? []).map((d) => [d.key, d]));
+    return [
+      { name: "Удалёнка", pct: byKey.remote?.pct ?? 0 },
+      { name: "Гибрид",   pct: byKey.hybrid?.pct ?? 0 },
+      { name: "Офис",     pct: byKey.office?.pct ?? 0 },
+      { name: "Релокация", pct: ra.relocation_pct ?? 0 },
+    ].sort((a, b) => b.pct - a.pct);
+  })();
 
   return (
     <div className="view market-worth-view">
       <div className="view-list">
         <div className="mw-header">
           <h1>Анализ рынка</h1>
-          {data && (
-            <span className="mw-header-n">n={data.total_relevant_vacancies} вакансий</span>
-          )}
+          {data && <span className="mw-header-n">n={data.total_relevant_vacancies} вакансий</span>}
         </div>
 
         {loading && !data && <div className="loading">Загрузка…</div>}
         {error && <div className="error">{error}</div>}
 
         {data && (
-          <div className="mw-grid">
-            <SalaryCard data={data} />
-            <StackCard sa={data.stack_analytics} />
-            <BenefitsCard ba={data.benefits_analytics} />
-            <RequirementsCard ra={data.requirements_analytics} />
-          </div>
+          <>
+            <TopBlock data={data} />
+
+            <div className="mw-bottom-grid">
+              <FreqTileBlock
+                title="Стек"
+                n={data.stack_analytics?.vacancies_with_stack}
+                items={stackItems}
+              />
+              <FreqTileBlock
+                title="Грейд"
+                n={data.requirements_analytics?.vacancies_with_seniority}
+                items={gradeItems}
+              />
+              <FreqTileBlock
+                title="Бенефиты"
+                n={data.benefits_analytics?.vacancies_with_benefits}
+                items={benefitsItems}
+              />
+              <FreqTileBlock
+                title="Формат"
+                n={data.requirements_analytics?.total_pool}
+                items={formatItems}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>
