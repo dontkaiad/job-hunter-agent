@@ -37,7 +37,7 @@ export const STATE_LABELS = {
   screening: "ответили / скрининг",
   interview: "собес",
   offer: "оффер 🎉",
-  declined: "отказ работодателя",
+  declined: "отклонено",
 };
 
 export const ALL_STATES = [
