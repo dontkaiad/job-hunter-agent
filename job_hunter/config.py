@@ -128,10 +128,10 @@ class Config:
     min_persist_score: int = 25
 
     # --- Market Worth: pipeline-derived salary benchmark (zero API) ---
-    # Aggregates salary data from work_items with score 50–100. No LLM call.
+    # Aggregates salary data from work_items with score 25–100. No LLM call.
     # Minimum number of vacancies with salary data per market to show a range.
     # Below this threshold, the result is honest-degraded ("ещё копится").
-    market_min_sample: int = 3
+    market_min_sample: int = 5
 
     # FX
     fx_provider: str = "frankfurter"
@@ -210,7 +210,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         auth_database_url=get("AUTH_DATABASE_URL"),
         dashboard_public_url=get("DASHBOARD_PUBLIC_URL"),
         min_persist_score=_int_or_none(get("MIN_PERSIST_SCORE")) or 25,
-        market_min_sample=_int_or_none(get("MARKET_MIN_SAMPLE")) or 3,
+        market_min_sample=_int_or_none(get("MARKET_MIN_SAMPLE")) or 5,
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,
         new_channel_lookback_days=_int_or_none(get("NEW_CHANNEL_LOOKBACK_DAYS")) or 14,

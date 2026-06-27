@@ -193,7 +193,7 @@ def compute_from_pipeline(conn, cfg) -> MarketWorthResult:
 
     Pure-SQL aggregation — zero API calls.
     """
-    min_sample = getattr(cfg, "market_min_sample", 3)
+    min_sample = getattr(cfg, "market_min_sample", 5)
 
     rows = conn.execute(
         """
