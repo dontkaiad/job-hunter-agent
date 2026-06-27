@@ -585,12 +585,17 @@ _DECISION_LABELS = {
 }
 
 
+class DeclineBody(BaseModel):
+    reason: Optional[str] = None
+
+
 def _apply_decision(
     conn: psycopg.Connection,
     item_id: int,
     decision: str,
     fx: Optional[fx_mod.FxRates],
     deps: Deps,
+    reason: Optional[str] = None,
 ) -> ItemDetail:
     """Run a single HITL decision through advance_by_id and serialize the result.
 
@@ -605,7 +610,7 @@ def _apply_decision(
         raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
 
     current_state = item.state
-    result = pipeline_mod.advance_by_id(conn, item_id, decision=decision, deps=deps)
+    result = pipeline_mod.advance_by_id(conn, item_id, decision=decision, deps=deps, reason=reason)
 
     if result.status != "moved":
         label = _DECISION_LABELS.get(decision, decision)
@@ -720,12 +725,13 @@ def offer_item(
 @writer_router.post("/items/{item_id}/decline", response_model=ItemDetail)
 def decline_item(
     item_id: int,
+    body: DeclineBody = DeclineBody(),
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
 ) -> ItemDetail:
-    """DECISION_DECLINE: T14/T17/T20 *->declined (employer rejection, terminal)."""
-    return _apply_decision(conn, item_id, DECISION_DECLINE, fx, deps)
+    """DECISION_DECLINE: T14/T17/T20/T22/T23/T24 *->declined. Optional reason body."""
+    return _apply_decision(conn, item_id, DECISION_DECLINE, fx, deps, reason=body.reason)
 
 
 @writer_router.post("/items/{item_id}/close", response_model=ItemDetail)

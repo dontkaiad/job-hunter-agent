@@ -86,8 +86,15 @@ export const api = {
   // The action endpoints. Each returns the updated ItemDetail. action is one of:
   // approve | backlog | skip | sent | draft (pre-send) or the post-send funnel
   // screening | interview | offer | decline | close.
-  act(id, action) {
-    return request(`/api/items/${id}/${action}`, { method: "POST" });
+  // body is optional JSON payload (e.g. { reason: "..." } for decline).
+  act(id, action, body = null) {
+    return request(`/api/items/${id}/${action}`, {
+      method: "POST",
+      ...(body != null && {
+        headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    });
   },
 
   // Market Worth: GET /api/market-worth and POST /api/market-worth/refresh.

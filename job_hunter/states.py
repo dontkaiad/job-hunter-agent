@@ -93,6 +93,10 @@ TRANSITIONS: List[Transition] = [
     Transition("T19", INTERVIEW, OFFER, KIND_HITL, DECISION_OFFER),
     Transition("T20", INTERVIEW, DECLINED, KIND_HITL, DECISION_DECLINE),
     Transition("T21", INTERVIEW, CLOSED, KIND_HITL, DECISION_CLOSE),
+    # Pre-send manual reject: operator decided not to pursue an approved vacancy.
+    Transition("T22", APPROVED, DECLINED, KIND_HITL, DECISION_DECLINE),
+    Transition("T23", RESEARCHED, DECLINED, KIND_HITL, DECISION_DECLINE),
+    Transition("T24", DRAFTED, DECLINED, KIND_HITL, DECISION_DECLINE),
 ]
 
 # Index: from_state -> list of outgoing transitions.

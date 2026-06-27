@@ -802,6 +802,13 @@ def build_draft_system(profile: Profile) -> str:
 DRAFT_SYSTEM = build_draft_system(example_profile())
 
 
+def _detect_lang(text: str) -> str:
+    """Return 'en' if text is predominantly Latin/English, else 'ru'. PURE."""
+    cyrillic = sum(1 for c in text if "Ѐ" <= c <= "ӿ")
+    latin = sum(1 for c in text if "a" <= c.lower() <= "z")
+    return "en" if latin > cyrillic else "ru"
+
+
 def build_draft_prompt(
     extracted: ExtractResult,
     raw_text: str,
@@ -822,8 +829,15 @@ def build_draft_prompt(
         if extracted.company
         else "TARGET COMPANY: not named — use a neutral opening, do NOT write «None».\n"
     )
+    lang = _detect_lang(raw_text)
+    lang_instruction = (
+        "LANGUAGE (MANDATORY): write the message in ENGLISH — the vacancy is in English.\n"
+        if lang == "en"
+        else "LANGUAGE (MANDATORY): write the message in RUSSIAN.\n"
+    )
     return (
         "Write the application message for our (female) candidate.\n"
+        + lang_instruction
         + company_line
         + json.dumps(payload, ensure_ascii=False)
         + "\n\nRead the FULL vacancy text below; only ask about details it does "

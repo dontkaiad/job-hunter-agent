@@ -13,6 +13,8 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [awaitingReason, setAwaitingReason] = useState(false);
   const panelRef = useRef(null);
 
   const load = useCallback(async (id) => {
@@ -42,12 +44,14 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
     }
   }, [itemId]);
 
-  async function runAction(action) {
+  async function runAction(action, body = null) {
     setBusy(true);
     setNotice(null);
     try {
-      const updated = await api.act(itemId, action);
+      const updated = await api.act(itemId, action, body);
       setDetail(updated);
+      setAwaitingReason(false);
+      setDeclineReason("");
       if (onUpdated) onUpdated(updated);
     } catch (e) {
       if (e.status === 409) {
@@ -60,6 +64,19 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleActionClick(action, needsReason) {
+    if (needsReason) {
+      setAwaitingReason(true);
+      setDeclineReason("");
+    } else {
+      runAction(action);
+    }
+  }
+
+  function submitDecline() {
+    runAction("decline", declineReason.trim() ? { reason: declineReason.trim() } : null);
   }
 
   if (itemId == null) return null;
@@ -119,7 +136,12 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
             status={detail.status}
             busy={busy}
             notice={notice}
-            onAction={runAction}
+            onAction={handleActionClick}
+            awaitingReason={awaitingReason}
+            declineReason={declineReason}
+            onDeclineReasonChange={setDeclineReason}
+            onDeclineSubmit={submitDecline}
+            onDeclineCancel={() => { setAwaitingReason(false); setDeclineReason(""); }}
           />
 
           {/* Бенефиты — после действий, свёрнуто */}
@@ -151,25 +173,48 @@ function DetailField({ label, value }) {
   );
 }
 
-function Actions({ status, busy, notice, onAction }) {
+function Actions({
+  status, busy, notice, onAction,
+  awaitingReason, declineReason, onDeclineReasonChange, onDeclineSubmit, onDeclineCancel,
+}) {
   const actions = actionsForStatus(status);
   return (
     <div className="actions">
       {actions.length === 0 && (
         <div className="muted">Нет доступных действий для статуса «{status}»</div>
       )}
-      {actions.map((a) => (
+      {!awaitingReason && actions.map((a) => (
         <button
           key={a.action}
           type="button"
           className="btn btn-action"
           data-action={a.action}
           disabled={busy}
-          onClick={() => onAction(a.action)}
+          onClick={() => onAction(a.action, a.needsReason)}
         >
           {a.label}
         </button>
       ))}
+      {awaitingReason && (
+        <div className="decline-reason-box">
+          <textarea
+            className="decline-reason-input"
+            placeholder="Причина отклонения (необязательно)"
+            value={declineReason}
+            onChange={(e) => onDeclineReasonChange(e.target.value)}
+            rows={2}
+            autoFocus
+          />
+          <div className="decline-reason-btns">
+            <button type="button" className="btn btn-action" disabled={busy} onClick={onDeclineSubmit}>
+              Подтвердить отклонение
+            </button>
+            <button type="button" className="btn" disabled={busy} onClick={onDeclineCancel}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
       {notice && <div className="notice">{notice}</div>}
     </div>
   );

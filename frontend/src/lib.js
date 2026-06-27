@@ -92,9 +92,15 @@ export function actionsForStatus(status) {
       ];
     case APPROVED:
     case RESEARCHED:
-      return [{ action: "draft", label: "Сгенерировать отклик" }];
+      return [
+        { action: "draft", label: "Сгенерировать отклик" },
+        { action: "decline", label: "Отклонить", needsReason: true },
+      ];
     case DRAFTED:
-      return [{ action: "sent", label: "Отметить отправленным" }];
+      return [
+        { action: "sent", label: "Отметить отправленным" },
+        { action: "decline", label: "Отклонить", needsReason: true },
+      ];
     // Post-send response funnel (mirrors states.py T13..T21). decline/close are
     // available at every funnel stage; offer only after an interview.
     case SENT:
