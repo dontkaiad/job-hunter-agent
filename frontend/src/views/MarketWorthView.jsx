@@ -6,11 +6,11 @@ import { api } from "../api.js";
 // ---------------------------------------------------------------------------
 
 const TEAL_STOPS = [
-  { bg: "var(--teal-deep)", text: "var(--teal-bri)" },   // lowest pct
-  { bg: "var(--teal-dim)",  text: "var(--teal-bri)" },
-  { bg: "var(--teal-dim)",  text: "var(--ink)" },
+  { bg: "var(--teal-bri)", text: "var(--bg)" },          // lowest pct — lightest
   { bg: "var(--teal)",      text: "var(--bg)" },
-  { bg: "var(--teal-bri)", text: "var(--bg)" },          // highest pct
+  { bg: "var(--teal-dim)",  text: "var(--ink)" },
+  { bg: "var(--teal-dim)",  text: "var(--teal-bri)" },
+  { bg: "var(--teal-deep)", text: "var(--teal-bri)" },   // highest pct — darkest
 ];
 
 function tileColor(pct, maxPct) {
