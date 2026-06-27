@@ -110,6 +110,9 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
             </div>
           )}
 
+          {/* Обоснование — перед текстом вакансии, свёрнуто */}
+          <TextBlock label="Обоснование" value={detail.reasoning} collapsible />
+
           <VacancyText text={detail.raw_text} />
 
           <Actions
@@ -119,12 +122,9 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
             onAction={runAction}
           />
 
-          <ListBlock label="Бенефиты" items={detail.benefits} />
+          {/* Бенефиты — после действий, свёрнуто */}
+          <ListBlock label="Бенефиты" items={detail.benefits} collapsible />
 
-          {/* «Причины» убрана: бэкенд кладёт в reasons ровно [reasoning],
-              т.е. тот же текст, что и в «Обоснование» ниже (см. pipeline._do_score).
-              Показываем обоснование один раз — форматированным <pre>. */}
-          <TextBlock label="Обоснование" value={detail.reasoning} />
           <TextBlock label="Отклик (draft)" value={detail.draft} copyable />
 
           <Research research={detail.research} />
@@ -175,16 +175,27 @@ function Actions({ status, busy, notice, onAction }) {
   );
 }
 
-function ListBlock({ label, items }) {
+function ListBlock({ label, items, collapsible = false }) {
   if (!items || items.length === 0) return null;
+  const content = (
+    <ul>
+      {items.map((x, i) => (
+        <li key={i}>{x}</li>
+      ))}
+    </ul>
+  );
+  if (collapsible) {
+    return (
+      <details className="vacancy">
+        <summary className="vacancy-summary">{label}</summary>
+        <div className="block" style={{ marginTop: 8 }}>{content}</div>
+      </details>
+    );
+  }
   return (
     <div className="block">
       <h4>{label}</h4>
-      <ul>
-        {items.map((x, i) => (
-          <li key={i}>{x}</li>
-        ))}
-      </ul>
+      {content}
     </div>
   );
 }
@@ -204,8 +215,16 @@ function CopyButton({ text }) {
   );
 }
 
-function TextBlock({ label, value, copyable = false }) {
+function TextBlock({ label, value, copyable = false, collapsible = false }) {
   if (!value) return null;
+  if (collapsible) {
+    return (
+      <details className="vacancy">
+        <summary className="vacancy-summary">{label}</summary>
+        <pre className="text-block vacancy-text" style={{ marginTop: 0 }}>{value}</pre>
+      </details>
+    );
+  }
   return (
     <div className="block">
       <h4 className="block-head">
