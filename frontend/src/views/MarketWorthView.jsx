@@ -2,15 +2,15 @@ import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
 
 // ---------------------------------------------------------------------------
-// Color scale for tiles — darkest = highest normalized value
+// Color scale for tiles — uses project CSS custom properties
 // ---------------------------------------------------------------------------
 
 const TEAL_STOPS = [
-  { bg: "#C3EBDC", text: "#04342C" },
-  { bg: "#7FD3B5", text: "#04342C" },
-  { bg: "#5DAE91", text: "#04342C" },
-  { bg: "#2E8B6E", text: "#E1F5EE" },
-  { bg: "#0F6E56", text: "#E1F5EE" },
+  { bg: "var(--teal-deep)", text: "var(--teal-bri)" },   // lowest pct
+  { bg: "var(--teal-dim)",  text: "var(--teal-bri)" },
+  { bg: "var(--teal-dim)",  text: "var(--ink)" },
+  { bg: "var(--teal)",      text: "var(--bg)" },
+  { bg: "var(--teal-bri)", text: "var(--bg)" },          // highest pct
 ];
 
 function tileColor(pct, maxPct) {
@@ -40,25 +40,30 @@ function fmtShort(n, currency) {
 }
 
 // ---------------------------------------------------------------------------
-// Salary scale bar — positions P25-P75 segment on a fixed reference scale
+// Salary scale bar — always renders the track; fills only when data present
 // ---------------------------------------------------------------------------
 
-function SalaryScale({ p25, p75, currency, sampleSize, total }) {
+function SalaryScale({ p25, p75, currency, sampleSize, total, minSample }) {
+  const hasData = p25 != null;
   const scaleMax = SCALE_MAX[currency] ?? 600000;
   const p75real = p75 ?? p25;
-  const leftPct = Math.max(0, Math.min(100, (p25 / scaleMax) * 100));
-  const widthPct = Math.max(2, Math.min(100 - leftPct, ((p75real - p25) / scaleMax) * 100));
-  const sym = { RUB: "₽", USD: "$", EUR: "€" }[currency] ?? currency;
-  const shortSym = currency === "RUB" ? "к₽" : (currency === "USD" ? "k$" : "k€");
+  const leftPct = hasData ? Math.max(0, Math.min(100, (p25 / scaleMax) * 100)) : 0;
+  const widthPct = hasData
+    ? Math.max(2, Math.min(100 - leftPct, ((p75real - p25) / scaleMax) * 100))
+    : 0;
+  const shortSym = currency === "RUB" ? "к₽" : currency === "USD" ? "k$" : "k€";
 
   return (
     <div className="mw-salary-scale-wrap">
-      <div className="mw-salary-scale">
-        <div className="mw-salary-scale-seg" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
+      <div className={`mw-salary-scale${hasData ? "" : " mw-salary-scale--empty"}`}>
+        {hasData && (
+          <div className="mw-salary-scale-seg" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
+        )}
       </div>
-      <div className="mw-salary-caption">
-        P25 {fmtShort(p25, currency)}{shortSym} · P75 {fmtShort(p75real, currency)}{shortSym}
-        {" · "}{sampleSize} из {total} с зарплатой
+      <div className={`mw-salary-caption${hasData ? "" : " mw-salary-caption--acc"}`}>
+        {hasData
+          ? `P25 ${fmtShort(p25, currency)}${shortSym} · P75 ${fmtShort(p75real, currency)}${shortSym} · ${sampleSize} из ${total} с зарплатой`
+          : `копится… (${sampleSize} / ${minSample})`}
       </div>
     </div>
   );
@@ -67,6 +72,11 @@ function SalaryScale({ p25, p75, currency, sampleSize, total }) {
 // ---------------------------------------------------------------------------
 // Top block: salary (left) + divider + benchmark (right)
 // ---------------------------------------------------------------------------
+
+const BENCH_SOURCES = [
+  "enigmai.ru", "vc.ru/ai", "hirehi.ru",
+  "ayautomate.com", "kore1.com", "remotelytalents.com", "lemon.io",
+];
 
 function TopBlock({ data }) {
   const minSample = data.min_sample ?? 3;
@@ -81,52 +91,44 @@ function TopBlock({ data }) {
         <div className="mw-section-label">Зарплата</div>
 
         {data.degraded && !hasRu && !hasIntl && (
-          <div className="market-worth-warning">{data.degraded_reason}</div>
+          <div className="market-worth-warning" style={{ whiteSpace: "pre-line" }}>
+            {(data.degraded_reason ?? "").replace(/;\s*/g, ";\n")}
+          </div>
         )}
 
-        {/* RU row */}
+        {/* RU row — scale always renders */}
         <div className="mw-salary-row">
           <span className="mw-salary-flag">🇷🇺</span>
           <div className="mw-salary-body">
-            {hasRu ? (
-              <>
-                <div className="mw-salary-range">{fmtRange(data.ru_min, data.ru_max, data.ru_currency)}</div>
-                <SalaryScale
-                  p25={data.ru_min}
-                  p75={data.ru_max}
-                  currency={data.ru_currency}
-                  sampleSize={data.ru_sample_size}
-                  total={data.total_relevant_vacancies}
-                />
-              </>
-            ) : (
-              <div className="mw-salary-accumulating">
-                копится… ({data.ru_sample_size} / {minSample})
-              </div>
+            {hasRu && (
+              <div className="mw-salary-range">{fmtRange(data.ru_min, data.ru_max, data.ru_currency)}</div>
             )}
+            <SalaryScale
+              p25={hasRu ? data.ru_min : null}
+              p75={hasRu ? data.ru_max : null}
+              currency={data.ru_currency ?? "RUB"}
+              sampleSize={data.ru_sample_size}
+              total={data.total_relevant_vacancies}
+              minSample={minSample}
+            />
           </div>
         </div>
 
-        {/* Intl row */}
+        {/* Intl row — scale always renders */}
         <div className="mw-salary-row">
           <span className="mw-salary-flag">🌍</span>
           <div className="mw-salary-body">
-            {hasIntl ? (
-              <>
-                <div className="mw-salary-range">{fmtRange(data.intl_min, data.intl_max, data.intl_currency)}</div>
-                <SalaryScale
-                  p25={data.intl_min}
-                  p75={data.intl_max}
-                  currency={data.intl_currency}
-                  sampleSize={data.intl_sample_size}
-                  total={data.total_relevant_vacancies}
-                />
-              </>
-            ) : (
-              <div className="mw-salary-accumulating">
-                копится… ({data.intl_sample_size} / {minSample})
-              </div>
+            {hasIntl && (
+              <div className="mw-salary-range">{fmtRange(data.intl_min, data.intl_max, data.intl_currency)}</div>
             )}
+            <SalaryScale
+              p25={hasIntl ? data.intl_min : null}
+              p75={hasIntl ? data.intl_max : null}
+              currency={data.intl_currency ?? "USD"}
+              sampleSize={data.intl_sample_size}
+              total={data.total_relevant_vacancies}
+              minSample={minSample}
+            />
           </div>
         </div>
       </div>
@@ -154,14 +156,21 @@ function TopBlock({ data }) {
           </div>
         </div>
 
-        <div className="mw-bench-aside">fine-tuning / PyTorch — не нужен</div>
-
-        <div className="mw-bench-sources">
-          enigmai.ru · vc.ru/ai · hirehi.ru<br />
-          ayautomate.com · kore1.com<br />
-          remotelytalents.com · lemon.io
+        {/* Accent block: tech не нужен */}
+        <div className="mw-bench-nope">
+          <span className="mw-bench-nope-tech">fine-tuning / PyTorch</span>
+          <span className="mw-bench-nope-verdict">не нужен</span>
         </div>
-        <div className="mw-bench-footer">26.06.2026 · обновлять раз в 2–3 мес</div>
+
+        {/* Chip grid: sources */}
+        <div className="mw-bench-chips">
+          {BENCH_SOURCES.map((s) => (
+            <span key={s} className="mw-bench-chip">{s}</span>
+          ))}
+        </div>
+
+        <div className="mw-bench-update">↻ обновлять раз в 2–3 мес</div>
+        <div className="mw-bench-date">26.06.2026</div>
       </div>
 
     </div>
@@ -169,13 +178,15 @@ function TopBlock({ data }) {
 }
 
 // ---------------------------------------------------------------------------
-// Frequency tile block — 2×2 grid of top-4 items
+// Frequency tile block — 2×2 top tiles + expandable horizontal bars for rest
 // ---------------------------------------------------------------------------
 
 function FreqTileBlock({ title, n, items }) {
+  const [expanded, setExpanded] = useState(false);
   const top4 = items.slice(0, 4);
-  const rest = items.length - 4;
+  const rest = items.slice(4);
   const maxPct = top4.length > 0 ? top4[0].pct : 0;
+  const hasMore = rest.length > 0;
 
   return (
     <div className="mw-ftblock">
@@ -199,7 +210,28 @@ function FreqTileBlock({ title, n, items }) {
         ))}
       </div>
 
-      {rest > 0 && <div className="mw-tile-more">+ ещё {rest}</div>}
+      {hasMore && expanded && (
+        <div className="mw-tile-bars">
+          {rest.map((item) => (
+            <div key={item.name} className="mw-tile-bar">
+              <span className="mw-tile-bar-label">{item.name}</span>
+              <div className="mw-tile-bar-track">
+                <div
+                  className="mw-tile-bar-fill"
+                  style={{ width: `${maxPct > 0 ? (item.pct / maxPct) * 100 : 0}%` }}
+                />
+              </div>
+              <span className="mw-tile-bar-pct">{item.pct}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {hasMore && (
+        <button className="mw-tile-more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "свернуть ↑" : `+ ещё ${rest.length}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -258,10 +290,7 @@ export default function MarketWorthView() {
   return (
     <div className="view market-worth-view">
       <div className="view-list">
-        <div className="mw-header">
-          <h1>Анализ рынка</h1>
-          {data && <span className="mw-header-n">n={data.total_relevant_vacancies} вакансий</span>}
-        </div>
+        <h1>Анализ рынка</h1>
 
         {loading && !data && <div className="loading">Загрузка…</div>}
         {error && <div className="error">{error}</div>}

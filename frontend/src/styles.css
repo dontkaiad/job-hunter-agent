@@ -1292,21 +1292,7 @@ h1::before {
   max-width: 1060px;
 }
 .market-worth-view h1 {
-  margin-bottom: 0;
-}
-
-/* Header row */
-.mw-header {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
   margin-bottom: 20px;
-}
-.mw-header-n {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-4);
-  letter-spacing: 0.04em;
 }
 
 /* Warning box */
@@ -1319,6 +1305,7 @@ h1::before {
   border-radius: var(--radius);
   padding: 8px 12px;
   margin-bottom: 16px;
+  line-height: 1.7;
 }
 
 /* ── TOP CARD ─────────────────────────────────────────────────────────────── */
@@ -1342,13 +1329,13 @@ h1::before {
   padding: 22px 22px;
 }
 
-/* Section labels */
+/* Section labels — teal, prominent */
 .mw-section-label {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: var(--ink-3);
+  color: var(--teal);
   margin-bottom: 18px;
 }
 
@@ -1382,14 +1369,11 @@ h1::before {
   margin-bottom: 8px;
   white-space: nowrap;
 }
-.mw-salary-accumulating {
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--ink-4);
-  padding: 6px 0 4px;
-}
 
-/* Salary scale bar */
+/* Salary scale bar — always rendered; --empty dims the track */
+.mw-salary-scale-wrap {
+  margin-top: 4px;
+}
 .mw-salary-scale {
   position: relative;
   height: 5px;
@@ -1397,6 +1381,9 @@ h1::before {
   border-radius: 3px;
   margin-bottom: 5px;
   overflow: hidden;
+}
+.mw-salary-scale--empty {
+  opacity: 0.45;
 }
 .mw-salary-scale-seg {
   position: absolute;
@@ -1412,12 +1399,16 @@ h1::before {
   color: var(--ink-4);
   letter-spacing: 0.02em;
 }
+.mw-salary-caption--acc {
+  color: var(--ink-4);
+  font-style: italic;
+}
 
 /* Benchmark column */
 .mw-bench-subtitle {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-4);
+  font-size: 11px;
+  color: var(--teal-dim);
   letter-spacing: 0.03em;
   margin-bottom: 14px;
 }
@@ -1445,26 +1436,63 @@ h1::before {
   color: var(--ink-3);
   line-height: 1.45;
 }
-.mw-bench-aside {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-4);
-  margin: 2px 0 12px 22px;
+
+/* Accent block: fine-tuning не нужен */
+.mw-bench-nope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-left: 2px solid var(--amber);
+  background: var(--panel-2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 6px 10px;
+  margin: 10px 0 12px;
 }
-.mw-bench-sources {
+.mw-bench-nope-tech {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.mw-bench-nope-verdict {
   font-family: var(--mono);
   font-size: 10px;
-  color: var(--ink-4);
-  line-height: 1.55;
+  color: var(--amber);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+/* Source chip grid */
+.mw-bench-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   border-top: 1px solid var(--line-2);
   padding-top: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
-.mw-bench-footer {
+.mw-bench-chip {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+/* Update reminder — more visible */
+.mw-bench-update {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--teal);
+  letter-spacing: 0.02em;
+}
+.mw-bench-date {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-4);
-  font-style: italic;
+  margin-top: 2px;
 }
 
 /* ── BOTTOM TILE GRID ─────────────────────────────────────────────────────── */
@@ -1472,6 +1500,7 @@ h1::before {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
+  align-items: start;
 }
 .mw-ftblock {
   background: var(--panel);
@@ -1487,10 +1516,10 @@ h1::before {
 }
 .mw-ftblock-title {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: var(--ink-3);
+  color: var(--teal);
 }
 .mw-ftblock-n {
   font-family: var(--mono);
@@ -1503,9 +1532,9 @@ h1::before {
   gap: 5px;
 }
 .mw-tile {
-  height: 46px;
+  height: 56px;
   border-radius: calc(var(--radius) - 1px);
-  padding: 6px 8px;
+  padding: 7px 9px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1517,7 +1546,7 @@ h1::before {
 }
 .mw-tile-label {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.01em;
   overflow: hidden;
@@ -1527,16 +1556,73 @@ h1::before {
 }
 .mw-tile-pct {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1;
 }
+
+/* Expand button */
 .mw-tile-more {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-4);
-  margin-top: 7px;
+  font-size: 11px;
+  color: var(--teal-dim);
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 8px;
+  cursor: pointer;
+  display: block;
+  text-align: left;
+  letter-spacing: 0.01em;
+}
+.mw-tile-more:hover {
+  color: var(--teal);
+}
+
+/* Expanded bar rows */
+.mw-tile-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.mw-tile-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.mw-tile-bar-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  width: 88px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mw-tile-bar-track {
+  flex: 1;
+  height: 5px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mw-tile-bar-fill {
+  height: 100%;
+  background: var(--teal-dim);
+  border-radius: 3px;
+}
+.mw-tile-bar-pct {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  width: 30px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 /* Compact salary under avatar in sidebar */
@@ -1564,5 +1650,11 @@ h1::before {
 @media (max-width: 560px) {
   .mw-bottom-grid {
     grid-template-columns: 1fr;
+  }
+  .mw-tile-bar-label {
+    width: 72px;
+  }
+  .mw-salary-range {
+    font-size: 18px;
   }
 }
