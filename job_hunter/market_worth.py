@@ -1,6 +1,6 @@
 """Market Worth — salary benchmark derived from the collected vacancy pipeline.
 
-Aggregates salary data from work_items with relevance_score 50–100 (the
+Aggregates salary data from work_items with relevance_score 25–100 (the
 relevant pool). Splits by market: Russian (RUB) vs international (EUR/USD or
 Jobicy source). Returns honest null / degraded when the sample is too small.
 
@@ -35,7 +35,7 @@ class MarketWorthResult:
     ru_sample_size: int             # vacancies with RU salary data
     intl_sample_size: int           # vacancies with intl salary data
     min_sample: int                 # threshold to show a range
-    total_relevant_vacancies: int   # vacancies with score 50–100
+    total_relevant_vacancies: int   # vacancies with score 25–100
     sources: List[str]              # always ["work_items pipeline"]
     reasoning_short: str            # human-readable summary
     computed_at: str                # ISO-8601 timestamp
@@ -161,7 +161,7 @@ def _aggregate_salaries(
     else:
         reasoning = (
             f"По {ru_sample} РФ и {intl_sample} международным вакансиям "
-            f"со скором 50–100 (диапазон P25–P75)."
+            f"со скором 25–100 (диапазон P25–P75)."
         )
 
     return MarketWorthResult(
@@ -189,7 +189,7 @@ def _aggregate_salaries(
 
 
 def compute_from_pipeline(conn, cfg) -> MarketWorthResult:
-    """Query work_items with score 50–100 and aggregate salary data.
+    """Query work_items with score 25–100 and aggregate salary data.
 
     Pure-SQL aggregation — zero API calls.
     """
@@ -199,9 +199,8 @@ def compute_from_pipeline(conn, cfg) -> MarketWorthResult:
         """
         SELECT extracted_json, relevance_score, source_channel
         FROM work_items
-        WHERE relevance_score >= 50
+        WHERE relevance_score >= 25
           AND extracted_json IS NOT NULL
-          AND state NOT IN ('rejected', 'closed', 'declined')
         """,
     ).fetchall()
 
