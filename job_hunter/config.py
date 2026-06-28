@@ -105,6 +105,10 @@ class Config:
     # the /login page falls back to the relative "/auth/callback" (today's
     # behavior; works on desktop / local dev).
     dashboard_public_url: str = ""
+    # Public https origin of the standalone login service (login.heylark.dev).
+    # Used by login_service to build the absolute widget callback URL. Empty =>
+    # relative "/auth/callback" fallback.
+    login_public_url: str = ""
 
     # --- Jobicy international-remote source (OPTIONAL) ---
     # Jobicy (jobicy.com/api/v2/remote-jobs) is a no-auth JSON job board used as
@@ -209,6 +213,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         superuser_tg_ids=_split_int_set(get("SUPERUSER_TG_IDS")),
         auth_database_url=get("AUTH_DATABASE_URL"),
         dashboard_public_url=get("DASHBOARD_PUBLIC_URL"),
+        login_public_url=get("LOGIN_PUBLIC_URL"),
         min_persist_score=_int_or_none(get("MIN_PERSIST_SCORE")) or 25,
         market_min_sample=_int_or_none(get("MARKET_MIN_SAMPLE")) or 5,
         fx_provider=get("FX_PROVIDER") or "frankfurter",

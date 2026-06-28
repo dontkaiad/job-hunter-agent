@@ -148,6 +148,50 @@ services:
       retries: 3
       start_period: 15s
 
+  # ---------------------------------------------------------------------------
+  # Login service (standalone SSO entry point at login.heylark.dev).
+  # Reuses the same job-hunter:latest image (no new dependencies). Two routes:
+  #   GET /              – Telegram Login Widget page
+  #   GET /auth/callback – validates widget, sets hl_session cookie, redirects
+  # No pipeline/store dependencies; reads only auth env vars from .env.
+  # Public exposure (Caddy → login.heylark.dev) is configured separately.
+  login:
+    build:
+      context: .
+      args:
+        GIT_SHA: "${GIT_SHA:-unknown}"
+        VITE_PROFILE_NAME: "${VITE_PROFILE_NAME:-}"
+    image: job-hunter:latest
+    container_name: login
+    restart: unless-stopped
+
+    command: ["uvicorn", "job_hunter.login_service:app", "--host", "0.0.0.0", "--port", "8000"]
+
+    networks:
+      - nexus-arcana_default
+
+    # Only auth-related vars needed; pipeline secrets (BOT_TOKEN, DATABASE_URL,
+    # ANTHROPIC_API_KEY, etc.) from .env are loaded but never accessed at runtime.
+    env_file: .env
+
+    environment:
+      TZ: ${TZ:-UTC}
+      # Absolute origin for the widget data-auth-url (required for mobile login).
+      # Set here (not in .env) since it is deployment-specific and not a secret.
+      LOGIN_PUBLIC_URL: "https://login.heylark.dev"
+
+    # LOOPBACK ONLY — same pattern as dashboard. Port 8002 on the host loopback;
+    # Caddy terminates TLS and proxies to this.
+    ports:
+      - "127.0.0.1:8002:8000"
+
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 # The shared Postgres network, owned by the nexus-arcana compose project. It must
 # already exist; `external: true` tells Compose to attach, not create it.
 networks:

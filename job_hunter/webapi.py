@@ -255,9 +255,8 @@ def get_fx(config: Config = Depends(get_config)) -> fx_mod.FxRates:
 # tg_auth would pass its own app name and stays independent.
 APP_NAME = "jobhunter"
 
-# Session cookie name. Shared across heylark apps (same Domain) so it is a
-# single-sign-on token.
-SESSION_COOKIE = "hl_session"
+# Session cookie name. Defined once in tg_auth; re-exported here for local use.
+SESSION_COOKIE = tg_auth.SESSION_COOKIE
 
 # Templates for the public /login page (HTML kept OUT of this module).
 _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -951,25 +950,6 @@ auth_router = APIRouter(tags=["auth"])
 POST_LOGIN_PATH = "/"
 
 
-def _set_session_cookie(
-    response, token: str, max_age: Optional[int], settings: AuthSettings
-) -> None:
-    """Set the SSO session cookie with the cross-subdomain attributes.
-
-    Domain=COOKIE_DOMAIN (.heylark.dev), HttpOnly, Secure, SameSite=Lax. max_age
-    is ~30d for "remember me" or None for a session cookie (browser-lifetime).
-    """
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=token,
-        max_age=max_age,
-        domain=settings.cookie_domain,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/",
-    )
-
 
 @auth_router.get("/login", response_class=HTMLResponse)
 def login_page(
@@ -1026,7 +1006,7 @@ def auth_callback(
     )
     # 303 so the browser issues a GET to the post-login path after the redirect.
     response = RedirectResponse(url=POST_LOGIN_PATH, status_code=303)
-    _set_session_cookie(response, token, max_age, settings)
+    tg_auth.set_session_cookie(response, token, max_age, settings.cookie_domain)
     return response
 
 

@@ -141,6 +141,28 @@ REMEMBER_MAX_AGE_SECONDS = 2592000  # 30 days
 # blobs that might share the same secret).
 _SESSION_SALT = "heylark.session"
 
+# Shared SSO cookie name across all *.heylark.dev apps.
+SESSION_COOKIE = "hl_session"
+
+
+def set_session_cookie(response, token: str, max_age: Optional[int], cookie_domain: str) -> None:
+    """Set the SSO session cookie with cross-subdomain attributes.
+
+    Framework-agnostic: ``response`` is any object with a ``set_cookie`` method
+    (Starlette Response or compatible). Domain=cookie_domain ensures the cookie is
+    shared across all *.heylark.dev subdomains. HttpOnly/Secure/SameSite=Lax.
+    """
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=max_age,
+        domain=cookie_domain,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+
 
 def _serializer(secret: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret_key=secret, salt=_SESSION_SALT)
