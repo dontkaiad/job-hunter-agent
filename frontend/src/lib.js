@@ -124,6 +124,7 @@ export function actionsForStatus(status) {
         { action: "close", label: "Закрыть" },
       ];
     case "declined":
+    case "rejected":
       return [{ action: "approve", label: "Вернуть в работу" }];
     default:
       return [];

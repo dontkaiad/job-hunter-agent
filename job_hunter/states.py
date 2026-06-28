@@ -34,7 +34,7 @@ ALL_STATES = (
     SCREENING, INTERVIEW, OFFER, DECLINED,
 )
 
-TERMINAL_STATES = frozenset({REJECTED, SKIPPED, CLOSED, OFFER})
+TERMINAL_STATES = frozenset({SKIPPED, CLOSED, OFFER})
 
 # --- Transition kinds -------------------------------------------------------
 
@@ -99,6 +99,8 @@ TRANSITIONS: List[Transition] = [
     Transition("T24", DRAFTED, DECLINED, KIND_HITL, DECISION_DECLINE),
     # Re-approve a declined vacancy to resume the draft → sent flow.
     Transition("T25", DECLINED, APPROVED, KIND_HITL, DECISION_APPROVE),
+    # Override a system-rejected (salary guard / T3) vacancy manually.
+    Transition("T26", REJECTED, APPROVED, KIND_HITL, DECISION_APPROVE),
 ]
 
 # Index: from_state -> list of outgoing transitions.
