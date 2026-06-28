@@ -110,6 +110,7 @@ class PipelineItem(BaseModel):
     status: str  # = work_items.state
     published_at: Optional[str] = None  # = created_at (INGESTION time)
     source: Source
+    decline_reason: Optional[str] = None  # reason from state_transitions for declined items
 
 
 class Transition(BaseModel):
@@ -406,6 +407,22 @@ def get_pipeline(
     # Strip first: a whitespace-only q (e.g. "%20") is treated as no filter,
     # not as a literal-space substring that would match every multi-word field.
     q_lower = q.strip().lower() if q and q.strip() else None
+    # Bulk-fetch the most recent decline reason for any declined items in one query.
+    declined_ids = [it.id for it in items if it.state == "declined"]
+    decline_reasons: dict = {}
+    if declined_ids:
+        placeholders = ", ".join(["%s"] * len(declined_ids))
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT ON (item_id) item_id, reason
+            FROM state_transitions
+            WHERE item_id IN ({placeholders}) AND to_state = 'declined'
+            ORDER BY item_id, id DESC
+            """,
+            declined_ids,
+        ).fetchall()
+        decline_reasons = {r["item_id"]: r["reason"] for r in rows}
+
     out: List[PipelineItem] = []
     for item in items:
         ex, _ = _parse_extracted(item.extracted_json)
@@ -439,6 +456,7 @@ def get_pipeline(
                 status=item.state,
                 published_at=item.created_at,  # INGESTION time (see module docstring)
                 source=Source(channel=item.source_channel, link=item.source_link),
+                decline_reason=decline_reasons.get(item.id),
             )
         )
     return out

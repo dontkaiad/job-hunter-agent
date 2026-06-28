@@ -21,7 +21,7 @@ export default function PipelineView() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [collapsed, setCollapsed] = useState({});
+  const [collapsed, setCollapsed] = useState({ declined: true });
 
   const toggleLane = useCallback((key) => {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -87,11 +87,19 @@ export default function PipelineView() {
               <span className="lane-count">{grouped[lane.key].length}</span>
             </h2>
             {!collapsed[lane.key] && (
-              <PipelineTable
-                items={grouped[lane.key]}
-                selectedId={selectedId}
-                onSelect={(itemId) => navigate(`/item/${itemId}`)}
-              />
+              lane.key === "declined" ? (
+                <DeclinedList
+                  items={grouped[lane.key]}
+                  selectedId={selectedId}
+                  onSelect={(itemId) => navigate(`/item/${itemId}`)}
+                />
+              ) : (
+                <PipelineTable
+                  items={grouped[lane.key]}
+                  selectedId={selectedId}
+                  onSelect={(itemId) => navigate(`/item/${itemId}`)}
+                />
+              )
             )}
           </section>
         ))}
@@ -126,11 +134,34 @@ export default function PipelineView() {
 }
 
 function groupByLane(items) {
-  const out = { surfaced: [], approved: [], sent: [], other: [] };
+  const out = { surfaced: [], approved: [], sent: [], declined: [], other: [] };
   for (const it of items) {
     const lane = laneForStatus(it.status);
     if (lane) out[lane].push(it);
     else out.other.push(it);
   }
   return out;
+}
+
+function DeclinedList({ items, selectedId, onSelect }) {
+  if (!items || items.length === 0) {
+    return <div className="empty">Нет позиций</div>;
+  }
+  return (
+    <ul className="declined-list">
+      {items.map((it) => (
+        <li
+          key={it.id}
+          className={`declined-item${it.id === selectedId ? " row-selected" : ""}`}
+          onClick={() => onSelect(it.id)}
+        >
+          <span className="declined-role">{it.role || "—"}</span>
+          {it.company && <span className="declined-company">{it.company}</span>}
+          {it.decline_reason && (
+            <span className="declined-reason">{it.decline_reason}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
 }

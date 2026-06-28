@@ -620,6 +620,50 @@ h1::before {
   margin-left: auto;
 }
 
+/* ============================ DECLINED LIST ============================= */
+.declined-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.declined-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.declined-item:hover,
+.declined-item.row-selected {
+  background: var(--panel-2);
+  border-left-color: var(--teal-dim);
+}
+.declined-role {
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.declined-company {
+  font-size: 11px;
+  color: var(--ink-4);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.declined-reason {
+  font-size: 11px;
+  color: var(--amber);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ============================ TABLE ==================================== */
 .pipeline-table {
   width: 100%;

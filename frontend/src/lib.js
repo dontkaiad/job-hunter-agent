@@ -62,9 +62,10 @@ export function laneForStatus(status) {
     return "approved";
   // The "sent" lane holds the whole ACTIVE post-send funnel so those items stay
   // visible+clickable in the kanban (where the funnel buttons live). Terminal
-  // offer/declined/closed drop out of the lanes, like rejected/skipped.
+  // offer/closed drop out of the lanes, like rejected/skipped.
   if (status === SENT || status === SCREENING || status === INTERVIEW)
     return "sent";
+  if (status === "declined") return "declined";
   return null;
 }
 
@@ -73,6 +74,7 @@ export const LANES = [
   { key: "surfaced", title: "Ожидают решения" },
   { key: "approved", title: "Одобрено" },
   { key: "sent", title: "Отправлено" },
+  { key: "declined", title: "Отклонено" },
 ];
 
 // The per-state action buttons shown INSIDE the detail panel. Each entry is
