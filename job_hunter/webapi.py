@@ -973,6 +973,8 @@ def login_page(
             "request": request,
             "bot_username": settings.login_bot_username,
             "callback_url": callback_url,
+            "next_label": None,
+            "error": None,
         },
     )
 

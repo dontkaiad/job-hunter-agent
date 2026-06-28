@@ -1,84 +1,457 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sign in — Job Hunter</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f1115;
-      color: #e6e8eb;
-      display: flex;
-      min-height: 100vh;
-      margin: 0;
-      align-items: center;
-      justify-content: center;
-    }
-    .card {
-      background: #1a1d23;
-      padding: 2.5rem;
-      border-radius: 12px;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
-      text-align: center;
-      max-width: 360px;
-      width: 100%;
-    }
-    h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
-    p { color: #9aa0a6; font-size: 0.9rem; margin: 0 0 1.5rem; }
-    .remember {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.4rem;
-      margin-top: 1.25rem;
-      font-size: 0.85rem;
-      color: #9aa0a6;
-    }
-    #tg-widget { display: flex; justify-content: center; min-height: 48px; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>heylark — вход</title>
+
+{#
+  ============================================================================
+  login.heylark.dev — единый вход (Jinja2-шаблон)
+  ----------------------------------------------------------------------------
+  ПЛЕЙСХОЛДЕРЫ ДЛЯ БЭКЕНДА (подставляет сервер):
+    {{ bot_username }}  — username Telegram-бота для Login Widget
+    {{ callback_url }}  — URL, куда Telegram вернёт данные авторизации (data-auth-url)
+    {{ next_label }}    — необязательно: имя сервиса из ?next (пусто → нейтрально)
+    {{ error }}         — истина, если предыдущая попытка входа не удалась
+
+  ТЕХНИЧЕСКИЙ ИНВАРИАНТ:
+    • Блок Telegram Login Widget трогать нельзя — он сам рендерит синюю кнопку
+      «Log in». Кастомной кнопкой заменить НЕЛЬЗЯ.
+    • Из виджета настраиваются только его родные data-* (size, radius, userpic).
+    • Скрипт telegram-widget.js обязателен.
+    • Чекбокс «Запомнить меня» завязан на логику сессии — оставлен, перестилен.
+
+  Карточка повторяет «SSS»-карточку архитектора из Arcana: холо-рамка,
+  живой глаз (зрачок следит за курсором), сакральная геометрия. Фон —
+  сигил из того же проекта. Шрифты Google Fonts — единственная внешняя
+  зависимость кроме скрипта Telegram.
+  ============================================================================
+#}
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    /* Arcana night palette */
+    --bg-top:#0d1f1a;
+    --bg-mid:#0f1424;
+    --bg-bot:#1a0d2e;
+
+    --text:#e9efe8;
+    --text-dim:rgba(220,230,220,.55);
+    --text-mute:rgba(180,200,190,.38);
+    --border:rgba(140,200,180,.14);
+    --border-strong:rgba(180,220,200,.28);
+
+    --cyan:#7bdfd1;
+    --gold:#e8c887;
+    --magenta:#d97ec9;
+    --violet:#9d7be0;
+
+    --ox:#e26d7d;
+    --ox-deep:#2c1018;
+
+    --teal-bri:#92ecdc;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;
+    --ui:"Space Grotesk",system-ui,sans-serif;
+    --disp:"Oswald","Space Grotesk",system-ui,sans-serif;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+
+  body{
+    font-family:var(--ui);
+    color:var(--text);
+    font-size:14px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    min-height:100svh;
+    display:flex;
+    padding:max(18px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));
+    position:relative;overflow-x:hidden;overflow-y:auto;
+    background:
+      radial-gradient(70% 55% at 50% 32%, rgba(60,40,100,.40), transparent 70%),
+      radial-gradient(60% 50% at 85% 8%, rgba(123,223,209,.10), transparent 60%),
+      radial-gradient(60% 50% at 12% 96%, rgba(217,126,201,.10), transparent 60%),
+      linear-gradient(170deg, var(--bg-top) 0%, var(--bg-mid) 52%, var(--bg-bot) 100%);
+  }
+
+  /* ── background sigil from the Arcana project (gold rings + hexagram) ── */
+  .sigil-bg{
+    position:fixed;left:50%;top:50%;width:min(104vw,104vh);aspect-ratio:1;
+    transform:translate(-50%,-50%);z-index:0;pointer-events:none;opacity:.15;
+    background:center/contain no-repeat url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20320%20320'%20fill='none'%3E%3Cg%20stroke='%23e8c887'%20stroke-width='0.7'%3E%3Ccircle%20cx='160'%20cy='160'%20r='150'/%3E%3Ccircle%20cx='160'%20cy='160'%20r='120'%20stroke-dasharray='3%206'/%3E%3Ccircle%20cx='160'%20cy='160'%20r='92'%20stroke-dasharray='1.5%205'/%3E%3Cpolygon%20points='160,26 276,226 44,226'/%3E%3Cpolygon%20points='160,294 44,94 276,94'/%3E%3Cline%20x1='10'%20y1='160'%20x2='310'%20y2='160'/%3E%3Cline%20x1='160'%20y1='10'%20x2='160'%20y2='310'/%3E%3C/g%3E%3C/svg%3E");
+    animation:sigilSpin 140s linear infinite;
+  }
+  @keyframes sigilSpin{to{transform:translate(-50%,-50%) rotate(360deg);}}
+
+  /* ── starfield (white twinkle dust, like the project) ── */
+  .stars{
+    position:fixed;inset:0;z-index:0;pointer-events:none;
+    background-image:
+      radial-gradient(1.4px 1.4px at 18% 22%, rgba(255,255,255,.9), transparent),
+      radial-gradient(1px 1px at 72% 16%, rgba(255,255,255,.7), transparent),
+      radial-gradient(1.2px 1.2px at 40% 70%, rgba(255,255,255,.8), transparent),
+      radial-gradient(1px 1px at 86% 56%, rgba(255,255,255,.6), transparent),
+      radial-gradient(1.3px 1.3px at 8% 64%, rgba(255,255,255,.7), transparent),
+      radial-gradient(1px 1px at 60% 88%, rgba(255,255,255,.6), transparent),
+      radial-gradient(1px 1px at 30% 40%, rgba(255,255,255,.5), transparent),
+      radial-gradient(1.2px 1.2px at 92% 82%, rgba(255,255,255,.6), transparent);
+    animation:twinkle 5s ease-in-out infinite alternate;
+  }
+  @keyframes twinkle{from{opacity:.35;}to{opacity:.85;}}
+
+  /* ════════════════ THE CARD (SSS · holo foil) ════════════════ */
+  .card{
+    position:relative;z-index:1;margin:auto;
+    width:100%;max-width:384px;
+    border-radius:18px;
+    padding:30px 24px 28px;
+    background:linear-gradient(160deg, rgba(13,31,26,.95), rgba(26,13,46,.95));
+    box-shadow:0 30px 70px -28px rgba(0,0,0,.85), 0 0 40px -16px rgba(123,223,209,.20);
+    overflow:hidden;
+  }
+  /* holographic running border */
+  .card::before{
+    content:"";position:absolute;inset:0;border-radius:18px;padding:1.2px;
+    background:linear-gradient(120deg, var(--cyan), var(--magenta), var(--gold), var(--violet), var(--cyan));
+    background-size:300% 100%;
+    -webkit-mask:linear-gradient(#fff,#fff) content-box, linear-gradient(#fff,#fff);
+    -webkit-mask-composite:xor;mask-composite:exclude;
+    animation:holoBorder 5s linear infinite;z-index:3;pointer-events:none;
+  }
+  /* refractive sheen sweep */
+  .card::after{
+    content:"";position:absolute;inset:0;z-index:2;pointer-events:none;
+    background:linear-gradient(115deg, transparent 30%, rgba(255,255,255,.07) 50%, transparent 70%);
+    background-size:250% 100%;
+    animation:holoShine 6s ease-in-out infinite;
+  }
+  @keyframes holoBorder{to{background-position:300% 0;}}
+  @keyframes holoShine{0%,100%{background-position:120% 0;opacity:0;}35%,65%{opacity:1;}50%{background-position:-40% 0;}}
+
+  .card-inner{position:relative;z-index:4;text-align:center;}
+
+  /* top row — FOIL line + badge */
+  .toprow{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .foil{font-family:var(--mono);font-size:9px;letter-spacing:.25em;color:var(--cyan);text-transform:uppercase;}
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:3px 9px;border-radius:999px;
+    font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--gold);
+    background:linear-gradient(90deg, rgba(232,200,135,.16), rgba(232,200,135,.05));
+    border:.5px solid rgba(232,200,135,.45);
+    box-shadow:0 0 12px rgba(232,200,135,.22), inset 0 0 8px rgba(232,200,135,.10);
+  }
+  .badge svg{display:block;}
+
+  /* ── living-eye emblem + sigil ring ── */
+  .emblem{
+    position:relative;width:184px;height:150px;margin:12px auto 18px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .sigil-ring{
+    position:absolute;left:50%;top:50%;width:184px;height:184px;
+    transform:translate(-50%,-50%);pointer-events:none;
+  }
+  .eye-svg{
+    position:relative;width:128px;height:auto;overflow:visible;
+    filter:drop-shadow(0 0 10px rgba(123,223,209,.30));
+  }
+  .eye-glow{animation:eyeGlow 3.5s ease-in-out infinite;}
+  @keyframes eyeGlow{0%,100%{opacity:.5;}50%{opacity:.9;}}
+
+  /* main line — Oswald display, gradient (Job Hunter style) */
+  h1{
+    font-family:var(--disp);font-weight:700;
+    font-size:clamp(28px,8vw,36px);line-height:1.05;
+    letter-spacing:.02em;text-transform:uppercase;
+    color:transparent;
+    background:linear-gradient(100deg, var(--teal-bri) 0%, var(--cyan) 46%, var(--gold) 100%);
+    -webkit-background-clip:text;background-clip:text;
+    filter:drop-shadow(0 0 16px rgba(123,223,209,.16));
+    margin-top:10px;
+  }
+  .tagline{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.32em;text-transform:uppercase;
+    color:var(--cyan);margin-top:9px;opacity:.9;
+  }
+  .divider{
+    margin:12px auto 0;max-width:240px;height:1px;
+    background:linear-gradient(90deg, transparent, rgba(217,126,201,.5), transparent);
+  }
+
+  .subtitle{
+    font-family:var(--ui);font-size:14.5px;line-height:1.5;color:var(--cyan);
+    max-width:30ch;margin:18px auto 18px;text-wrap:pretty;
+  }
+  .subtitle b{color:var(--teal-bri);font-weight:600;}
+
+  /* error plaque */
+  .error{
+    display:flex;align-items:center;gap:9px;text-align:left;
+    font-family:var(--mono);font-size:12px;line-height:1.4;color:var(--ox);
+    background:var(--ox-deep);border:.5px solid rgba(226,109,125,.4);border-left:2px solid var(--ox);
+    border-radius:10px;padding:10px 13px;margin:0 0 16px;
+  }
+  .error .mark{
+    flex:0 0 auto;width:17px;height:17px;border-radius:50%;
+    border:1.4px solid var(--ox);display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;line-height:1;
+  }
+
+  /* next-context plaque (Job Hunter status style, teal) */
+  .note{
+    display:flex;align-items:center;gap:9px;text-align:left;
+    font-family:var(--mono);font-size:12px;line-height:1.4;color:var(--cyan);
+    background:rgba(123,223,209,.06);
+    border:.5px solid rgba(123,223,209,.30);border-left:2px solid var(--cyan);
+    border-radius:10px;padding:10px 13px;margin:0 0 16px;
+  }
+  .note b{color:var(--teal-bri);font-weight:600;}
+  .note .mark{
+    flex:0 0 auto;width:17px;height:17px;border-radius:50%;
+    border:1.4px solid var(--cyan);display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;line-height:1;
+  }
+
+  /* ── Telegram widget wrapper (widget itself untouched) ── */
+  .tg{min-height:50px;display:flex;align-items:center;justify-content:center;margin:8px 0 18px;}
+  .tg-skeleton{
+    width:220px;height:48px;border-radius:8px;
+    background:linear-gradient(100deg, rgba(123,223,209,.05), rgba(123,223,209,.14), rgba(123,223,209,.05));
+    background-size:220% 100%;animation:shimmer 1.5s linear infinite;
+  }
+  @keyframes shimmer{from{background-position:140% 0;}to{background-position:-40% 0;}}
+
+  /* remember checkbox */
+  .remember{
+    display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--cyan);padding:4px;
+  }
+  .remember input{position:absolute;opacity:0;width:0;height:0;}
+  .remember .box{
+    width:19px;height:19px;flex:0 0 auto;border-radius:5px;
+    border:.5px solid var(--border-strong);background:rgba(0,0,0,.3);
+    display:flex;align-items:center;justify-content:center;transition:.14s ease;
+  }
+  .remember .box svg{width:11px;height:11px;opacity:0;transform:scale(.6);transition:.14s ease;}
+  .remember input:checked + .box{background:var(--cyan);border-color:var(--cyan);}
+  .remember input:checked + .box svg{opacity:1;transform:scale(1);}
+  .remember input:focus-visible + .box{outline:2px solid var(--cyan);outline-offset:2px;}
+  .remember:hover .box{border-color:var(--cyan);}
+
+  /* reassurance footer */
+  .reassure{
+    margin-top:20px;padding-top:16px;border-top:.5px solid var(--border);
+    font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--text-mute);display:flex;align-items:center;justify-content:center;gap:7px;
+  }
+  .reassure svg{flex:0 0 auto;opacity:.7;}
+
+  @media (max-width:380px){
+    .card{padding:16px 16px 18px;}
+    .emblem{width:168px;height:138px;}
+    .sigil-ring{width:168px;height:168px;}
+    .eye-svg{width:116px;}
+    .subtitle{font-size:14px;}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .sigil-bg,.stars,.card::before,.card::after,.eye-glow{animation:none;}
+  }
+</style>
 </head>
 <body>
-  <div class="card">
-    <h1>Job Hunter Dashboard</h1>
-    <p>Sign in with Telegram to continue.</p>
+  <div class="sigil-bg" aria-hidden="true"></div>
+  <div class="stars" aria-hidden="true"></div>
 
-    <div id="tg-widget">
-      <!--
-        Telegram Login Widget. data-telegram-login is the LOGIN bot's username
-        (the bot that signs the widget). On success it redirects to
-        /auth/callback?<widget params>&remember=<0|1> which verifies the HMAC,
-        authorizes the grant, and sets the cross-subdomain session cookie.
-      -->
-      <script
-        async
-        src="https://telegram.org/js/telegram-widget.js?22"
-        data-telegram-login="{{ bot_username }}"
-        data-size="large"
-        data-userpic="true"
-        data-request-access="write"
-        data-auth-url="{{ callback_url }}"></script>
+  <main class="card" role="main">
+    <div class="card-inner">
+
+      <div class="toprow">
+        <span class="foil">FOIL · 001/001</span>
+        <span class="badge">
+          <svg width="9" height="9" viewBox="0 0 10 10"><path d="M5 0 L6 4 L10 5 L6 6 L5 10 L4 6 L0 5 L4 4 Z" fill="#e8c887"/></svg>
+          heylark.dev
+        </span>
+      </div>
+
+      <!-- ── living-eye emblem (pupil follows cursor) ── -->
+      <div class="emblem" aria-hidden="true">
+        <svg class="sigil-ring" viewBox="0 0 320 320" fill="none">
+          <g stroke="#e8c887" stroke-opacity="0.34">
+            <circle cx="160" cy="160" r="150" stroke-width="1.1"/>
+            <circle cx="160" cy="160" r="120" stroke-width="0.9" stroke-dasharray="3 6"/>
+            <polygon points="160,30 272,224 48,224" stroke-width="1.1"/>
+            <polygon points="160,290 48,96 272,96" stroke-width="1.1" stroke-opacity="0.5"/>
+          </g>
+        </svg>
+
+        <svg class="eye-svg" viewBox="0 0 100 70" fill="none">
+          <defs>
+            <radialGradient id="irisGrad" cx="50%" cy="50%">
+              <stop offset="0%"  stop-color="#7bdfd1" stop-opacity="1"/>
+              <stop offset="55%" stop-color="#7bdfd1" stop-opacity="0.85"/>
+              <stop offset="100%" stop-color="#1a0d2e" stop-opacity="1"/>
+            </radialGradient>
+            <radialGradient id="eyeGlowGrad" cx="50%" cy="50%">
+              <stop offset="0%" stop-color="#7bdfd1" stop-opacity="0.55"/>
+              <stop offset="100%" stop-color="#7bdfd1" stop-opacity="0"/>
+            </radialGradient>
+            <clipPath id="lidClip"><path d="M5 35 Q50 -2 95 35 Q50 72 5 35 Z"/></clipPath>
+          </defs>
+
+          <ellipse class="eye-glow" cx="50" cy="35" rx="55" ry="35" fill="url(#eyeGlowGrad)"/>
+          <path d="M5 35 Q50 -2 95 35 Q50 72 5 35 Z" fill="#0a0e18"/>
+
+          <g clip-path="url(#lidClip)">
+            <g class="iris">
+              <circle cx="50" cy="35" r="18" fill="url(#irisGrad)"/>
+              <circle cx="50" cy="35" r="18" fill="none" stroke="#7bdfd1" stroke-width="0.6" opacity="0.7"/>
+              <!-- iris striations injected here by JS, before the pupil -->
+              <circle id="eyePupil" cx="50" cy="35" r="9" fill="#000"/>
+              <circle cx="53" cy="32.5" r="2.2" fill="#fff" opacity="0.9"/>
+            </g>
+          </g>
+
+          <path d="M5 35 Q50 -2 95 35 Q50 72 5 35 Z" fill="none" stroke="#7bdfd1" stroke-width="0.9"/>
+          <path d="M8 33 Q50 0 92 33" fill="none" stroke="#fff" stroke-width="0.4" opacity="0.35"/>
+        </svg>
+      </div>
+
+      <h1>Kai is watching you</h1>
+      <div class="tagline">единый вход · heylark.dev</div>
+
+      <div class="divider" aria-hidden="true"></div>
+
+      {# Подзаголовок: контекст из ?next, иначе нейтральный #}
+      {% if next_label %}
+        <div class="note">
+          <span class="mark">→</span>
+          <span>Войдите, чтобы продолжить в&nbsp;<b>{{ next_label }}</b>.</span>
+        </div>
+      {% endif %}
+
+      {# Плашка ошибки — если прошлая попытка не удалась #}
+      {% if error %}
+        <div class="error" role="alert">
+          <span class="mark">!</span>
+          <span>Что-то пошло не так. Попробуйте войти ещё раз.</span>
+        </div>
+      {% endif %}
+
+      <!-- ===================================================================
+           TELEGRAM LOGIN WIDGET — НЕ ИЗМЕНЯТЬ РАЗМЕТКУ/АТРИБУТЫ.
+           Виджет сам рендерит синюю кнопку «Log in». bot_username и callback_url
+           подставляет сервер. Меняются только родные data-* (size, radius, userpic).
+           (Альтернатива data-auth-url — data-onauth="onTelegramAuth(user)".)
+      ==================================================================== -->
+      <div class="tg">
+        <div class="tg-skeleton" aria-hidden="true"></div>
+        <script async src="https://telegram.org/js/telegram-widget.js?22"
+                data-telegram-login="{{ bot_username }}"
+                data-size="large"
+                data-userpic="true"
+                data-radius="8"
+                data-request-access="write"
+                data-auth-url="{{ callback_url }}"></script>
+      </div>
+      <!-- =============== /TELEGRAM LOGIN WIDGET =============== -->
+
+      {# Чекбокс сессии — оставлен как есть, перестилен. Бэкенд читает поле «remember». #}
+      <label class="remember" for="remember">
+        <input type="checkbox" id="remember" name="remember" value="1" checked />
+        <span class="box">
+          <svg viewBox="0 0 12 12" fill="none"><path d="M2 6.2l2.6 2.6L10 3" stroke="#06120f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span>Запомнить на 30 дней</span>
+      </label>
+
+      <p class="reassure">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="4" y="10" width="16" height="11" rx="1.5" stroke="#8aa39c" stroke-width="1.8"/><path d="M8 10V7a4 4 0 1 1 8 0v3" stroke="#8aa39c" stroke-width="1.8"/></svg>
+        Вход через Telegram · пароль не нужен
+      </p>
+
     </div>
+  </main>
 
-    <label class="remember">
-      <input type="checkbox" id="remember" checked
-             onchange="updateAuthUrl()" />
-      Remember me for 30 days
-    </label>
-  </div>
+  <div class="grain" aria-hidden="true"></div>
 
   <script>
-    // The widget builds the redirect from data-auth-url; append the current
-    // "remember me" choice so /auth/callback can pick the cookie lifetime.
-    function updateAuthUrl() {
-      var script = document.querySelector('#tg-widget script');
-      if (!script) return;
-      var base = "{{ callback_url }}";
-      var remember = document.getElementById('remember').checked ? '1' : '0';
-      var sep = base.indexOf('?') === -1 ? '?' : '&';
-      script.setAttribute('data-auth-url', base + sep + 'remember=' + remember);
-    }
-    updateAuthUrl();
+    /* remember → sync checkbox state into data-auth-url before Telegram redirect.
+       The widget's redirect flow does not auto-submit form fields, so we append
+       remember=1/0 to the callback URL ourselves — same pattern as the old template. */
+    (function(){
+      function syncRemember(){
+        var s = document.querySelector('.tg script');
+        if(!s) return;
+        var base = "{{ callback_url }}";
+        var sep = base.indexOf('?') === -1 ? '?' : '&';
+        s.setAttribute('data-auth-url', base + sep + 'remember=' + (document.getElementById('remember').checked ? '1' : '0'));
+      }
+      document.getElementById('remember').addEventListener('change', syncRemember);
+      syncRemember();
+    })();
+
+    /* Living eye — port of the Arcana ClampedLivingEye: pupil tracks the cursor
+       on desktop (clipped by the eyelid), drifts gently when idle / on mobile. */
+    (function(){
+      var emblem = document.querySelector('.emblem');
+      var iris   = document.querySelector('.emblem .iris');
+      var pupil  = document.getElementById('eyePupil');
+      if(!emblem || !iris) return;
+
+      var SVGNS = 'http://www.w3.org/2000/svg';
+      for(var i=0;i<14;i++){
+        var a = (i/14)*Math.PI*2;
+        var ln = document.createElementNS(SVGNS,'line');
+        ln.setAttribute('x1',(50+Math.cos(a)*9).toFixed(2));
+        ln.setAttribute('y1',(35+Math.sin(a)*9).toFixed(2));
+        ln.setAttribute('x2',(50+Math.cos(a)*17).toFixed(2));
+        ln.setAttribute('y2',(35+Math.sin(a)*17).toFixed(2));
+        ln.setAttribute('stroke','#7bdfd1');
+        ln.setAttribute('stroke-width','0.4');
+        ln.setAttribute('opacity','0.55');
+        iris.insertBefore(ln, pupil);
+      }
+
+      function set(x,y){ iris.setAttribute('transform','translate('+x.toFixed(2)+' '+y.toFixed(2)+')'); }
+
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if(reduce){ set(0,0); return; }
+
+      var cur={x:0,y:0}, tgt={x:0,y:0}, last=-9999;
+      window.addEventListener('mousemove', function(e){
+        var r = emblem.getBoundingClientRect();
+        var dx = e.clientX - (r.left + r.width/2);
+        var dy = e.clientY - (r.top + r.height/2);
+        var len = Math.hypot(dx,dy) || 1;
+        var k = Math.min(1, len/180);
+        tgt.x = (dx/len)*22*k;   // iris travels up to the lid; clip handles cutoff
+        tgt.y = (dy/len)*14*k;
+        last = performance.now();
+        // immediate nudge so tracking works even if rAF is throttled
+        cur.x += (tgt.x-cur.x)*0.5; cur.y += (tgt.y-cur.y)*0.5; set(cur.x,cur.y);
+      }, {passive:true});
+
+      function loop(t){
+        if(t - last > 2600){            // idle / touch — slow look-around
+          var s = t/1000;
+          tgt.x = Math.cos(s*0.5)*9;
+          tgt.y = Math.sin(s*0.7)*5;
+        }
+        cur.x += (tgt.x-cur.x)*0.12;
+        cur.y += (tgt.y-cur.y)*0.12;
+        set(cur.x,cur.y);
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+    })();
   </script>
 </body>
 </html>
