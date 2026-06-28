@@ -25,8 +25,8 @@ CLOSED = "closed"
 SCREENING = "screening"   # employer replied; first contact / screening
 INTERVIEW = "interview"   # interview stage
 OFFER = "offer"           # offer received (terminal)
-DECLINED = "declined"     # employer rejection (terminal) — NOT the scoring
-                          # REJECTED (T3); that one is the relevance filter.
+DECLINED = "declined"     # employer rejection OR manual pre-send reject.
+                          # Re-approvable via T25 (NOT the scoring REJECTED/T3).
 
 ALL_STATES = (
     DISCOVERED, EXTRACTED, SCORED, REJECTED, SURFACED, SKIPPED,
@@ -34,7 +34,7 @@ ALL_STATES = (
     SCREENING, INTERVIEW, OFFER, DECLINED,
 )
 
-TERMINAL_STATES = frozenset({REJECTED, SKIPPED, CLOSED, OFFER, DECLINED})
+TERMINAL_STATES = frozenset({REJECTED, SKIPPED, CLOSED, OFFER})
 
 # --- Transition kinds -------------------------------------------------------
 
@@ -97,6 +97,8 @@ TRANSITIONS: List[Transition] = [
     Transition("T22", APPROVED, DECLINED, KIND_HITL, DECISION_DECLINE),
     Transition("T23", RESEARCHED, DECLINED, KIND_HITL, DECISION_DECLINE),
     Transition("T24", DRAFTED, DECLINED, KIND_HITL, DECISION_DECLINE),
+    # Re-approve a declined vacancy to resume the draft → sent flow.
+    Transition("T25", DECLINED, APPROVED, KIND_HITL, DECISION_APPROVE),
 ]
 
 # Index: from_state -> list of outgoing transitions.

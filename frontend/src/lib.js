@@ -123,6 +123,8 @@ export function actionsForStatus(status) {
         { action: "decline", label: "Отказ" },
         { action: "close", label: "Закрыть" },
       ];
+    case "declined":
+      return [{ action: "approve", label: "Вернуть в работу" }];
     default:
       return [];
   }
