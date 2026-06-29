@@ -22,7 +22,50 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -e
             cd ~/heylark/job-hunter-agent
             git pull
-            GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build job-hunter dashboard
+
+            # Remove any Created containers from previous failed swaps — these
+            # orphans block name allocation on the next compose up.
+            docker ps -aq --filter status=created | xargs -r docker rm
+            docker ps -aq --filter status=exited --filter name=job-hunter | xargs -r docker rm
+            docker ps -aq --filter status=exited --filter name=dashboard   | xargs -r docker rm
+
+            # Build, replace, and clean up any services removed from compose.
+            # --force-recreate: stop current container before starting new one,
+            #   so the name is released before the replacement claims it.
+            # --remove-orphans: drop containers for services no longer in compose.
+            GIT_SHA=$(git rev-parse --short HEAD) \
+              docker compose up -d --build --force-recreate --remove-orphans job-hunter dashboard
+
+            # Verify both containers actually become healthy within 60 s.
+            # Exits 1 on timeout or unhealthy — no more silent false-success.
+            echo "Waiting for job-hunter and dashboard to become healthy (up to 60 s)..."
+            deadline=$(( $(date +%s) + 60 ))
+            for svc in job-hunter dashboard; do
+              while true; do
+                health=$(docker inspect "$svc" --format '{{.State.Health.Status}}' 2>/dev/null || echo "missing")
+                case "$health" in
+                  healthy)
+                    echo "$svc is healthy."
+                    break
+                    ;;
+                  unhealthy)
+                    echo "ERROR: $svc is unhealthy."
+                    docker logs "$svc" --tail 40
+                    exit 1
+                    ;;
+                  starting|missing)
+                    if [ "$(date +%s)" -ge "$deadline" ]; then
+                      echo "ERROR: timed out waiting for $svc to become healthy (status: $health)."
+                      docker logs "$svc" --tail 40
+                      exit 1
+                    fi
+                    sleep 3
+                    ;;
+                esac
+              done
+            done
+
             docker compose ps
