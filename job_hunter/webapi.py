@@ -1078,13 +1078,17 @@ def _mount_spa(app: FastAPI, static_dir: str) -> None:
         )
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    def spa_catch_all(full_path: str):  # noqa: ANN202 - FastAPI route
-        """Serve index.html for SPA client-side routes.
+    def spa_catch_all(  # noqa: ANN202 - FastAPI route
+        full_path: str,
+        _tg_id: int = Depends(require_auth(app=APP_NAME)),
+    ):
+        """Serve index.html for SPA client-side routes (owner-only).
 
         The /api routers and the auth routes are registered earlier, so they
         match first. Anything reaching here is an unmatched path: if it is an
         /api path (no API route matched it) we 404 in JSON so the API owns the
-        /api namespace; everything else is a client-side route -> index.html."""
+        /api namespace; everything else is a client-side route -> index.html.
+        Unauthenticated requests are redirected to /login by require_auth."""
         if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="not found")
         return FileResponse(index_path)
