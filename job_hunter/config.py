@@ -125,6 +125,14 @@ class Config:
     # Results per geo per fetch (Jobicy caps at 50).
     jobicy_count: int = 50
 
+    # --- Habr Career RSS source (OPTIONAL) ---
+    # HABR_ENABLED=true enables the source; default off. HABR_RSS_URL overrides
+    # the default feed URL (pre-filtered for LLM/AI remote vacancies).
+    habr_enabled: bool = False
+    habr_rss_url: str = (
+        "https://career.habr.com/vacancies/rss?q=LLM+AI+engineer&remote=true&type=1"
+    )
+
     # --- Harvest quality: minimum score to persist a vacancy in work_items ---
     # Vacancies with relevance_score < min_persist_score are deleted after
     # scoring and never reach work_items in a permanent state. Set to 0 to
@@ -222,4 +230,9 @@ def load_config(env: Optional[dict] = None) -> Config:
         jobicy_geos=_split_csv(get("JOBICY_GEOS")),
         jobicy_industry=get("JOBICY_INDUSTRY") or "dev",
         jobicy_count=_int_or_none(get("JOBICY_COUNT")) or 50,
+        habr_enabled=(get("HABR_ENABLED") or "false").lower() in ("1", "true", "yes"),
+        habr_rss_url=(
+            get("HABR_RSS_URL")
+            or "https://career.habr.com/vacancies/rss?q=LLM+AI+engineer&remote=true&type=1"
+        ),
     )

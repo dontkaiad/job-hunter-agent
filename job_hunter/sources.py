@@ -29,6 +29,9 @@ both ``europe`` and ``germany`` sweeps to a single card.
 from __future__ import annotations
 
 import time
+import xml.etree.ElementTree as ET
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from typing import Callable, List, Optional, Protocol, Tuple
 
 import httpx
@@ -264,6 +267,142 @@ def _default_get(url: str) -> "httpx.Response":
     return httpx.get(url, timeout=20.0, follow_redirects=True, headers=headers)
 
 
+def _rss_get(url: str) -> "httpx.Response":
+    headers = {
+        "User-Agent": _USER_AGENT,
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    }
+    return httpx.get(url, timeout=20.0, follow_redirects=True, headers=headers)
+
+
+# --- Habr Career RSS source --------------------------------------------------
+
+HABR_SOURCE = "habr"
+
+_HABR_ID_RE = __import__("re").compile(r"/vacancies/(\d+)")
+
+
+def _parse_rfc2822(value: Optional[str]):
+    """Parse RSS pubDate (RFC 2822) to UTC datetime. Returns None on failure."""
+    if not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value.strip())
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _parse_rss_items(xml_text: str) -> List[dict]:
+    """Parse RSS 2.0 XML into a list of raw item dicts. PURE."""
+    root = ET.fromstring(xml_text)
+    channel = root.find("channel") or root
+    items = []
+    for el in channel.findall("item"):
+        items.append(
+            {
+                "title": el.findtext("title"),
+                "link": el.findtext("link"),
+                "description": el.findtext("description"),
+                "pub_date": el.findtext("pubDate"),
+                "guid": el.findtext("guid"),
+            }
+        )
+    return items
+
+
+def habr_item_to_message(item: dict) -> Optional[IngestMessage]:
+    """Map ONE Habr Career RSS <item> to an IngestMessage. PURE, never raises."""
+    try:
+        link = (item.get("link") or "").strip()
+        guid = (item.get("guid") or link).strip()
+        if not guid:
+            return None
+        m = _HABR_ID_RE.search(guid)
+        short_id = m.group(1) if m else guid
+
+        title = (item.get("title") or "").strip()
+        body = html_to_text(item.get("description") or "")
+
+        lines: List[str] = []
+        if title:
+            lines.append(title)
+        lines.append("Remote · Хабр Карьера")
+        if body:
+            lines.append("")
+            lines.append(body)
+        if link:
+            lines.append("")
+            lines.append(link)
+
+        raw_text = "\n".join(lines).strip()
+        if not raw_text:
+            return None
+
+        return IngestMessage(
+            source_channel=HABR_SOURCE,
+            source_message_id=f"habr:{short_id}",
+            source_link=link or None,
+            raw_text=raw_text,
+            posted_at=_parse_rfc2822(item.get("pub_date")),
+        )
+    except Exception:
+        return None
+
+
+class HabrCareerSource:
+    """Habr Career public RSS feed as a Source.
+
+    ``http_get`` is injectable for tests (no network). Single cursor key
+    ``"habr"`` — no geo sweep, one feed URL.
+    """
+
+    name = "habr"
+
+    def __init__(
+        self,
+        http_get: Optional[Callable[[str], "httpx.Response"]] = None,
+    ) -> None:
+        self._http_get = http_get
+
+    def fetch(self, cfg: Config) -> List[IngestMessage]:
+        """Fetch + parse the RSS feed. Returns [] on any HTTP/parse error."""
+        get = self._http_get or _rss_get
+        resp = get(cfg.habr_rss_url)
+        resp.raise_for_status()
+        items = _parse_rss_items(resp.text)
+        out: List[IngestMessage] = []
+        for item in items:
+            msg = habr_item_to_message(item)
+            if msg is not None:
+                out.append(msg)
+        return out
+
+    def ingest(self, cfg: Config, conn) -> List[int]:
+        if not cfg.habr_enabled:
+            return []
+        now = now_utc()
+        try:
+            msgs = self.fetch(cfg)
+        except Exception as exc:
+            print(f"[ingest-habr] fetch failed: {exc}")
+            return []
+        ids = _store_with_watermark(
+            conn, HABR_SOURCE, msgs,
+            now=now, lookback_days=cfg.new_channel_lookback_days,
+        )
+        print(f"[ingest-habr] {len(msgs)} read, {len(ids)} new")
+        return ids
+
+    def ingest_with_own_connection(self, cfg: Config) -> List[int]:
+        conn = store.connect(cfg.database_url)
+        try:
+            store.init_db(conn)
+            return self.ingest(cfg, conn)
+        finally:
+            conn.close()
+
+
 # --- Registry / aggregator ---------------------------------------------------
 
 
@@ -272,7 +411,8 @@ def http_sources(cfg: Config, mode: str = "web") -> List[Source]:
 
     - telegram-web unless INGEST_MODE=telethon (that path is async and handled
       directly by run.ingest against the main-thread connection),
-    - Jobicy when JOBICY_GEOS is non-empty (opt-in).
+    - Jobicy when JOBICY_GEOS is non-empty (opt-in),
+    - Habr Career when HABR_ENABLED=true (opt-in).
     Each is offloaded to a worker thread by run.ingest via
     ``ingest_with_own_connection``.
     """
@@ -281,6 +421,8 @@ def http_sources(cfg: Config, mode: str = "web") -> List[Source]:
         sources.append(TelegramWebSource())
     if cfg.jobicy_geos:
         sources.append(JobicySource())
+    if cfg.habr_enabled:
+        sources.append(HabrCareerSource())
     return sources
 
 
