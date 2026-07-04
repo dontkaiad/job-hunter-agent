@@ -77,13 +77,6 @@ Salary-floor (€/мес) тоже берётся из профиля (`salary_f
 - **STRONG FIT (высокий):** роли, где кандидат ВЛАДЕЕТ AI / поведением модели —
   Prompt/AI/LLM Engineer, AI Product Engineer, applied-LLM; где RAG/роутинг/
   промпты — ЯДРО работы; грейд совпадает с `target_grade` из профиля.
-  Также STRONG FIT: роли, где ценность кандидата — оценка ПОДХОДА и
-  архитектурное решение (какой метод применить: RAG / fine-tune / rules /
-  automation / human-in-the-loop), даже если написание кода делегировано
-  команде или AI-инструментам. Примеры тайтлов: AI Solutions Engineer
-  (продуктовый/внутренний, не sales-facing), AI Enablement Engineer, AI
-  Transformation Engineer, Founding/Staff AI Engineer с архитектурным
-  фокусом. Смотри на суть обязанностей, не на тайтл.
 - **LOCATION PRIORITY:** локация оценивается по лестнице `location_priority`
   из профиля (релокация / remote / гибрид / офис — в порядке предпочтения).
   Роли за рубежом с релокацией / визовым спонсорством ранжируются высоко,
