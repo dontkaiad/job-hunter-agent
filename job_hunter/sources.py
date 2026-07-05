@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import time
 import xml.etree.ElementTree as ET
-from datetime import timezone
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Callable, List, Optional, Protocol, Tuple
 
@@ -403,6 +403,219 @@ class HabrCareerSource:
             conn.close()
 
 
+# ---------------------------------------------------------------------------
+# We Work Remotely
+# ---------------------------------------------------------------------------
+
+_WWR_ID_RE = __import__("re").compile(r"/openings/([^/?#]+)")
+
+
+def wwr_item_to_message(item: dict) -> Optional[IngestMessage]:
+    """Map ONE WWR RSS <item> to an IngestMessage. PURE, never raises."""
+    try:
+        link = (item.get("link") or "").strip()
+        guid = (item.get("guid") or link).strip()
+        url = guid or link
+        if not url:
+            return None
+        m = _WWR_ID_RE.search(url)
+        item_id = m.group(1) if m else url.rstrip("/").rsplit("/", 1)[-1]
+        if not item_id:
+            return None
+        title = (item.get("title") or "").strip()
+        body = html_to_text(item.get("description") or "")
+        raw_text = "\n\n".join(filter(None, [title, "We Work Remotely", body]))
+        posted_at = _parse_rfc2822(item.get("pub_date"))
+        return IngestMessage(
+            source_channel="wwr",
+            source_message_id=f"wwr:{item_id}",
+            source_link=link or url,
+            raw_text=raw_text,
+            posted_at=posted_at,
+        )
+    except Exception:
+        return None
+
+
+class WeworkRemotelySource:
+    """We Work Remotely public RSS feeds as a Source.
+
+    Sweeps two feed URLs (programming + full-stack), each with its own
+    watermark key (``"wwr:programming"``, ``"wwr:fullstack"``).  All items
+    share ``source_channel="wwr"``; the partial unique index on
+    (source_channel, source_message_id) deduplicates jobs that appear in both
+    feeds.
+    """
+
+    name = "wwr"
+
+    _FEED_KEYS: List[Tuple[str, str]] = []  # set in __init__
+
+    def __init__(
+        self,
+        http_get: Optional[Callable[[str], "httpx.Response"]] = None,
+    ) -> None:
+        self._http_get = http_get
+
+    def fetch(self, url: str) -> List[IngestMessage]:
+        """Fetch + parse one RSS feed URL. Returns [] on any error."""
+        get = self._http_get or _rss_get
+        resp = get(url)
+        resp.raise_for_status()
+        items = _parse_rss_items(resp.text)
+        out: List[IngestMessage] = []
+        for item in items:
+            msg = wwr_item_to_message(item)
+            if msg is not None:
+                out.append(msg)
+        return out
+
+    def ingest(self, cfg: Config, conn) -> List[int]:
+        if not cfg.wwr_enabled:
+            return []
+        now = now_utc()
+        feed_keys = [
+            (cfg.wwr_rss_urls[0], "wwr:programming"),
+            (cfg.wwr_rss_urls[1], "wwr:fullstack"),
+        ] if len(cfg.wwr_rss_urls) >= 2 else [
+            (u, f"wwr:{i}") for i, u in enumerate(cfg.wwr_rss_urls)
+        ]
+        all_ids: List[int] = []
+        for url, cursor_key in feed_keys:
+            try:
+                msgs = self.fetch(url)
+            except Exception as exc:
+                print(f"[ingest-wwr] fetch {cursor_key} failed: {exc}")
+                continue
+            ids = _store_with_watermark(
+                conn, cursor_key, msgs,
+                now=now, lookback_days=cfg.new_channel_lookback_days,
+            )
+            print(f"[ingest-wwr] {cursor_key}: {len(msgs)} read, {len(ids)} new")
+            all_ids.extend(ids)
+        return all_ids
+
+    def ingest_with_own_connection(self, cfg: Config) -> List[int]:
+        conn = store.connect(cfg.database_url)
+        try:
+            store.init_db(conn)
+            return self.ingest(cfg, conn)
+        finally:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Hacker News "Who is Hiring?"
+# ---------------------------------------------------------------------------
+
+_HN_ALGOLIA = (
+    "https://hn.algolia.com/api/v1/search_by_date"
+    "?tags=story,author_whoishiring&hitsPerPage=5"
+)
+_HN_FIREBASE = "https://hacker-news.firebaseio.com/v0/item/{id}.json"
+
+
+class HNHiringSource:
+    """Hacker News monthly "Who is Hiring?" thread as a Source.
+
+    Discovery: Algolia auto-discovers the newest "Who is Hiring?" story.
+    Fetch: Firebase API fetches the thread, then each top-level comment.
+    Each comment -> one IngestMessage (source_channel="hn_hiring").
+    Watermark on "hn_hiring" prevents re-ingesting old comments across runs.
+    """
+
+    name = "hn_hiring"
+
+    def __init__(
+        self,
+        http_get: Optional[Callable[[str], "httpx.Response"]] = None,
+    ) -> None:
+        self._http_get = http_get
+
+    def _get(self, url: str) -> "httpx.Response":
+        get = self._http_get or _default_get
+        return get(url)
+
+    def _discover_thread(self) -> Optional[int]:
+        """Return the newest 'Who is Hiring?' story ID from Algolia, or None."""
+        try:
+            resp = self._get(_HN_ALGOLIA)
+            resp.raise_for_status()
+            hits = (resp.json().get("hits") or [])
+            for hit in hits:
+                title = (hit.get("title") or "").lower()
+                if "who is hiring" in title:
+                    return int(hit["objectID"])
+        except Exception:
+            pass
+        return None
+
+    def fetch(self, thread_id: int) -> List[IngestMessage]:
+        """Fetch all top-level comments of the given HN thread."""
+        try:
+            resp = self._get(_HN_FIREBASE.format(id=thread_id))
+            resp.raise_for_status()
+            thread = resp.json()
+        except Exception:
+            return []
+        kids = thread.get("kids") or []
+        out: List[IngestMessage] = []
+        for kid_id in kids:
+            try:
+                r = self._get(_HN_FIREBASE.format(id=kid_id))
+                r.raise_for_status()
+                comment = r.json()
+                if comment.get("deleted") or comment.get("dead"):
+                    continue
+                body = html_to_text(comment.get("text") or "")
+                if not body:
+                    continue
+                posted_at: Optional[datetime] = None
+                ts = comment.get("time")
+                if ts:
+                    posted_at = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+                out.append(
+                    IngestMessage(
+                        source_channel="hn_hiring",
+                        source_message_id=f"hn:{kid_id}",
+                        source_link=f"https://news.ycombinator.com/item?id={kid_id}",
+                        raw_text=body,
+                        posted_at=posted_at,
+                    )
+                )
+            except Exception:
+                continue
+        return out
+
+    def ingest(self, cfg: Config, conn) -> List[int]:
+        if not cfg.hn_hiring_enabled:
+            return []
+        now = now_utc()
+        thread_id = self._discover_thread()
+        if thread_id is None:
+            print("[ingest-hn_hiring] could not discover thread via Algolia")
+            return []
+        try:
+            msgs = self.fetch(thread_id)
+        except Exception as exc:
+            print(f"[ingest-hn_hiring] fetch failed: {exc}")
+            return []
+        ids = _store_with_watermark(
+            conn, "hn_hiring", msgs,
+            now=now, lookback_days=cfg.new_channel_lookback_days,
+        )
+        print(f"[ingest-hn_hiring] thread={thread_id}: {len(msgs)} read, {len(ids)} new")
+        return ids
+
+    def ingest_with_own_connection(self, cfg: Config) -> List[int]:
+        conn = store.connect(cfg.database_url)
+        try:
+            store.init_db(conn)
+            return self.ingest(cfg, conn)
+        finally:
+            conn.close()
+
+
 # --- Registry / aggregator ---------------------------------------------------
 
 
@@ -412,7 +625,9 @@ def http_sources(cfg: Config, mode: str = "web") -> List[Source]:
     - telegram-web unless INGEST_MODE=telethon (that path is async and handled
       directly by run.ingest against the main-thread connection),
     - Jobicy when JOBICY_GEOS is non-empty (opt-in),
-    - Habr Career when HABR_ENABLED=true (opt-in).
+    - Habr Career when HABR_ENABLED=true (opt-in),
+    - We Work Remotely when WWR_ENABLED=true (opt-in),
+    - HN Who's Hiring when HN_HIRING_ENABLED=true (opt-in).
     Each is offloaded to a worker thread by run.ingest via
     ``ingest_with_own_connection``.
     """
@@ -423,6 +638,10 @@ def http_sources(cfg: Config, mode: str = "web") -> List[Source]:
         sources.append(JobicySource())
     if cfg.habr_enabled:
         sources.append(HabrCareerSource())
+    if cfg.wwr_enabled:
+        sources.append(WeworkRemotelySource())
+    if cfg.hn_hiring_enabled:
+        sources.append(HNHiringSource())
     return sources
 
 

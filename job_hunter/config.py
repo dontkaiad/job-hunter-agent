@@ -133,6 +133,23 @@ class Config:
         "https://career.habr.com/vacancies/rss?q=LLM+AI+engineer&remote=true&type=1"
     )
 
+    # --- We Work Remotely RSS source (OPTIONAL) ---
+    # WWR_ENABLED=true enables the source; default off.
+    # Two feeds (programming + full-stack) swept per ingest run.
+    wwr_enabled: bool = False
+    wwr_rss_urls: List[str] = field(
+        default_factory=lambda: [
+            "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+            "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+        ]
+    )
+
+    # --- Hacker News "Who is Hiring?" source (OPTIONAL) ---
+    # HN_HIRING_ENABLED=true enables the source; default off.
+    # Auto-discovers the current monthly thread via Algolia, then fetches
+    # top-level comments (one IngestMessage per comment) via Firebase API.
+    hn_hiring_enabled: bool = False
+
     # --- Harvest quality: minimum score to persist a vacancy in work_items ---
     # Vacancies with relevance_score < min_persist_score are deleted after
     # scoring and never reach work_items in a permanent state. Set to 0 to
@@ -235,4 +252,13 @@ def load_config(env: Optional[dict] = None) -> Config:
             get("HABR_RSS_URL")
             or "https://career.habr.com/vacancies/rss?q=LLM+AI+engineer&remote=true&type=1"
         ),
+        wwr_enabled=(get("WWR_ENABLED") or "false").lower() in ("1", "true", "yes"),
+        wwr_rss_urls=(
+            [u.strip() for u in get("WWR_RSS_URLS").split(",") if u.strip()]
+            or [
+                "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+                "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+            ]
+        ),
+        hn_hiring_enabled=(get("HN_HIRING_ENABLED") or "false").lower() in ("1", "true", "yes"),
     )
