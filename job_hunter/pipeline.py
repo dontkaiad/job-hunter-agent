@@ -321,6 +321,9 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
     Deterministic only:
       - HARD salary guard wins: if the RUB-equivalent salary top is known and
         below the floor, reject regardless of the (Sonnet) relevance score.
+      - HARD location guard wins: office-only with no relocation/visa signal
+        is physically unavailable to the candidate, reject regardless of how
+        well the stack matches.
       - Otherwise the surface threshold T is applied to the stored score.
     """
     extracted = _load_extracted(item)
@@ -352,6 +355,17 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
         return AdvanceResult(
             "moved", item.id, item.state, REJECTED, "T3", "hard reject (salary)",
             extra={"salary_rub": salary_rub, "floor_rub": floor_rub},
+        )
+
+    if scoring.location_guard_reject(extracted.remote, extracted.relocation):
+        store.update_state(
+            conn, item.id, REJECTED,
+            from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,
+            reason="hard reject: оффлайн без релокации/визы — физически недоступно",
+        )
+        return AdvanceResult(
+            "moved", item.id, item.state, REJECTED, "T3", "hard reject (location)",
+            extra={"remote": extracted.remote, "relocation": extracted.relocation},
         )
 
     score = extracted.relevance_score if extracted.relevance_score is not None else 0

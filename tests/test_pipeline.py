@@ -329,6 +329,75 @@ def test_salary_guard_overrides_high_llm_score(conn, fake_llm, fake_fx):
     assert any("hard reject" in (t["reason"] or "").lower() for t in trans)
 
 
+def test_location_guard_overrides_high_llm_score(conn, fake_llm, fake_fx):
+    """Office-only vacancy with explicit remote=false + relocation=false must
+    hard-reject even with a top relevance score — physically unavailable to
+    the candidate (no visa/right to work there without sponsorship)."""
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
+    fake_llm.set_for(
+        "strict JSON",
+        '{"title":"Senior Python Engineer","stack":["python","llm"],'
+        '"remote":false,"relocation":false,"location":"Moscow office"}',
+    )
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 95, "Обоснование": "perfect stack"}')
+    item_id = _insert(conn, "Office Python Senior LLM role in Moscow. @hr")
+    pipeline.run_to_gate(conn, item_id, deps=deps)
+    item = store.get_item(conn, item_id)
+    assert item.state == REJECTED
+    assert item.relevance_score == 95.0  # the high score was stored...
+    trans = store.list_transitions(conn, item_id)
+    assert any("hard reject" in (t["reason"] or "").lower() for t in trans)
+    assert any("физически недоступно" in (t["reason"] or "") for t in trans)
+
+
+def test_location_guard_fires_when_relocation_unmentioned(conn, fake_llm, fake_fx):
+    """The common real case: an office post that never mentions relocation at
+    all extracts as relocation=None (not False) — must still hard-reject."""
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
+    fake_llm.set_for(
+        "strict JSON",
+        '{"title":"Senior Python Engineer","stack":["python","llm"],'
+        '"remote":false,"location":"Moscow office"}',
+    )
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 95, "Обоснование": "perfect stack"}')
+    item_id = _insert(conn, "Office Python Senior LLM role in Moscow. @hr")
+    pipeline.run_to_gate(conn, item_id, deps=deps)
+    item = store.get_item(conn, item_id)
+    assert item.state == REJECTED
+    trans = store.list_transitions(conn, item_id)
+    assert any("физически недоступно" in (t["reason"] or "") for t in trans)
+
+
+def test_location_guard_not_triggered_with_relocation_support(conn, fake_llm, fake_fx):
+    """Office-only IS surfaced when relocation/visa support is confirmed."""
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
+    fake_llm.set_for(
+        "strict JSON",
+        '{"title":"Senior Python Engineer","stack":["python","llm"],'
+        '"remote":false,"relocation":true,"location":"Berlin office"}',
+    )
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 90, "Обоснование": "great fit"}')
+    item_id = _insert(conn, "Office Python Senior LLM role in Berlin, relocation package provided. @hr")
+    pipeline.run_to_gate(conn, item_id, deps=deps)
+    item = store.get_item(conn, item_id)
+    assert item.state == SURFACED
+
+
+def test_location_guard_not_triggered_when_remote(conn, fake_llm, fake_fx):
+    """A confirmed remote vacancy is never touched by the location guard."""
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
+    fake_llm.set_for(
+        "strict JSON",
+        '{"title":"Senior Python Engineer","stack":["python","llm"],'
+        '"remote":true,"relocation":false}',
+    )
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 90, "Обоснование": "great fit"}')
+    item_id = _insert(conn, "Remote Python Senior LLM role. @hr")
+    pipeline.run_to_gate(conn, item_id, deps=deps)
+    item = store.get_item(conn, item_id)
+    assert item.state == SURFACED
+
+
 def test_llm_extract_used_when_enabled(conn, fake_llm, fake_fx):
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
     fake_llm.set_for("strict JSON", '{"title":"LLM Eng","stack":["python","llm"],'

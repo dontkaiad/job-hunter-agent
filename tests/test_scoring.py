@@ -107,3 +107,33 @@ def test_salary_guard_no_floor_not_rejected():
 
 def test_salary_guard_high_pay_kept():
     assert scoring.salary_guard_reject(300_000.0, _FLOOR_RUB) is False
+
+
+def test_location_guard_rejects_office_no_relocation():
+    assert scoring.location_guard_reject(False, False) is True
+
+
+def test_location_guard_rejects_office_relocation_unmentioned():
+    # The common real case: office post that simply never mentions relocation
+    # extracts as relocation=None, not False — must still trip the guard.
+    assert scoring.location_guard_reject(False, None) is True
+
+
+def test_location_guard_keeps_remote():
+    assert scoring.location_guard_reject(True, False) is False
+
+
+def test_location_guard_keeps_office_with_relocation():
+    assert scoring.location_guard_reject(False, True) is False
+
+
+def test_location_guard_keeps_remote_with_relocation():
+    assert scoring.location_guard_reject(True, True) is False
+
+
+def test_location_guard_unknown_remote_not_rejected():
+    # remote=None means the format was never determined (not a confirmed
+    # office signal) -> do not hard reject on missing data.
+    assert scoring.location_guard_reject(None, False) is False
+    assert scoring.location_guard_reject(None, None) is False
+    assert scoring.location_guard_reject(None, True) is False

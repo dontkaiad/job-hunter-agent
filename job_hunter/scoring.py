@@ -17,6 +17,10 @@ weighted score: the relevance_score is produced by the Sonnet rubric judge
      layer (fx.py) upstream; this function receives the two already-converted
      RUB values and only compares them, so the floor works regardless of the
      posting's currency.
+  5. ``location_guard_reject`` — the HARD deterministic location/visa floor:
+     regardless of the LLM score, an office-only vacancy with no relocation/visa
+     support is physically unavailable to the candidate (no right to work there
+     without sponsorship) -> reject, no matter how well the stack matches.
 
 Scale: relevance_score in 0..100. Surface threshold T = 60.
 """
@@ -150,3 +154,31 @@ def salary_guard_reject(
     if salary_max_rub is None or floor_rub is None:
         return False
     return salary_max_rub < floor_rub
+
+
+def location_guard_reject(remote: Optional[bool], relocation: Optional[bool]) -> bool:
+    """Deterministic HARD location/visa floor. PURE.
+
+    An office/offline vacancy with no relocation or visa-sponsorship signal is
+    physically unavailable to the candidate — there is no right to work in
+    that country without sponsorship — regardless of how well the stack
+    matches. Independent of the LLM score — it overrides it, same as
+    ``salary_guard_reject``.
+
+    Triggers only when ``remote`` is CONFIRMED False: both the heuristic
+    extractor (extract.py) and the LLM extract prompt only set remote=False
+    on an explicit office/on-site signal, never as a default ("remote = null
+    only when NOTHING indicates a work format") — so False here is never a
+    stand-in for "unknown". Unknown remote (``None``) does NOT trigger the
+    guard.
+
+    ``relocation`` is treated as absent unless explicitly True. Its "no
+    signal" state in this codebase is ``None`` (the heuristic extractor only
+    ever returns True or None; the LLM prompt has no equivalent "false only
+    when explicitly ruled out" instruction for this field the way it does for
+    remote) — so a typical office post that simply never mentions
+    relocation/visa support extracts as ``relocation=None``, and that MUST
+    still trip the guard, or it would only ever fire on the rare post that
+    explicitly says "no relocation".
+    """
+    return remote is False and relocation is not True
