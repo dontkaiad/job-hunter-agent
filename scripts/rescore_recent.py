@@ -11,7 +11,14 @@ has the change, against the SAME production DB the change will run against:
     .venv/bin/python scripts/rescore_recent.py --days 14 --dry-run
 
 ``--dry-run`` NEVER writes to the DB — it only prints the diff table + a
-summary verdict. Review the diff BEFORE deploying; only re-run without
+summary verdict. COST: only rows that pass the SAME free deterministic
+``scoring.prefilter`` gate production applies before scoring actually call the
+Sonnet judge (see the "Estimated cost" line this script prints BEFORE any API
+call) — junk/prefilter-dropped rows are skipped for $0. Use ``--max-items N``
+to cap a first trial run to a known-cheap size before committing to the full
+``--days`` window.
+
+Review the diff BEFORE deploying; only re-run without
 ``--dry-run`` (after the deploy) to persist the new scores:
 
     .venv/bin/python scripts/rescore_recent.py --days 14
@@ -54,11 +61,18 @@ from job_hunter.clock import now_iso, now_utc
 from job_hunter.llm import AnthropicClient, JUDGE_MODEL, llm_score
 from job_hunter.pipeline import _load_extracted
 from job_hunter.profile import load_profile
-from job_hunter.scoring import clamp_score
+from job_hunter.scoring import clamp_score, prefilter as scoring_prefilter
 
 MAX_ITEMS = 200          # hard cap so a big --days window can't run away
 THROTTLE_S = 0.4         # pause between calls to avoid rate-limit bursts
 BIG_SHIFT_PTS = 10       # |diff| at/above this counts as a "big" shift
+
+# Modeled Sonnet judge cost per llm_score call (see COST.md "score" row): the
+# ~1,422-token system prompt clears the cache floor and is reused across calls
+# seconds apart (this script's THROTTLE_S keeps every call well inside the
+# 5-minute cache TTL), so all but the FIRST call are cache reads.
+_SONNET_SCORE_CACHE_WRITE_USD = 0.0112   # first call: cache write, no hit yet
+_SONNET_SCORE_CACHE_READ_USD = 0.0063    # every call after: cached system prefix
 
 # Heuristic keyword probe (NOT the rubric logic itself — just used here to
 # flag, for human review, whether a big shift plausibly correlates with the
@@ -71,7 +85,7 @@ _LOCATION_SIGNAL_RE = re.compile(
 )
 
 
-def _fetch_candidates(conn, days: int):
+def _fetch_candidates(conn, days: int, max_items: int):
     """Rows updated within the last ``days``. updated_at is a TEXT column
     holding UTC ISO-8601 strings (see migrations/schema_pg.sql) — same-format
     strings sort lexicographically, so the cutoff is computed in Python
@@ -90,7 +104,7 @@ def _fetch_candidates(conn, days: int):
         ORDER BY updated_at DESC
         LIMIT %s
         """,
-        (cutoff, MAX_ITEMS),
+        (cutoff, max_items),
     ).fetchall()
     return rows
 
@@ -129,6 +143,11 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="print the diff + verdict only; NEVER writes to the DB",
     )
+    parser.add_argument(
+        "--max-items", type=int, default=MAX_ITEMS,
+        help=f"hard cap on Sonnet calls this run (default {MAX_ITEMS}); lower "
+             "this for a cheap first trial",
+    )
     args = parser.parse_args()
 
     db_url = os.environ.get("DATABASE_URL") or ""
@@ -152,30 +171,60 @@ def main() -> None:
         profile = None
         print(f"[rescore] profile load failed ({exc!r}), using generic rubric")
 
-    rows = _fetch_candidates(conn, args.days)
+    rows = _fetch_candidates(conn, args.days, args.max_items)
     if not rows:
         print(f"[rescore] No scored vacancies in the last {args.days} days — nothing to do.")
         conn.close()
         return
 
-    print(f"\n[rescore] Re-scoring {len(rows)} vacancies with the CURRENT rubric...")
+    # FREE deterministic pass FIRST: any row that would fail the same
+    # scoring.prefilter gate production already applies at T2 was scored 0
+    # WITHOUT ever calling an LLM, and re-scoring junk text with Sonnet here
+    # would (a) burn money for no signal and (b) pollute the diff — a raw junk
+    # string can "shift" by any amount with zero relation to the location
+    # rubric change, which would false-trigger the stop-the-deploy gate below.
+    # This mirrors pipeline._do_score's own cost-aware routing.
+    to_score = []
+    skipped_junk = []
+    for row in rows:
+        item = store.get_item(conn, row["id"])
+        extracted = _load_extracted(item) if item else None
+        if extracted is None:
+            skipped_junk.append(row["id"])
+            continue
+        pf = scoring_prefilter(extracted, row["raw_text"] or "")
+        if not pf.keep:
+            skipped_junk.append(row["id"])
+            continue
+        to_score.append((row, extracted))
+
+    n_calls = len(to_score)
+    est_cost = (
+        _SONNET_SCORE_CACHE_WRITE_USD + max(0, n_calls - 1) * _SONNET_SCORE_CACHE_READ_USD
+        if n_calls > 0 else 0.0
+    )
+    print(
+        f"\n[rescore] {len(rows)} rows fetched, {len(skipped_junk)} skipped for free "
+        f"(no extracted_json / fails the deterministic prefilter — score stays as-is, "
+        f"no API call), {n_calls} will call Sonnet."
+    )
+    print(f"[rescore] Estimated cost for this run: ~${est_cost:.2f} ({n_calls} Sonnet calls, cache-warm after the first).")
+    if n_calls == 0:
+        print("[rescore] Nothing to re-score after the free filter.")
+        conn.close()
+        return
+
     print(f"\n{'id':>8}  {'old':>5}  {'new':>5}  {'diff':>6}  {'loc?':>4}  state")
     print("-" * 55)
 
     client = AnthropicClient(api_key=api_key, model=judge_model)
 
     results = []
-    for row in rows:
+    for row, extracted in to_score:
         item_id = row["id"]
         old_score = float(row["relevance_score"])
         state = row["state"]
         raw_text = row["raw_text"] or ""
-
-        item = store.get_item(conn, item_id)
-        extracted = _load_extracted(item) if item else None
-        if extracted is None:
-            print(f"{item_id:>8}  skip — no extracted_json")
-            continue
 
         try:
             verdict = llm_score(client, extracted, raw_text, model=judge_model, profile=profile)
