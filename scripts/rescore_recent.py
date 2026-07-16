@@ -58,21 +58,38 @@ from datetime import timedelta
 
 from job_hunter import store
 from job_hunter.clock import now_iso, now_utc
-from job_hunter.llm import AnthropicClient, JUDGE_MODEL, llm_score
+from job_hunter.llm import AnthropicClient, CHEAP_MODEL, JUDGE_MODEL, llm_score
 from job_hunter.pipeline import _load_extracted
 from job_hunter.profile import load_profile
 from job_hunter.scoring import clamp_score, prefilter as scoring_prefilter
 
-MAX_ITEMS = 200          # hard cap so a big --days window can't run away
+# Default to a SMALL sample on the CHEAP model: this is a drift SMOKE TEST (did
+# the rubric change cause a systemic, unexplained shift?), not a full re-score
+# — it does not need production-grade judge fidelity to answer that question.
+# Bump to --model judge / a larger --max-items only if this cheap pass looks
+# ambiguous and you want a more faithful (pricier) second opinion.
+MAX_ITEMS = 20
 THROTTLE_S = 0.4         # pause between calls to avoid rate-limit bursts
 BIG_SHIFT_PTS = 10       # |diff| at/above this counts as a "big" shift
 
-# Modeled Sonnet judge cost per llm_score call (see COST.md "score" row): the
-# ~1,422-token system prompt clears the cache floor and is reused across calls
-# seconds apart (this script's THROTTLE_S keeps every call well inside the
-# 5-minute cache TTL), so all but the FIRST call are cache reads.
-_SONNET_SCORE_CACHE_WRITE_USD = 0.0112   # first call: cache write, no hit yet
-_SONNET_SCORE_CACHE_READ_USD = 0.0063    # every call after: cached system prefix
+# Modeled cost per llm_score call (see COST.md "extract"/"score" rows).
+# Haiku (default): system prompt (~1,422 tok) is BELOW Haiku's 2,048-token
+# cache floor, so it is never cached — every call pays the full system+user
+# input flat, no first-call/cache-hit split.
+_HAIKU_SCORE_CALL_USD = 0.0034
+# Sonnet (--model judge): the SAME system prompt clears Sonnet's 1,024-token
+# floor and IS cached, so only the FIRST call pays the cache-write price;
+# every call after (seconds apart, well inside the 5-min TTL) is a cache read.
+_SONNET_SCORE_CACHE_WRITE_USD = 0.0112
+_SONNET_SCORE_CACHE_READ_USD = 0.0063
+
+
+def _estimate_cost_usd(model_choice: str, n_calls: int) -> float:
+    if n_calls <= 0:
+        return 0.0
+    if model_choice == "judge":
+        return _SONNET_SCORE_CACHE_WRITE_USD + max(0, n_calls - 1) * _SONNET_SCORE_CACHE_READ_USD
+    return n_calls * _HAIKU_SCORE_CALL_USD
 
 # Heuristic keyword probe (NOT the rubric logic itself — just used here to
 # flag, for human review, whether a big shift plausibly correlates with the
@@ -145,8 +162,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--max-items", type=int, default=MAX_ITEMS,
-        help=f"hard cap on Sonnet calls this run (default {MAX_ITEMS}); lower "
-             "this for a cheap first trial",
+        help=f"hard cap on LLM calls this run (default {MAX_ITEMS}, deliberately "
+             "small — this is a drift smoke test, not a full re-score)",
+    )
+    parser.add_argument(
+        "--model", choices=("cheap", "judge"), default="cheap",
+        help="'cheap' (default): Haiku, ~3x cheaper, enough to catch a "
+             "systemic calibration shift. 'judge': Sonnet, the real production "
+             "judge model — use only if the cheap pass looks ambiguous.",
     )
     args = parser.parse_args()
 
@@ -157,10 +180,13 @@ def main() -> None:
     if not api_key:
         sys.exit("ANTHROPIC_API_KEY not set — add it to .env or export it")
 
-    judge_model = os.environ.get("ANTHROPIC_JUDGE_MODEL") or JUDGE_MODEL
+    if args.model == "judge":
+        model = os.environ.get("ANTHROPIC_JUDGE_MODEL") or JUDGE_MODEL
+    else:
+        model = os.environ.get("ANTHROPIC_CHEAP_MODEL") or CHEAP_MODEL
     mode = "DRY-RUN (read-only)" if args.dry_run else "APPLY (writes relevance_score)"
     print(f"[rescore] DB={db_url[:40]}...")
-    print(f"[rescore] mode={mode}  days={args.days}  judge_model={judge_model!r}")
+    print(f"[rescore] mode={mode}  days={args.days}  model={args.model} ({model!r})")
 
     conn = store.connect(db_url)
 
@@ -199,16 +225,13 @@ def main() -> None:
         to_score.append((row, extracted))
 
     n_calls = len(to_score)
-    est_cost = (
-        _SONNET_SCORE_CACHE_WRITE_USD + max(0, n_calls - 1) * _SONNET_SCORE_CACHE_READ_USD
-        if n_calls > 0 else 0.0
-    )
+    est_cost = _estimate_cost_usd(args.model, n_calls)
     print(
         f"\n[rescore] {len(rows)} rows fetched, {len(skipped_junk)} skipped for free "
         f"(no extracted_json / fails the deterministic prefilter — score stays as-is, "
-        f"no API call), {n_calls} will call Sonnet."
+        f"no API call), {n_calls} will call the model."
     )
-    print(f"[rescore] Estimated cost for this run: ~${est_cost:.2f} ({n_calls} Sonnet calls, cache-warm after the first).")
+    print(f"[rescore] Estimated cost for this run: ~${est_cost:.2f} ({n_calls} {args.model} calls).")
     if n_calls == 0:
         print("[rescore] Nothing to re-score after the free filter.")
         conn.close()
@@ -217,7 +240,7 @@ def main() -> None:
     print(f"\n{'id':>8}  {'old':>5}  {'new':>5}  {'diff':>6}  {'loc?':>4}  state")
     print("-" * 55)
 
-    client = AnthropicClient(api_key=api_key, model=judge_model)
+    client = AnthropicClient(api_key=api_key, model=model)
 
     results = []
     for row, extracted in to_score:
@@ -227,7 +250,7 @@ def main() -> None:
         raw_text = row["raw_text"] or ""
 
         try:
-            verdict = llm_score(client, extracted, raw_text, model=judge_model, profile=profile)
+            verdict = llm_score(client, extracted, raw_text, model=model, profile=profile)
             new_score = float(clamp_score(verdict["score"]))
         except Exception as exc:
             print(f"{item_id:>8}  ERROR: {exc!r}")
