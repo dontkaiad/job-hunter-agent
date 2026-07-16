@@ -283,6 +283,65 @@ def test_score_system_reserves_warning_for_hard_misses():
     assert "softer, non-⚠️ language" in low or "non-⚠️ language" in low
 
 
+def test_score_system_eor_contractor_signal_is_positive_and_scoped_to_location():
+    """ADDITIONAL LOCATION SIGNAL: an EOR/payroll-provider or contractor framing
+    (Deel, Remote.com, Oyster, Papaya Global; 'hire contractors globally' /
+    'worldwide' / 'no visa sponsorship needed' / 'contract, not employment')
+    must be called out as a POSITIVE location signal for a Russia-based
+    candidate, and must live INSIDE the LOCATION PRIORITY block (a refinement,
+    not a new top-level rubric category) — same regression risk as last time's
+    STRONG FIT calibration drift, but scoped to location only."""
+    s = llm.SCORE_SYSTEM
+    low = s.lower()
+    assert "additional location signal" in low
+    for provider in ("deel", "remote.com", "oyster", "papaya global"):
+        assert provider in low
+    assert "hire contractors globally" in low
+    assert "no visa sponsorship needed" in low
+    assert "contract, not employment" in low
+    assert "positive signal for a russia-based candidate" in low
+    assert "refinement of the existing location signal" in low
+    assert "not a new category" in low
+    # Scoped INSIDE location priority: appears after the score ladder line and
+    # before the next top-level rubric bullet (FLAG / DOWN-WEIGHT).
+    ladder_idx = s.find("Score ladder:")
+    signal_idx = low.find("additional location signal")
+    flag_idx = s.find("FLAG / DOWN-WEIGHT")
+    assert ladder_idx != -1 and flag_idx != -1
+    assert ladder_idx < signal_idx < flag_idx
+
+
+def test_score_system_no_sponsorship_fulltime_is_negative_location_signal():
+    """Conversely: a HARD 'must be authorized to work in [country]' / 'no
+    sponsorship' requirement paired with on-payroll full-time employment is a
+    genuine location barrier for THIS candidate — down-weight, never a hard
+    reject (she may still want visibility on it)."""
+    low = llm.SCORE_SYSTEM.lower()
+    assert "must be authorized to work in" in low
+    assert "no sponsorship" in low
+    assert "on-payroll full-time structure" in low
+    assert "genuine location barrier for this candidate specifically" in low
+    assert "down-weight, don't hard reject" in low
+
+
+def test_score_system_eor_addition_does_not_touch_strong_fit_or_calibration():
+    """Regression guard: last time, adding examples to STRONG FIT accidentally
+    shifted the whole rubric's calibration. This change must be confined to
+    LOCATION PRIORITY — STRONG FIT wording and the four numeric calibration
+    anchors must be byte-identical to before."""
+    s = llm.SCORE_SYSTEM
+    assert (
+        "STRONG FIT (high score): roles where the candidate OWNS the AI / model "
+        "behavior — Prompt / AI / LLM Engineer, AI Product Engineer, applied-LLM; "
+        "where RAG / routing / prompts are the CORE of the job; grade matches the "
+        "target grade above." in s
+    )
+    assert "~10  — Backend/fullstack developer role in an RF office" in s
+    assert "~42  — Data Scientist role (model training, statistics, Jupyter)" in s
+    assert "~65  — LLM / Prompt Engineer, fully remote" in s
+    assert "~88  — AI / Prompt Engineer, international remote" in s
+
+
 def test_extract_system_scans_whole_post_for_contact():
     """FIX 3: the extract prompt must tell the model to scan the WHOLE post
     (including the bottom) for the contact and never use the source channel."""
