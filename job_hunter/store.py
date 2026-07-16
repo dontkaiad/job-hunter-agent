@@ -314,6 +314,28 @@ def get_item_by_source(
     return WorkItem.from_row(row) if row else None
 
 
+def find_duplicate_by_source_link(
+    conn: psycopg.Connection, source_link: Optional[str], exclude_id: int
+) -> Optional[int]:
+    """Return the id of another row sharing this exact ``source_link``, if any.
+
+    READ-ONLY. Cross-SOURCE duplicate detector: the partial unique index only
+    dedups within (source_channel, source_message_id), so the same posting
+    mirrored by two different sources (e.g. the same job appearing via WWR AND
+    Jobicy) is not caught there. Ordered by id ASC so the EARLIEST-ingested row
+    is reported as canonical. Returns None when ``source_link`` is empty/None
+    or no other row matches.
+    """
+    if not source_link:
+        return None
+    row = conn.execute(
+        "SELECT id FROM work_items WHERE source_link = %s AND id != %s "
+        "ORDER BY id ASC LIMIT 1",
+        (source_link, exclude_id),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def list_by_state(conn: psycopg.Connection, state: str, limit: int = 100) -> List[WorkItem]:
     rows = conn.execute(
         "SELECT * FROM work_items WHERE state = %s ORDER BY updated_at ASC LIMIT %s",

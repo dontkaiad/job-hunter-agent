@@ -138,13 +138,37 @@ def _salary_floor_rub(deps: Deps) -> Optional[float]:
 
 
 def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
-    """T1: discovered -> extracted (LLM smart extract, heuristic fallback)."""
+    """T1: discovered -> extracted (LLM smart extract, heuristic fallback).
+
+    Cost-aware routing: a cheap deterministic pre-filter runs over raw_text
+    FIRST, before any LLM call. High-volume noisy sources (HN Who's Hiring
+    ingests every top-level comment with zero content filtering; WWR/Jobicy
+    can mirror the same posting under different source_channels) would
+    otherwise send every ingested item straight to a paid Haiku extract call.
+    Two deterministic drops skip that call (heuristic extract only, same as
+    the "no LLM configured" path):
+      1) ``scoring.text_prefilter`` — obvious junk (empty/too-short text,
+         "looking for work" posts). LENIENT: only unambiguous non-jobs drop.
+      2) cross-source duplicate — another row already carries the SAME
+         source_link (the partial unique index only dedups within one
+         source_channel, so a job mirrored across sources isn't caught there).
+    """
     source_channel = item.source_channel or ""
     raw = item.raw_text or ""
     extracted: ExtractResult
     used = "heuristic"
 
-    if deps.use_llm_extract and deps.llm_client is not None:
+    pf = scoring.text_prefilter(raw)
+    dup_id = (
+        store.find_duplicate_by_source_link(conn, item.source_link, item.id)
+        if pf.keep else None
+    )
+    use_llm = (
+        deps.use_llm_extract and deps.llm_client is not None
+        and pf.keep and dup_id is None
+    )
+
+    if use_llm:
         try:
             extracted = llm_extract(
                 deps.llm_client, raw, source_channel, item.source_link,
@@ -164,6 +188,10 @@ def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Advance
             used = "heuristic(fallback)"
     else:
         extracted = heuristic_extract(raw, source_channel, item.source_link)
+        if not pf.keep:
+            used = f"heuristic(prefilter:{pf.reason})"
+        elif dup_id is not None:
+            used = f"heuristic(duplicate of #{dup_id})"
 
     extracted.source_channel = source_channel
     if item.source_link:
@@ -208,9 +236,16 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
 
     raw = item.raw_text or ""
     pf = scoring.prefilter(extracted, raw)
-    if not pf.keep:
+    dup_id = (
+        store.find_duplicate_by_source_link(conn, item.source_link, item.id)
+        if pf.keep else None
+    )
+    if not pf.keep or dup_id is not None:
         score = 0
-        reasoning = f"prefilter: {pf.reason}"
+        reasoning = (
+            f"prefilter: {pf.reason}" if not pf.keep
+            else f"prefilter: duplicate of #{dup_id} (same source_link)"
+        )
         used = "prefilter-drop"
         print(f"[score] id={item.id} haiku=0 final=0 (prefilter)", flush=True)
     else:

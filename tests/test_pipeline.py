@@ -402,7 +402,7 @@ def test_llm_extract_used_when_enabled(conn, fake_llm, fake_fx):
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
     fake_llm.set_for("strict JSON", '{"title":"LLM Eng","stack":["python","llm"],'
                                     '"salary_max":300000,"currency":"RUB","remote":true}')
-    item_id = _insert(conn, "some raw text")
+    item_id = _insert(conn, "some raw text describing a remote LLM engineering role")
     res = pipeline.advance_by_id(conn, item_id, deps=deps)
     assert res.to_state == EXTRACTED
     assert "llm" in res.reason
@@ -419,7 +419,7 @@ def test_llm_extract_falls_back_on_error(conn, fake_fx):
             raise RuntimeError("api down")
 
     deps = Deps(llm_client=BoomLLM(), fx=fake_fx, use_llm_extract=True)
-    item_id = _insert(conn, "Remote Python LLM role @hr")
+    item_id = _insert(conn, "Remote Python LLM engineer role, apply via @hr contact")
     res = pipeline.advance_by_id(conn, item_id, deps=deps)
     assert res.to_state == EXTRACTED
     assert "fallback" in res.reason

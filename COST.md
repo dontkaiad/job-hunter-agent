@@ -36,7 +36,8 @@ and [Finout](https://www.finout.io/blog/anthropic-api-pricing), June 2026).
 ## Per-step model + token map
 
 Read from the code; input tokens measured on the representative posting. Ingest
-and the prefilter are deterministic (no LLM, no cost).
+and the two prefilters — the T1 raw-text gate (before extract) and the T2
+`scoring.prefilter` gate (before score) — are deterministic (no LLM, no cost).
 
 | Step | Model | Input tokens (sys + user) | Output cap | System cached? |
 |---|---|---|---|---|
@@ -67,6 +68,56 @@ Daily total for 13 postings:
 (The 13 score calls run seconds apart, well inside the 5-minute cache TTL, so the
 warm-cache assumption holds.)
 
+## Multi-source volume growth and the T1 pre-filter (2026-07)
+
+The ~13-postings/day figure above predates We Work Remotely and HN Who's Hiring
+(both opt-in, `WWR_ENABLED` / `HN_HIRING_ENABLED`, added after the ~13/day
+baseline). With both enabled, a single harvest run can ingest ~100+ raw items
+instead of ~13 — daily LLM spend before this fix scaled roughly **1:1** with
+that raw count, because every ingested item went straight to the Haiku extract
+call regardless of quality.
+
+The volume growth is NOT uniform across sources:
+
+- **HN Who's Hiring** (`sources.py` `HNHiringSource.fetch`) does **zero content
+  filtering** before ingest — it stores every top-level comment in the monthly
+  thread as a work_item, skipping only `deleted`/`dead`/empty-body comments.
+  Meta replies, "no one is hiring here" asides, and other non-vacancy comments
+  all reached the paid extract call before this fix.
+- **We Work Remotely** sweeps two already engineering-scoped RSS feeds
+  (`remote-programming-jobs`, `remote-full-stack-programming-jobs`), so its
+  noise is lower-volume — mainly cross-source duplicates (the same posting
+  also picked up by Jobicy/Habr under a different `source_channel`, which the
+  DB's `(source_channel, source_message_id)` unique index does not dedup).
+
+**The fix** (`pipeline._do_extract`): a deterministic pre-filter runs on
+`raw_text` BEFORE `llm_extract` is called —
+`scoring.text_prefilter` (empty/too-short text, "looking for work" posts; the
+same lenient rules T2's `scoring.prefilter` already applied post-extract, now
+also enforced pre-extract) plus a cross-source duplicate check
+(`store.find_duplicate_by_source_link`: another row already carries the same
+`source_link`). Either check dropping the item routes it to the free
+`heuristic_extract` instead of Haiku, and the SAME duplicate check was added to
+`_do_score` so a duplicate never reaches Sonnet either — mirroring the existing
+"prefilter-drop -> score 0, no LLM" path.
+
+**Honesty caveat, consistent with the method note above**: this repo does not
+retain historical per-run item counts or a junk/real-vacancy split for HN/WWR
+(no billing telemetry, no persisted harvest log), so there is no historical
+baseline to compute a precise "% of the ~100+ raw items this catches." What
+follows from the code is qualitative, not measured: HN's top-level comments
+include an unknown-but-nonzero share of non-postings (this fix skips the LLM
+call for whichever of them are empty, under 25 meaningful characters, or a
+"looking for work" reply — the SAME lenient bar T2 already enforced downstream,
+so no previously-surfaced vacancy starts getting dropped) plus any exact
+cross-source link duplicates. The daily-cost math earlier in this document
+(extract $0.0033 + score $0.0063 per REAL posting) is unchanged for whatever
+share of items survive both gates; what changes is that raw ingest volume no
+longer multiplies 1:1 into paid calls. Calibrating the caught fraction
+precisely requires reading the `[score] id=... (prefilter)` / `heuristic
+(prefilter:...)` / `heuristic (duplicate of #...)` reasons a live harvest run
+actually emits, not a code-only estimate.
+
 ## Cost of one approval (research + draft)
 
 Research and draft run **only after a human Approve**, on the ~2–4 roles approved
@@ -95,7 +146,7 @@ Steady state for the same four days would be ~$0.5–0.65 total. The ~$8 is a
 **development burst (~15× steady state)**; the live cost going forward is
 ≈ $0.13–0.16 / day.
 
-## Cost-aware design (four levers, each with its number)
+## Cost-aware design (five levers, each with its number)
 
 1. **Tiered model routing.** Sonnet is reserved for the one judgment step
    (scoring). It already accounts for ~⅔ of the daily harvest cost from one of
@@ -119,3 +170,14 @@ Steady state for the same four days would be ~$0.5–0.65 total. The ~$8 is a
    carries ~2,360 input tokens with the 6k-char page) fire on the ~2–4 approved
    roles per day, never on all ~60 surfaced/backlog items — keeping the
    per-approval cost (~$0.01) off the daily-harvest bill.
+
+5. **Deterministic pre-filter before EVERY LLM call, not just before scoring.**
+   See "Multi-source volume growth and the T1 pre-filter" above: as ingest
+   sources multiply (WWR, HN Who's Hiring — the latter forwarding every raw HN
+   comment with no upstream filtering), raw ingest volume stops being a proxy
+   for real-vacancy volume. `scoring.text_prefilter` + the cross-source
+   `store.find_duplicate_by_source_link` check now gate BOTH the extract call
+   (`pipeline._do_extract`) and the score call (`pipeline._do_score`), so junk
+   and cross-source duplicates cost nothing at either step — LLM spend tracks
+   the count of plausible vacancies, not the count of things a source handed
+   the pipeline.

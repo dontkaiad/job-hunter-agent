@@ -85,6 +85,30 @@ class PrefilterResult:
     reason: Optional[str] = None  # why dropped (None when kept)
 
 
+def text_prefilter(raw_text: Optional[str]) -> PrefilterResult:
+    """LENIENT deterministic gate over RAW TEXT ALONE. PURE, no ExtractResult.
+
+    The T1 entrypoint: runs BEFORE the paid extract LLM call (pipeline.py
+    ``_do_extract``), so it can only see ``raw_text`` — there is no
+    ExtractResult yet. Same rules ``prefilter`` applies post-extract; factored
+    out so both callers share one set of thresholds/patterns.
+    """
+    stripped = (raw_text or "").strip()
+
+    if not stripped:
+        return PrefilterResult(False, "empty/no text")
+
+    # Strip whitespace to count real characters (a wall of newlines is junk).
+    meaningful = re.sub(r"\s+", "", stripped)
+    if len(meaningful) < _MIN_MEANINGFUL_CHARS:
+        return PrefilterResult(False, "too short to be a vacancy")
+
+    if _NON_JOB_RE.search(stripped):
+        return PrefilterResult(False, "looks like a candidate 'looking for work' post")
+
+    return PrefilterResult(True, None)
+
+
 def prefilter(extracted: ExtractResult, raw_text: Optional[str] = None) -> PrefilterResult:
     """LENIENT deterministic gate. Returns keep=True for anything plausible.
 
@@ -99,20 +123,7 @@ def prefilter(extracted: ExtractResult, raw_text: Optional[str] = None) -> Prefi
     # Fall back to the title when no raw text is supplied (keeps it usable from
     # places that only have the structured result).
     probe = text if text.strip() else (extracted.title or "")
-    stripped = probe.strip()
-
-    if not stripped:
-        return PrefilterResult(False, "empty/no text")
-
-    # Strip whitespace to count real characters (a wall of newlines is junk).
-    meaningful = re.sub(r"\s+", "", stripped)
-    if len(meaningful) < _MIN_MEANINGFUL_CHARS:
-        return PrefilterResult(False, "too short to be a vacancy")
-
-    if _NON_JOB_RE.search(stripped):
-        return PrefilterResult(False, "looks like a candidate 'looking for work' post")
-
-    return PrefilterResult(True, None)
+    return text_prefilter(probe)
 
 
 def clamp_score(value) -> int:
