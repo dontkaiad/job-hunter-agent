@@ -134,12 +134,21 @@ function BucketBlock({ bucket, entries, days }) {
 }
 
 function GapCandidates({ items, days }) {
-  if (!items || items.length === 0) return null;
+  if (!items || items.length === 0) {
+    return (
+      <div className="empty">
+        За последние {days} дней рынок не просит ничего, чего ещё нет в
+        компетенциях.
+      </div>
+    );
+  }
   return (
     <section className="comp-gaps">
       <div className="comp-gaps-head">
         <span className="comp-gaps-badge">пробел</span>
-        <h2>Просит рынок, но не размечено</h2>
+        <span className="comp-gaps-hint">
+          встречаются в вакансиях, но ни один пункт компетенций не сматчился
+        </span>
       </div>
       <div className="mw-tile-bars">
         {items.map((g) => (
@@ -154,10 +163,6 @@ function GapCandidates({ items, days }) {
             <span className="mw-tile-bar-pct">{g.market_pct}%</span>
           </div>
         ))}
-      </div>
-      <div className="comp-gaps-note">
-        встречаются в вакансиях за последние {days} дней, но ни один пункт
-        компетенций на них не сматчился
       </div>
     </section>
   );
@@ -213,6 +218,9 @@ export default function CompetenciesView() {
   }));
   const totalMatched = byBucket.reduce((n, b) => n + b.entries.length, 0);
   const activeEntries = byBucket.find((b) => b.bucket === activeBucket)?.entries ?? [];
+  const gapItems = (data?.gap_candidates ?? []).filter(
+    (g) => !q || g.term.toLowerCase().includes(q)
+  );
 
   return (
     <div className="view competencies-view">
@@ -264,11 +272,24 @@ export default function CompetenciesView() {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeBucket === "gap"}
+                className={`comp-tab comp-tab--gap${activeBucket === "gap" ? " comp-tab--active" : ""}`}
+                onClick={() => setActiveBucket("gap")}
+              >
+                <span className="comp-tab-dot" />
+                Пробелы
+                <span className="comp-tab-n">{gapItems.length}</span>
+              </button>
             </div>
 
-            <BucketBlock bucket={activeBucket} entries={activeEntries} days={days} />
-
-            {!q && <GapCandidates items={data.gap_candidates} days={days} />}
+            {activeBucket === "gap" ? (
+              <GapCandidates items={gapItems} days={days} />
+            ) : (
+              <BucketBlock bucket={activeBucket} entries={activeEntries} days={days} />
+            )}
           </>
         )}
       </div>

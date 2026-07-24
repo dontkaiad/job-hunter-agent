@@ -2121,20 +2121,19 @@ h1::before {
   border-radius: var(--radius);
   padding: 3px 8px;
 }
-.comp-gaps-head h2 {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-  margin: 0;
+.comp-gaps-hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
 }
 .mw-tile-bar-fill--amber {
   background: var(--amber);
 }
-.comp-gaps-note {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-3);
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+
+/* Tab bar entry for the gap card — its own amber accent (not a
+   .comp-bucket--<name> modifier, since gap candidates aren't a competency
+   bucket from the backend model, just a derived comparison view). */
+.comp-tab--gap {
+  --bucket-accent: var(--amber);
+  --bucket-accent-bg: rgba(224, 138, 43, 0.1);
 }
