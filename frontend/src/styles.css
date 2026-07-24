@@ -1737,10 +1737,63 @@ h1::before {
 
 /* ============================ COMPETENCIES ============================= */
 .competencies-view .view-list {
-  max-width: 1100px;
+  max-width: 1400px;
 }
 .competencies-view h1 {
   margin-bottom: 20px;
+}
+
+.comp-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.comp-search-input {
+  width: 100%;
+  max-width: 420px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.comp-search-input::placeholder {
+  color: var(--ink-4);
+}
+.comp-search-input:focus {
+  border-color: var(--teal-dim);
+  box-shadow: 0 0 0 1px var(--teal-dim), 0 0 12px rgba(84, 199, 182, 0.18);
+}
+.comp-search-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* All 4 buckets visible at once, side by side — not tabs, so nothing has to
+   be switched away to compare buckets. 2x2 so each column stays wide enough
+   for the accordion rows to stay readable (unlike the 4-across tile grid on
+   Market Worth, these rows carry real text, not just a % tile). */
+.comp-buckets-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 22px;
+}
+.comp-buckets-grid .comp-bucket {
+  margin-bottom: 0;
+}
+@media (max-width: 900px) {
+  .comp-buckets-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Each bucket gets a real accent, not a 5th shade of grey — reusing the
@@ -1884,13 +1937,37 @@ h1::before {
   font-size: 11.5px;
   color: var(--ink-3);
 }
-.comp-row-projects {
+/* Project chips inline in the COLLAPSED row — see which of Kai's projects
+   prove a term without opening it. Capped at MAX_INLINE_PROJECT_CHIPS
+   (JS side); overflow collapses into a "+N" chip so the row never wraps. */
+.comp-row-project-chips {
   flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.comp-row-project-chip {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 9.5px;
   letter-spacing: 0.02em;
-  color: var(--ink-4);
+  color: var(--ink-3);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1px 6px;
   white-space: nowrap;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 640px) {
+  .comp-row-project-chips {
+    display: none;
+  }
+}
+.comp-row-project-chip--more {
+  color: var(--ink-4);
+  border-style: dashed;
 }
 .comp-row-freq {
   flex-shrink: 0;

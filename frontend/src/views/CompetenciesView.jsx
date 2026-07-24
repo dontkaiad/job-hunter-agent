@@ -27,11 +27,18 @@ const BUCKET_META = {
 };
 const BUCKET_ORDER = ["core", "growing", "skip", "glossary"];
 
+// How many project chips show inline in the collapsed row before the rest
+// collapse into a "+N" chip — keeps the summary line from wrapping/colliding
+// with the freq badge as more projects get reviewed.
+const MAX_INLINE_PROJECT_CHIPS = 3;
+
 function CompetencyRow({ e, days }) {
   const hasFreq = e.market_count > 0;
   const hasBothTerms = e.term_ru && e.term_en;
   const evidence = e.evidence ?? [];
-  const projectCount = new Set(evidence.map((ev) => ev.project).filter(Boolean)).size;
+  const projects = [...new Set(evidence.map((ev) => ev.project).filter(Boolean))];
+  const shownProjects = projects.slice(0, MAX_INLINE_PROJECT_CHIPS);
+  const hiddenCount = projects.length - shownProjects.length;
 
   return (
     <details className="comp-row">
@@ -40,9 +47,16 @@ function CompetencyRow({ e, days }) {
           {e.term_ru || e.term_en}
           {hasBothTerms && <span className="comp-row-term-en"> · {e.term_en}</span>}
         </span>
-        {projectCount > 0 && (
-          <span className="comp-row-projects" title="в скольких проектах встречается">
-            {projectCount === 1 ? "1 проект" : `${projectCount} проекта`}
+        {shownProjects.length > 0 && (
+          <span className="comp-row-project-chips" title="реализовано в проектах">
+            {shownProjects.map((p) => (
+              <span key={p} className="comp-row-project-chip">{p}</span>
+            ))}
+            {hiddenCount > 0 && (
+              <span className="comp-row-project-chip comp-row-project-chip--more">
+                +{hiddenCount}
+              </span>
+            )}
           </span>
         )}
         <span className={`comp-row-freq${hasFreq ? "" : " comp-row-freq--zero"}`}>
@@ -149,10 +163,27 @@ function GapCandidates({ items, days }) {
   );
 }
 
+function matchesQuery(e, q) {
+  if (!q) return true;
+  const haystack = [
+    e.term_ru,
+    e.term_en,
+    e.explainer_ru,
+    e.explainer_en,
+    e.resume_line,
+    ...(e.evidence ?? []).flatMap((ev) => [ev.project, ev.source_ref, ev.note]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(q);
+}
+
 export default function CompetenciesView() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [query, setQuery] = useState("");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -172,10 +203,14 @@ export default function CompetenciesView() {
   }, [fetchData]);
 
   const days = data?.market?.window_days ?? "?";
+  const q = query.trim().toLowerCase();
   const byBucket = BUCKET_ORDER.map((bucket) => ({
     bucket,
-    entries: (data?.entries ?? []).filter((e) => e.bucket === bucket),
+    entries: (data?.entries ?? [])
+      .filter((e) => e.bucket === bucket)
+      .filter((e) => matchesQuery(e, q)),
   }));
+  const totalMatched = byBucket.reduce((n, b) => n + b.entries.length, 0);
 
   return (
     <div className="view competencies-view">
@@ -193,16 +228,33 @@ export default function CompetenciesView() {
               </div>
             )}
 
-            {byBucket.map(({ bucket, entries }) => (
-              <BucketBlock
-                key={bucket}
-                bucket={bucket}
-                entries={entries}
-                days={days}
+            <div className="comp-search">
+              <input
+                type="text"
+                className="comp-search-input"
+                placeholder="Поиск: термин, проект, файл..."
+                value={query}
+                onChange={(ev) => setQuery(ev.target.value)}
               />
-            ))}
+              {q && (
+                <span className="comp-search-count">
+                  {totalMatched} {totalMatched === 1 ? "совпадение" : "совпадений"}
+                </span>
+              )}
+            </div>
 
-            <GapCandidates items={data.gap_candidates} days={days} />
+            <div className="comp-buckets-grid">
+              {byBucket.map(({ bucket, entries }) => (
+                <BucketBlock
+                  key={bucket}
+                  bucket={bucket}
+                  entries={entries}
+                  days={days}
+                />
+              ))}
+            </div>
+
+            {!q && <GapCandidates items={data.gap_candidates} days={days} />}
           </>
         )}
       </div>
