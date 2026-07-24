@@ -30,6 +30,8 @@ const BUCKET_ORDER = ["core", "growing", "skip", "glossary"];
 function CompetencyRow({ e, days }) {
   const hasFreq = e.market_count > 0;
   const hasBothTerms = e.term_ru && e.term_en;
+  const evidence = e.evidence ?? [];
+  const projectCount = new Set(evidence.map((ev) => ev.project).filter(Boolean)).size;
 
   return (
     <details className="comp-row">
@@ -38,6 +40,11 @@ function CompetencyRow({ e, days }) {
           {e.term_ru || e.term_en}
           {hasBothTerms && <span className="comp-row-term-en"> · {e.term_en}</span>}
         </span>
+        {projectCount > 0 && (
+          <span className="comp-row-projects" title="в скольких проектах встречается">
+            {projectCount === 1 ? "1 проект" : `${projectCount} проекта`}
+          </span>
+        )}
         <span className={`comp-row-freq${hasFreq ? "" : " comp-row-freq--zero"}`}>
           {e.market_pct}%
         </span>
@@ -55,13 +62,18 @@ function CompetencyRow({ e, days }) {
           </div>
         )}
 
-        <div className="comp-row-field">
-          <span className="comp-row-field-label">Источник</span>
-          {e.source_ref ? (
-            <span className="comp-source-ref">
-              {e.source_ref}
-              {e.project && <span className="comp-source-project"> · {e.project}</span>}
-            </span>
+        <div className="comp-row-field comp-row-field--evidence">
+          <span className="comp-row-field-label">Где реализовано</span>
+          {evidence.length > 0 ? (
+            <ul className="comp-evidence-list">
+              {evidence.map((ev, i) => (
+                <li key={`${ev.project}-${i}`}>
+                  <span className="comp-evidence-project">{ev.project}</span>
+                  <span className="comp-source-ref">{ev.source_ref}</span>
+                  {ev.note && <span className="comp-evidence-note"> — {ev.note}</span>}
+                </li>
+              ))}
+            </ul>
           ) : (
             <span className="muted">не размечено</span>
           )}

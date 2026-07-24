@@ -1884,6 +1884,14 @@ h1::before {
   font-size: 11.5px;
   color: var(--ink-3);
 }
+.comp-row-projects {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
 .comp-row-freq {
   flex-shrink: 0;
   font-family: var(--mono);
@@ -1928,8 +1936,43 @@ h1::before {
   color: var(--teal-bri);
   word-break: break-word;
 }
-.comp-source-project {
-  color: var(--ink-4);
+/* Evidence list — one line per project proving a term. This is the piece
+   that keeps the term-first shape legible: "Python" stays ONE row, and
+   opening it shows every project it was actually found in, instead of a
+   separate "Python" row per project. */
+.comp-row-field--evidence {
+  align-items: flex-start;
+}
+.comp-evidence-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1;
+  min-width: 0;
+}
+.comp-evidence-list li {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+.comp-evidence-list li:last-child {
+  margin-bottom: 0;
+}
+.comp-evidence-project {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1px 6px;
+  margin-right: 6px;
+}
+.comp-evidence-note {
+  color: var(--ink-3);
+  font-size: 12px;
 }
 
 /* Gap candidates — deliberately NOT another comp-bucket. Heavier card (gradient

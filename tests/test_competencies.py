@@ -3,6 +3,7 @@
 from job_hunter.competencies import (
     BUCKETS,
     CompetencyEntry,
+    Evidence,
     parse_competencies,
     sync_with_market,
 )
@@ -47,7 +48,67 @@ def test_parse_ignores_unknown_bucket_key():
     assert entries[0].term_en == "A"
 
 
-def test_parse_fills_all_fields():
+def test_parse_term_ru_only_is_kept():
+    data = {"core": [{"term_ru": "Только по-русски"}]}
+    entries = parse_competencies(data)
+    assert len(entries) == 1
+    assert entries[0].term_ru == "Только по-русски"
+    assert entries[0].term_en == ""
+
+
+# ---------------------------------------------------------------------------
+# evidence parsing — the term-first, multi-project shape
+# ---------------------------------------------------------------------------
+
+
+def test_parse_evidence_list_under_a_term():
+    data = {
+        "core": [
+            {
+                "term_en": "Python",
+                "evidence": [
+                    {"project": "job-hunter-agent", "source_ref": "requirements.txt"},
+                    {"project": "Nexus", "source_ref": "pyproject.toml", "note": "backend"},
+                ],
+            }
+        ]
+    }
+    entries = parse_competencies(data)
+    assert len(entries) == 1
+    ev = entries[0].evidence
+    assert ev == (
+        Evidence(project="job-hunter-agent", source_ref="requirements.txt", note=""),
+        Evidence(project="Nexus", source_ref="pyproject.toml", note="backend"),
+    )
+
+
+def test_parse_evidence_missing_defaults_to_empty_tuple():
+    data = {"core": [{"term_en": "Python"}]}
+    entries = parse_competencies(data)
+    assert entries[0].evidence == ()
+
+
+def test_parse_evidence_skips_rows_missing_both_project_and_source_ref():
+    data = {
+        "core": [
+            {
+                "term_en": "Python",
+                "evidence": [{"note": "no project or source_ref"}, {"project": "X"}],
+            }
+        ]
+    }
+    entries = parse_competencies(data)
+    assert len(entries[0].evidence) == 1
+    assert entries[0].evidence[0].project == "X"
+
+
+def test_parse_evidence_non_list_is_ignored():
+    data = {"core": [{"term_en": "Python", "evidence": "not a list"}]}
+    entries = parse_competencies(data)
+    assert entries[0].evidence == ()
+
+
+def test_parse_fills_all_scalar_fields():
     data = {
         "core": [
             {
@@ -56,30 +117,20 @@ def test_parse_fills_all_fields():
                 "explainer_ru": "30 сек",
                 "explainer_en": "30 sec",
                 "resume_line": "Did X",
-                "project": "job-hunter-agent",
-                "source_ref": "job_hunter/foo.py:bar",
+                "evidence": [{"project": "job-hunter-agent", "source_ref": "job_hunter/foo.py:1 (bar)"}],
             }
         ]
     }
     e = parse_competencies(data)[0]
-    assert e == CompetencyEntry(
-        bucket="core",
-        term_ru="Термин",
-        term_en="Term",
-        explainer_ru="30 сек",
-        explainer_en="30 sec",
-        resume_line="Did X",
-        project="job-hunter-agent",
-        source_ref="job_hunter/foo.py:bar",
+    assert e.bucket == "core"
+    assert e.term_ru == "Термин"
+    assert e.term_en == "Term"
+    assert e.explainer_ru == "30 сек"
+    assert e.explainer_en == "30 sec"
+    assert e.resume_line == "Did X"
+    assert e.evidence == (
+        Evidence(project="job-hunter-agent", source_ref="job_hunter/foo.py:1 (bar)", note=""),
     )
-
-
-def test_parse_term_ru_only_is_kept():
-    data = {"core": [{"term_ru": "Только по-русски"}]}
-    entries = parse_competencies(data)
-    assert len(entries) == 1
-    assert entries[0].term_ru == "Только по-русски"
-    assert entries[0].term_en == ""
 
 
 # ---------------------------------------------------------------------------
@@ -139,3 +190,23 @@ def test_sync_matched_preserves_input_order():
     entries = [_entry("core", "A"), _entry("growing", "B"), _entry("skip", "C")]
     result = sync_with_market(entries, {}, vacancies_with_stack=1)
     assert [m["term_en"] for m in result["matched"]] == ["A", "B", "C"]
+
+
+def test_sync_serializes_evidence_list():
+    entries = [
+        CompetencyEntry(
+            bucket="core",
+            term_ru="",
+            term_en="Python",
+            evidence=(
+                Evidence(project="job-hunter-agent", source_ref="requirements.txt"),
+                Evidence(project="Nexus", source_ref="pyproject.toml", note="backend"),
+            ),
+        )
+    ]
+    result = sync_with_market(entries, {"Python": 2}, vacancies_with_stack=4)
+    ev = result["matched"][0]["evidence"]
+    assert ev == [
+        {"project": "job-hunter-agent", "source_ref": "requirements.txt", "note": ""},
+        {"project": "Nexus", "source_ref": "pyproject.toml", "note": "backend"},
+    ]

@@ -7,23 +7,47 @@
 #
 # To fill in your own: copy this file to config/competencies.local.yaml (it is
 # gitignored and must NEVER be committed) and replace every row with claims
-# you can point at real code — see source_ref below. Filling this in is a
-# separate, manual pass done project by project (reading the actual code, not
-# writing from memory).
+# you can point at real code.
 #
-# Shape: four buckets, each a list of entries. Every entry needs at least one
-# of term_ru/term_en. Fields:
+# Shape is TERM-FIRST: one entry per skill/technique, with an "evidence" list
+# inside it — one row per PROJECT that proves the term, each with a
+# file/function pointer. The SAME term found in a second project gets a
+# SECOND evidence row on the SAME entry, not a new entry — that's what keeps
+# this readable as more projects get reviewed (e.g. "Python" stays one row
+# with N evidence entries, instead of N separate "Python" rows).
+#
+# Fields:
 #   term_ru / term_en   — the skill/term in each language.
-#   explainer_ru/en     — a ~30-second spoken explanation of what it means.
+#   explainer_ru/en     — a ~30-second spoken explanation of what the TERM
+#                          means in general (not project-specific).
 #   resume_line         — a ready resume bullet (bucket: core only).
-#   project             — which of Kai's projects proves this (job-hunter-agent,
-#                          Nexus, Arcana, klgpff, mox-bunfarm, ...).
-#   source_ref           — "path/to/file.py:function_or_class" — the SOURCE OF
-#                          TRUTH pointer. An entry with an empty source_ref is
-#                          still awaiting verification against real code.
+#   evidence            — list of {project, source_ref, note}:
+#     project    — which of Kai's projects proves this (job-hunter-agent,
+#                  Nexus, Arcana, klgpff, mox-bunfarm, ...).
+#     source_ref — "path/to/file.py:LINE (symbol)" — the SOURCE OF TRUTH
+#                  pointer. An entry with no evidence at all is still
+#                  awaiting verification against real code.
+#     note       — optional short, project-specific detail (what the term is
+#                  used FOR in that project, if not obvious from source_ref).
 # ---------------------------------------------------------------------------
 
 core:
+  - term_ru: Пример — Python
+    term_en: Python
+    explainer_ru: >-
+      Пример объяснения на 30 секунд: основной язык бэкенда — синхронный,
+      без async/await, весь пайплайн и веб-API написаны на нём.
+    explainer_en: >-
+      Fictional 30-second explainer: the primary backend language — sync,
+      no async/await, the whole pipeline and web API are written in it.
+    resume_line: >-
+      Shipped and maintained a production Python backend end-to-end
+      (example placeholder line).
+    evidence:
+      - project: job-hunter-agent (example)
+        source_ref: requirements.txt; job_hunter/*.py
+        note: весь бэкенд
+
   - term_ru: Пример — оркестрация детерминированного пайплайна
     term_en: Deterministic pipeline orchestration
     explainer_ru: >-
@@ -36,8 +60,9 @@ core:
     resume_line: >-
       Designed and shipped a deterministic state-machine pipeline routing
       cost-aware LLM calls (example placeholder line).
-    project: job-hunter-agent (example)
-    source_ref: job_hunter/pipeline.py:advance
+    evidence:
+      - project: job-hunter-agent (example)
+        source_ref: job_hunter/pipeline.py:1 (advance)
 
 growing:
   - term_ru: Пример — тонкая настройка (fine-tuning)
@@ -48,16 +73,13 @@ growing:
     explainer_en: >-
       Fictional placeholder: not yet implemented in any of Kai's projects,
       studied independently of production code.
-    project: ""
-    source_ref: ""
+    evidence: []
 
 skip:
   - term_ru: Пример — управление людьми
     term_en: People management
     explainer_ru: "Пример: сознательно не развивается на этом этапе карьеры."
     explainer_en: "Fictional placeholder: deliberately not pursued at this stage."
-    project: ""
-    source_ref: ""
 
 glossary:
   - term_ru: Пример — векторная база данных
@@ -68,5 +90,4 @@ glossary:
     explainer_en: >-
       Fictional placeholder: term is understood and recognized in postings,
       not claimed as hands-on experience without a real code pointer.
-    project: ""
-    source_ref: ""
+    evidence: []
