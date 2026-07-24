@@ -1737,7 +1737,7 @@ h1::before {
 
 /* ============================ COMPETENCIES ============================= */
 .competencies-view .view-list {
-  max-width: 1400px;
+  max-width: 1100px;
 }
 .competencies-view h1 {
   margin-bottom: 20px;
@@ -1776,24 +1776,61 @@ h1::before {
   white-space: nowrap;
 }
 
-/* All 4 buckets visible at once, side by side — not tabs, so nothing has to
-   be switched away to compare buckets. 2x2 so each column stays wide enough
-   for the accordion rows to stay readable (unlike the 4-across tile grid on
-   Market Worth, these rows carry real text, not just a % tile). */
-.comp-buckets-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-items: start;
-  margin-bottom: 22px;
+/* Tab bar switching between the 4 buckets (a 2x2 grid of full accordion
+   lists side by side forced too much scrolling). Reuses each bucket's own
+   --bucket-accent/-bg/-border custom properties (defined below on
+   .comp-bucket--*) by sharing that SAME modifier class on the tab button, so
+   the color identity from the bucket cards carries over 1:1 to the tabs
+   instead of being redefined twice. */
+.comp-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
 }
-.comp-buckets-grid .comp-bucket {
-  margin-bottom: 0;
+.comp-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--ui);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 9px 4px 8px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
 }
-@media (max-width: 900px) {
-  .comp-buckets-grid {
-    grid-template-columns: 1fr;
-  }
+.comp-tab:hover {
+  color: var(--ink);
+}
+.comp-tab--active {
+  color: var(--ink);
+  border-bottom-color: var(--bucket-accent);
+}
+.comp-tab-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bucket-accent);
+  opacity: 0.55;
+}
+.comp-tab--active .comp-tab-dot {
+  opacity: 1;
+  box-shadow: 0 0 6px var(--bucket-accent-bg);
+}
+.comp-tab-n {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-4);
+}
+.comp-tab--active .comp-tab-n {
+  color: var(--ink-3);
 }
 
 /* Each bucket gets a real accent, not a 5th shade of grey — reusing the

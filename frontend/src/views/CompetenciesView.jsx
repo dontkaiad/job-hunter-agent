@@ -184,6 +184,7 @@ export default function CompetenciesView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState("");
+  const [activeBucket, setActiveBucket] = useState(BUCKET_ORDER[0]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -211,6 +212,7 @@ export default function CompetenciesView() {
       .filter((e) => matchesQuery(e, q)),
   }));
   const totalMatched = byBucket.reduce((n, b) => n + b.entries.length, 0);
+  const activeEntries = byBucket.find((b) => b.bucket === activeBucket)?.entries ?? [];
 
   return (
     <div className="view competencies-view">
@@ -243,16 +245,28 @@ export default function CompetenciesView() {
               )}
             </div>
 
-            <div className="comp-buckets-grid">
-              {byBucket.map(({ bucket, entries }) => (
-                <BucketBlock
-                  key={bucket}
-                  bucket={bucket}
-                  entries={entries}
-                  days={days}
-                />
-              ))}
+            <div className="comp-tabs" role="tablist">
+              {byBucket.map(({ bucket, entries }) => {
+                const meta = BUCKET_META[bucket];
+                const active = bucket === activeBucket;
+                return (
+                  <button
+                    key={bucket}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={`comp-tab comp-bucket--${bucket}${active ? " comp-tab--active" : ""}`}
+                    onClick={() => setActiveBucket(bucket)}
+                  >
+                    <span className="comp-tab-dot" />
+                    {meta.label}
+                    <span className="comp-tab-n">{entries.length}</span>
+                  </button>
+                );
+              })}
             </div>
+
+            <BucketBlock bucket={activeBucket} entries={activeEntries} days={days} />
 
             {!q && <GapCandidates items={data.gap_candidates} days={days} />}
           </>
