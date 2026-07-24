@@ -81,8 +81,9 @@ function CompetencyRow({ e, days }) {
 function BucketBlock({ bucket, entries, days }) {
   const meta = BUCKET_META[bucket];
   return (
-    <section className="comp-bucket">
+    <section className={`comp-bucket comp-bucket--${bucket}`}>
       <div className="comp-bucket-head">
+        <span className="comp-bucket-dot" />
         <h2>{meta.label}</h2>
         {meta.hint && <span className="comp-bucket-hint">{meta.hint}</span>}
         <span className="comp-bucket-n">{entries.length}</span>
@@ -109,10 +110,10 @@ function BucketBlock({ bucket, entries, days }) {
 function GapCandidates({ items, days }) {
   if (!items || items.length === 0) return null;
   return (
-    <section className="comp-bucket comp-gaps">
-      <div className="comp-bucket-head">
+    <section className="comp-gaps">
+      <div className="comp-gaps-head">
+        <span className="comp-gaps-badge">пробел</span>
         <h2>Просит рынок, но не размечено</h2>
-        <span className="comp-bucket-hint">кандидаты на пробел</span>
       </div>
       <div className="mw-tile-bars">
         {items.map((g) => (
@@ -120,7 +121,7 @@ function GapCandidates({ items, days }) {
             <span className="mw-tile-bar-label">{g.term}</span>
             <div className="mw-tile-bar-track">
               <div
-                className="mw-tile-bar-fill"
+                className="mw-tile-bar-fill mw-tile-bar-fill--amber"
                 style={{ width: `${Math.min(100, g.market_pct)}%` }}
               />
             </div>

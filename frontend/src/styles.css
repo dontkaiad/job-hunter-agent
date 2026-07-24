@@ -1743,14 +1743,54 @@ h1::before {
   margin-bottom: 20px;
 }
 
+/* Each bucket gets a real accent, not a 5th shade of grey — reusing the
+   dashboard's existing semantic palette (teal = signal/core, amber =
+   borderline/priority, oxblood = rejected/skip, khaki = quiet meta) instead
+   of inventing new colors. See --teal/--amber/--ox/--khaki in :root and how
+   they're already used for score bands + action buttons. */
 .comp-bucket {
-  margin-bottom: 28px;
+  margin-bottom: 22px;
+  padding: 14px 16px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--bucket-accent);
+  border-radius: var(--radius);
 }
+.comp-bucket--core {
+  --bucket-accent: var(--teal);
+  --bucket-accent-bg: rgba(84, 199, 182, 0.1);
+  --bucket-accent-border: rgba(84, 199, 182, 0.35);
+}
+.comp-bucket--growing {
+  --bucket-accent: var(--amber);
+  --bucket-accent-bg: rgba(224, 138, 43, 0.1);
+  --bucket-accent-border: rgba(224, 138, 43, 0.35);
+}
+.comp-bucket--skip {
+  --bucket-accent: var(--ox-bri);
+  --bucket-accent-bg: rgba(198, 72, 90, 0.1);
+  --bucket-accent-border: rgba(198, 72, 90, 0.35);
+}
+.comp-bucket--glossary {
+  --bucket-accent: var(--khaki);
+  --bucket-accent-bg: rgba(182, 173, 108, 0.1);
+  --bucket-accent-border: rgba(182, 173, 108, 0.35);
+}
+
 .comp-bucket-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
   margin-bottom: 10px;
+}
+.comp-bucket-dot {
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bucket-accent);
+  box-shadow: 0 0 8px var(--bucket-accent-bg);
 }
 .comp-bucket-head h2 {
   font-size: 15px;
@@ -1760,9 +1800,14 @@ h1::before {
 }
 .comp-bucket-hint {
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.03em;
   text-transform: lowercase;
+  color: var(--bucket-accent);
+  background: var(--bucket-accent-bg);
+  border: 1px solid var(--bucket-accent-border);
+  border-radius: var(--radius);
+  padding: 2px 7px;
 }
 .comp-bucket-n {
   margin-left: auto;
@@ -1887,9 +1932,52 @@ h1::before {
   color: var(--ink-4);
 }
 
+/* Gap candidates — deliberately NOT another comp-bucket. Heavier card (gradient
+   surface, glow, top accent bar) so it reads as "the dashboard is telling you
+   something", not a 5th skill list — same weight class as .mw-top-card /
+   .detail-panel elsewhere on this dashboard. Amber = attention, matching the
+   borderline-score / "needs a look" semantic used everywhere else. */
+.comp-gaps {
+  margin-top: 6px;
+  padding: 18px 20px;
+  background: linear-gradient(165deg, var(--panel-2) 0%, var(--panel) 65%, var(--inset) 100%);
+  border: 1px solid var(--line-2);
+  border-top: 3px solid var(--amber);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 rgba(224, 138, 43, 0.1), 0 20px 48px -32px rgba(0, 0, 0, 0.85);
+}
+.comp-gaps-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.comp-gaps-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  background: rgba(224, 138, 43, 0.12);
+  border: 1px solid rgba(224, 138, 43, 0.4);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+}
+.comp-gaps-head h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.mw-tile-bar-fill--amber {
+  background: var(--amber);
+}
 .comp-gaps-note {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--ink-3);
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
