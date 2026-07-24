@@ -3,9 +3,16 @@ import { api } from "../api.js";
 
 // Компетенции: Kai's hand-curated skill inventory (config/competencies.*.yaml,
 // see job_hunter/competencies.py) crossed against real market demand — the
-// "частота в вакансиях за N дней" column comes from the SAME extract pipeline
+// "частота в вакансиях за N дней" figure comes from the SAME extract pipeline
 // that already pulls a `stack` list out of every harvested vacancy
 // (job_hunter/stack_analytics.py), just windowed and matched here.
+//
+// Layout: one term = one collapsed row (term + a short freq badge, single
+// line, never wraps) that expands on click to reveal the 30-sec explainer /
+// resume line / source pointer below — a per-row <details>, the same native
+// disclosure pattern DetailPanel.jsx already uses for the vacancy text /
+// benefits blocks (.vacancy / .vacancy-summary). A 5-column table with long
+// free text in every cell doesn't fit a browser width; this does.
 //
 // Content (the "делаю" column, i.e. what each entry actually says) is filled
 // separately, project by project, straight from reading each project's code
@@ -20,49 +27,58 @@ const BUCKET_META = {
 };
 const BUCKET_ORDER = ["core", "growing", "skip", "glossary"];
 
-function EntryRow({ e }) {
+function CompetencyRow({ e, days }) {
   const hasFreq = e.market_count > 0;
+  const hasBothTerms = e.term_ru && e.term_en;
+
   return (
-    <tr>
-      <td className="cell-role">
-        <div>{e.term_ru || e.term_en}</div>
-        {e.term_ru && e.term_en && (
-          <div className="comp-term-en">{e.term_en}</div>
+    <details className="comp-row">
+      <summary className="comp-row-summary">
+        <span className="comp-row-term">
+          {e.term_ru || e.term_en}
+          {hasBothTerms && <span className="comp-row-term-en"> · {e.term_en}</span>}
+        </span>
+        <span className={`comp-row-freq${hasFreq ? "" : " comp-row-freq--zero"}`}>
+          {e.market_pct}%
+        </span>
+      </summary>
+
+      <div className="comp-row-body">
+        {(e.explainer_ru || e.explainer_en) && (
+          <p className="comp-row-explainer">{e.explainer_ru || e.explainer_en}</p>
         )}
-      </td>
-      <td className="comp-explainer" title={e.explainer_en || undefined}>
-        {e.explainer_ru || e.explainer_en || "—"}
-      </td>
-      {e.bucket === "core" ? (
-        <td className="comp-resume">{e.resume_line || "—"}</td>
-      ) : (
-        <td className="comp-resume muted">—</td>
-      )}
-      <td className="comp-source">
-        {e.source_ref ? (
-          <>
-            <div className="comp-source-ref">{e.source_ref}</div>
-            {e.project && <div className="comp-source-project">{e.project}</div>}
-          </>
-        ) : (
-          <span className="muted">не размечено</span>
+
+        {e.bucket === "core" && e.resume_line && (
+          <div className="comp-row-field">
+            <span className="comp-row-field-label">Резюме</span>
+            <span>{e.resume_line}</span>
+          </div>
         )}
-      </td>
-      <td className={`comp-freq${hasFreq ? "" : " comp-freq--zero"}`}>
-        {hasFreq ? (
-          <>
-            <span className="comp-freq-pct">{e.market_pct}%</span>
-            <span className="comp-freq-n">n={e.market_count}</span>
-          </>
-        ) : (
-          "0%"
-        )}
-      </td>
-    </tr>
+
+        <div className="comp-row-field">
+          <span className="comp-row-field-label">Источник</span>
+          {e.source_ref ? (
+            <span className="comp-source-ref">
+              {e.source_ref}
+              {e.project && <span className="comp-source-project"> · {e.project}</span>}
+            </span>
+          ) : (
+            <span className="muted">не размечено</span>
+          )}
+        </div>
+
+        <div className="comp-row-field">
+          <span className="comp-row-field-label">Частота, {days}д</span>
+          <span className={hasFreq ? "" : "muted"}>
+            {e.market_pct}% {hasFreq && `· n=${e.market_count}`}
+          </span>
+        </div>
+      </div>
+    </details>
   );
 }
 
-function BucketTable({ bucket, entries, days }) {
+function BucketBlock({ bucket, entries, days }) {
   const meta = BUCKET_META[bucket];
   return (
     <section className="comp-bucket">
@@ -71,27 +87,20 @@ function BucketTable({ bucket, entries, days }) {
         {meta.hint && <span className="comp-bucket-hint">{meta.hint}</span>}
         <span className="comp-bucket-n">{entries.length}</span>
       </div>
+
       {entries.length === 0 ? (
         <div className="empty">Пока пусто</div>
       ) : (
-        <div className="table-scroll">
-          <table className="pipeline-table comp-table">
-            <thead>
-              <tr>
-                <th>Термин</th>
-                <th>30 сек</th>
-                <th>Резюме</th>
-                <th>Источник</th>
-                <th>Частота, {days}д</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((e, i) => (
-                <EntryRow key={`${e.term_en || e.term_ru}-${i}`} e={e} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="comp-list-head">
+            <span className="comp-list-head-freq">{days}д</span>
+          </div>
+          <div className="comp-list">
+            {entries.map((e, i) => (
+              <CompetencyRow key={`${e.term_en || e.term_ru}-${i}`} e={e} days={days} />
+            ))}
+          </div>
+        </>
       )}
     </section>
   );
@@ -172,7 +181,7 @@ export default function CompetenciesView() {
             )}
 
             {byBucket.map(({ bucket, entries }) => (
-              <BucketTable
+              <BucketBlock
                 key={bucket}
                 bucket={bucket}
                 entries={entries}

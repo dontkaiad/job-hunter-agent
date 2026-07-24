@@ -1771,28 +1771,111 @@ h1::before {
   color: var(--ink-4);
 }
 
-.comp-table th,
-.comp-table td {
-  vertical-align: top;
+/* Thin header row: just the freq column label ("30д"), right-aligned to sit
+   above the badge in every row's summary line below it. No other column
+   headers — the list isn't a table, so nothing else needs one. */
+.comp-list-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 14px 4px;
 }
-.comp-term-en {
+.comp-list-head-freq {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.comp-list {
+  border-top: 1px solid var(--hair);
+}
+
+/* One row = one <details>. Collapsed: term + freq badge on a single line,
+   never wraps. Expanded: explainer / resume / source stacked below — the
+   same disclosure mechanic as .vacancy in DetailPanel, restyled as a list
+   row instead of a standalone block. */
+.comp-row {
+  border-bottom: 1px solid var(--hair);
+}
+.comp-row-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.1s;
+}
+.comp-row-summary::-webkit-details-marker {
+  display: none;
+}
+.comp-row-summary::before {
+  content: "\25B8"; /* ▸ */
+  color: var(--teal);
+  font-size: 10px;
+  flex-shrink: 0;
+  transition: transform 0.12s;
+}
+.comp-row[open] > .comp-row-summary::before {
+  transform: rotate(90deg);
+}
+.comp-row-summary:hover {
+  background: rgba(84, 199, 182, 0.045);
+}
+.comp-row-term {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.comp-row-term-en {
+  font-family: var(--mono);
+  font-size: 11.5px;
   color: var(--ink-3);
-  margin-top: 2px;
 }
-.comp-explainer {
-  max-width: 320px;
-  color: var(--ink-2);
+.comp-row-freq {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--teal-bri);
+  white-space: nowrap;
+}
+.comp-row-freq--zero {
+  color: var(--ink-4);
+  font-weight: 400;
+}
+
+.comp-row-body {
+  padding: 2px 14px 14px 26px;
+}
+.comp-row-explainer {
+  margin: 0 0 10px;
   font-size: 13px;
-}
-.comp-resume {
-  max-width: 260px;
+  line-height: 1.55;
   color: var(--ink-2);
-  font-size: 12.5px;
 }
-.comp-source {
-  max-width: 220px;
+.comp-row-field {
+  display: flex;
+  gap: 10px;
+  margin: 6px 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  align-items: baseline;
+}
+.comp-row-field-label {
+  flex: 0 0 88px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
 .comp-source-ref {
   font-family: var(--mono);
@@ -1801,25 +1884,6 @@ h1::before {
   word-break: break-word;
 }
 .comp-source-project {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ink-4);
-  margin-top: 2px;
-}
-.comp-freq {
-  white-space: nowrap;
-  font-family: var(--mono);
-}
-.comp-freq-pct {
-  color: var(--teal-bri);
-  font-weight: 500;
-}
-.comp-freq-n {
-  color: var(--ink-4);
-  font-size: 11px;
-  margin-left: 6px;
-}
-.comp-freq--zero {
   color: var(--ink-4);
 }
 
