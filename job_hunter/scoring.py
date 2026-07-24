@@ -109,6 +109,50 @@ def text_prefilter(raw_text: Optional[str]) -> PrefilterResult:
     return PrefilterResult(True, None)
 
 
+# AI/ML/LLM topic signal for the T1 topic gate (see ``topic_prefilter``).
+# Small and deliberately generic — this is a RECALL-first keyword list, not a
+# classifier: it only needs to catch obvious off-topic noise (frontend-only,
+# plain DevOps, etc.), not exhaustively describe the AI field. Case-insensitive
+# substring match against title + a short prefix of the body.
+_AI_TOPIC_KEYWORDS = [
+    "ai", "ml", "llm", "gpt", "genai", "gen ai",
+    "machine learning", "artificial intelligence", "deep learning",
+    "nlp", "rag", "prompt", "prompt engineering", "data science",
+    "data scientist", "computer vision", "neural network",
+    "искусственный интеллект", "машинное обучение", "нейросет",
+]
+# Length of the raw-text prefix probed (title is checked separately, in full).
+_TOPIC_PROBE_CHARS = 500
+# \b-wrapped: short acronyms like "ai"/"ml"/"rag" are common substrings of
+# ordinary words ("email", "html", "average") and would false-positive
+# without word boundaries.
+_AI_TOPIC_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(k) for k in _AI_TOPIC_KEYWORDS) + r")\b", re.I
+)
+
+
+def topic_prefilter(raw_text: Optional[str], title: Optional[str] = None) -> PrefilterResult:
+    """Cheap AI/ML/LLM topic signal over RAW TEXT (title + a short prefix).
+
+    NOT a relevance judge — it is a recall-first keyword gate meant to catch
+    only the OBVIOUS off-topic case (e.g. a frontend-only or plain-DevOps
+    posting with zero AI/ML/LLM vocabulary anywhere near the top). A legit
+    AI-team posting titled "Backend Engineer" that mentions the stack further
+    down, or uses vocabulary not in the list, is expected to still pass —
+    false negatives here are a cost problem (one skipped Haiku call), false
+    positives are a correctness problem (a real fit silently dropped), so this
+    stays lenient by design. See pipeline._do_extract for how the caller
+    currently treats a miss (dry-run log vs. real drop, per Deps.topic_gate_enforce).
+    """
+    text = raw_text or ""
+    probe = ((title or "") + " " + text[:_TOPIC_PROBE_CHARS]).strip()
+    if not probe:
+        return PrefilterResult(True, None)
+    if _AI_TOPIC_RE.search(probe):
+        return PrefilterResult(True, None)
+    return PrefilterResult(False, "no AI/ML/LLM keyword in title/prefix")
+
+
 def prefilter(extracted: ExtractResult, raw_text: Optional[str] = None) -> PrefilterResult:
     """LENIENT deterministic gate. Returns keep=True for anything plausible.
 

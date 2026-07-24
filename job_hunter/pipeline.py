@@ -74,6 +74,12 @@ class Deps:
     # Items scoring below this threshold are DELETED from work_items after
     # scoring — they never reach a terminal 'rejected' row. 0 = disabled.
     min_persist_score: int = 0
+    # T1 AI/ML/LLM topic gate (scoring.topic_prefilter). False (default):
+    # DRY-RUN — a miss is only logged (`[topic-gate]`), extract still runs
+    # normally. True: a miss is treated like the other T1 prefilter drops
+    # (heuristic extract only, no LLM call). Keep False until a few days of
+    # dry-run logs confirm the false-positive rate on real traffic is low.
+    topic_gate_enforce: bool = False
 
 
 @dataclass
@@ -152,6 +158,15 @@ def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Advance
       2) cross-source duplicate — another row already carries the SAME
          source_link (the partial unique index only dedups within one
          source_channel, so a job mirrored across sources isn't caught there).
+      3) ``scoring.topic_prefilter`` — AI/ML/LLM keyword gate over title + a
+         raw-text prefix. Confirmed data (2026-07-24): 46/48 recent rejects
+         were score<T, not location/salary — the rubric IS correctly rejecting
+         generic (non-AI) postings from WWR/Jobicy, we're just paying Haiku to
+         find that out every time. DRY-RUN by default (Deps.topic_gate_enforce
+         = False): a miss is only logged, never drops the item — this gate is
+         intentionally lenient and a keyword miss on a real AI role (e.g. one
+         titled plain "Backend Engineer") is a live risk, so it needs a few
+         days of `[topic-gate]` log review before it's allowed to cut anything.
     """
     source_channel = item.source_channel or ""
     raw = item.raw_text or ""
@@ -163,9 +178,21 @@ def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Advance
         store.find_duplicate_by_source_link(conn, item.source_link, item.id)
         if pf.keep else None
     )
+    topic_pf = (
+        scoring.topic_prefilter(raw)
+        if pf.keep and dup_id is None else scoring.PrefilterResult(True, None)
+    )
+    if pf.keep and dup_id is None and not topic_pf.keep:
+        print(
+            f"[topic-gate] id={item.id} source={source_channel!r}"
+            f" would-filter: {topic_pf.reason}"
+            f" (enforce={deps.topic_gate_enforce})",
+            flush=True,
+        )
+    topic_drop = deps.topic_gate_enforce and not topic_pf.keep
     use_llm = (
         deps.use_llm_extract and deps.llm_client is not None
-        and pf.keep and dup_id is None
+        and pf.keep and dup_id is None and not topic_drop
     )
 
     if use_llm:
@@ -192,6 +219,8 @@ def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Advance
             used = f"heuristic(prefilter:{pf.reason})"
         elif dup_id is not None:
             used = f"heuristic(duplicate of #{dup_id})"
+        elif topic_drop:
+            used = f"heuristic(topic-filtered:{topic_pf.reason})"
 
     extracted.source_channel = source_channel
     if item.source_link:

@@ -118,6 +118,32 @@ precisely requires reading the `[score] id=... (prefilter)` / `heuristic
 (prefilter:...)` / `heuristic (duplicate of #...)` reasons a live harvest run
 actually emits, not a code-only estimate.
 
+## T1 topic gate: AI/ML/LLM keyword pre-check (2026-07-24, dry-run)
+
+Confirmed by manual review, not a code-only estimate: over the 3 days before
+this change, 46 of 48 rejected vacancies were rejected for `score < T`, not
+the salary/location guards. Spot-checking 3 of them (score 28: a Canonical
+Ltd Field Engineer, a Frontend React/Flutter role, a Sustaining Engineering
+role) confirmed the rubric was rejecting them correctly — none is an AI/LLM
+role. The rubric is not the problem; the problem is that WWR and Jobicy's
+general-remote feed ingest a wide stream of ordinary engineering postings, of
+which AI/LLM-specific roles are a minority, so every one of those non-AI
+postings still paid for a Haiku extract call just to reach a predictable
+reject at T2.
+
+`scoring.topic_prefilter` adds a THIRD deterministic T1 check (alongside
+`text_prefilter` and the cross-source duplicate check): a small, recall-first
+AI/ML/LLM keyword list matched against the title + a raw-text prefix. It is
+intentionally lenient — the risk of a false positive (silently dropping a real
+AI-team role titled something generic like "Backend Engineer") is worse than
+the cost of a false negative (one skipped Haiku call), so a miss does NOT drop
+the item today. `Deps.topic_gate_enforce` defaults to `False`
+(`TOPIC_GATE_ENFORCE` env var, off by default): a miss is only logged
+(`[topic-gate] id=... would-filter: ...`), extract still runs as before. The
+plan is to read a few days of those logs, eyeball the false-positive rate on
+real traffic, and only then flip `TOPIC_GATE_ENFORCE=true` to let it actually
+skip the LLM call the way the other two T1 checks already do.
+
 ## Cost of one approval (research + draft)
 
 Research and draft run **only after a human Approve**, on the ~2–4 roles approved

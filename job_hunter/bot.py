@@ -1303,6 +1303,7 @@ def build_deps(cfg: Config) -> Deps:
         corridor_lo=cfg.score_corridor_lo, corridor_hi=cfg.score_corridor_hi,
         profile=profile,
         min_persist_score=cfg.min_persist_score,
+        topic_gate_enforce=cfg.topic_gate_enforce,
     )
 
 

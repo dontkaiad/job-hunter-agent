@@ -150,6 +150,13 @@ class Config:
     # top-level comments (one IngestMessage per comment) via Firebase API.
     hn_hiring_enabled: bool = False
 
+    # --- T1 AI/ML/LLM topic gate (scoring.topic_prefilter) ---
+    # TOPIC_GATE_ENFORCE=true switches the gate from dry-run (log only, see
+    # pipeline._do_extract) to actually skipping the LLM extract call on a
+    # keyword miss. Default off: run in dry-run for a few days first to check
+    # the false-positive rate on real traffic before it can drop anything.
+    topic_gate_enforce: bool = False
+
     # --- Harvest quality: minimum score to persist a vacancy in work_items ---
     # Vacancies with relevance_score < min_persist_score are deleted after
     # scoring and never reach work_items in a permanent state. Set to 0 to
@@ -261,4 +268,5 @@ def load_config(env: Optional[dict] = None) -> Config:
             ]
         ),
         hn_hiring_enabled=(get("HN_HIRING_ENABLED") or "false").lower() in ("1", "true", "yes"),
+        topic_gate_enforce=(get("TOPIC_GATE_ENFORCE") or "false").lower() in ("1", "true", "yes"),
     )
