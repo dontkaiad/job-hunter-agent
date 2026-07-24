@@ -124,6 +124,14 @@ services:
       # Same READ-ONLY profile mount as the bot, so the /draft endpoint's
       # build_deps can load the candidate profile.
       - ./config/profile.local.yaml:/app/config/profile.local.yaml:ro
+      # REAL competencies inventory (job_hunter/competencies.py), same
+      # gitignored-on-host / bind-mounted-read-only treatment as the profile
+      # above — never baked into the image. MUST exist on the host as a FILE
+      # before `docker compose up`: a missing source path makes Docker mount
+      # an empty DIRECTORY here instead, which breaks GET /api/competencies
+      # (the loader tries to open a directory as YAML) instead of falling
+      # back to the committed example.yaml.
+      - ./config/competencies.local.yaml:/app/config/competencies.local.yaml:ro
 
     # LOOPBACK ONLY. The `127.0.0.1:` host prefix means the published port is
     # bound to the VPS loopback interface — it is NOT reachable from outside the

@@ -7,6 +7,7 @@
 .env.*
 !.env.example
 config/profile.local.yaml
+config/competencies.local.yaml
 
 # Local SQLite DB(s) and Telegram session files — host-mounted / regenerated.
 *.db
