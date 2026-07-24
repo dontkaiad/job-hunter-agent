@@ -1,0 +1,72 @@
+# ---------------------------------------------------------------------------
+# job-hunter-agent — COMPETENCIES INVENTORY (example / fictional placeholder)
+#
+# This is a GENERIC, runnable example — NOT real content. The dashboard's
+# Компетенции page loads config/competencies.local.yaml if it exists,
+# otherwise it falls back to THIS file (see job_hunter/competencies.py).
+#
+# To fill in your own: copy this file to config/competencies.local.yaml (it is
+# gitignored and must NEVER be committed) and replace every row with claims
+# you can point at real code — see source_ref below. Filling this in is a
+# separate, manual pass done project by project (reading the actual code, not
+# writing from memory).
+#
+# Shape: four buckets, each a list of entries. Every entry needs at least one
+# of term_ru/term_en. Fields:
+#   term_ru / term_en   — the skill/term in each language.
+#   explainer_ru/en     — a ~30-second spoken explanation of what it means.
+#   resume_line         — a ready resume bullet (bucket: core only).
+#   project             — which of Kai's projects proves this (job-hunter-agent,
+#                          Nexus, Arcana, klgpff, mox-bunfarm, ...).
+#   source_ref           — "path/to/file.py:function_or_class" — the SOURCE OF
+#                          TRUTH pointer. An entry with an empty source_ref is
+#                          still awaiting verification against real code.
+# ---------------------------------------------------------------------------
+
+core:
+  - term_ru: Пример — оркестрация детерминированного пайплайна
+    term_en: Deterministic pipeline orchestration
+    explainer_ru: >-
+      Пример объяснения на 30 секунд: состояние вакансии продвигается через
+      явный конечный автомат с единственной точкой записи, а не разбросанными
+      условиями по коду.
+    explainer_en: >-
+      Fictional 30-second explainer: vacancy state advances through an
+      explicit state machine with one write path, not scattered conditionals.
+    resume_line: >-
+      Designed and shipped a deterministic state-machine pipeline routing
+      cost-aware LLM calls (example placeholder line).
+    project: job-hunter-agent (example)
+    source_ref: job_hunter/pipeline.py:advance
+
+growing:
+  - term_ru: Пример — тонкая настройка (fine-tuning)
+    term_en: Fine-tuning
+    explainer_ru: >-
+      Пример: пока не реализовано в проектах Кай, изучается отдельно от
+      прод-кода.
+    explainer_en: >-
+      Fictional placeholder: not yet implemented in any of Kai's projects,
+      studied independently of production code.
+    project: ""
+    source_ref: ""
+
+skip:
+  - term_ru: Пример — управление людьми
+    term_en: People management
+    explainer_ru: "Пример: сознательно не развивается на этом этапе карьеры."
+    explainer_en: "Fictional placeholder: deliberately not pursued at this stage."
+    project: ""
+    source_ref: ""
+
+glossary:
+  - term_ru: Пример — векторная база данных
+    term_en: Vector database
+    explainer_ru: >-
+      Пример: термин понятен и узнаётся в вакансиях, но не заявлен как
+      практический опыт без реальной ссылки на код.
+    explainer_en: >-
+      Fictional placeholder: term is understood and recognized in postings,
+      not claimed as hands-on experience without a real code pointer.
+    project: ""
+    source_ref: ""

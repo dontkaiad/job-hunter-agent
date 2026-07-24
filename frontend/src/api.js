@@ -109,6 +109,13 @@ export const api = {
     return request("/api/market-worth/refresh", { method: "POST" });
   },
 
+  // Competencies: GET /api/competencies — Kai's skill inventory crossed
+  // against real market-stack frequency (see job_hunter/competencies.py).
+  // Read-only, always fresh (recomputed from the pipeline DB per request).
+  getCompetencies() {
+    return request("/api/competencies");
+  },
+
   // Add a vacancy by URL. Returns { item_id, state, score, duplicate }.
   // duplicate=true => the URL is already in the pipeline (no new card created).
   // A 422 ApiError is thrown for an invalid or unreadable URL (detail carries

@@ -102,6 +102,10 @@ class StackAnalyticsResult:
     """True when total_pool < min_display_sample — data is noisy, warn user."""
 
     degraded_reason: Optional[str] = None
+    window_days: Optional[int] = None
+    """When set, total_pool/tech_freq are windowed to the last N days
+    (created_at >= now - window_days). None means the whole quality pool
+    (the original, unwindowed behavior)."""
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +119,7 @@ def _aggregate_stack(
     total_pool: int = 0,
     min_display_sample: int = 5,
     top_n: int = 20,
+    window_days: Optional[int] = None,
 ) -> StackAnalyticsResult:
     """Pure function: aggregate a list of stack lists into StackAnalyticsResult.
 
@@ -165,6 +170,7 @@ def _aggregate_stack(
         min_display_sample=min_display_sample,
         small_sample=small_sample,
         degraded_reason=degraded_reason,
+        window_days=window_days,
     )
 
 
@@ -173,21 +179,46 @@ def _aggregate_stack(
 # ---------------------------------------------------------------------------
 
 
-def compute_from_pipeline(conn, cfg) -> StackAnalyticsResult:
+def compute_from_pipeline(conn, cfg, days: Optional[int] = None) -> StackAnalyticsResult:
     """Query work_items with score >= 25 and aggregate stack frequencies.
 
     Pure-SQL fetch + Python aggregation — zero API calls.
+
+    ``days``, when given, windows the pool to items ingested in the last N
+    days (``created_at >= now - days``), for callers that want a "frequency
+    in vacancies over the last N days" figure (e.g. Competencies market sync)
+    rather than the whole-history pool market-worth uses. ``created_at`` is a
+    UTC ISO-8601 TEXT column (job_hunter.clock.now_iso convention), so the
+    cutoff is computed the same way and compared lexicographically — no
+    timestamptz cast needed.
     """
+    from .clock import now_utc
+
     min_display_sample = getattr(cfg, "stack_min_sample", 5)
 
-    rows = conn.execute(
-        """
-        SELECT extracted_json
-        FROM work_items
-        WHERE relevance_score >= 25
-          AND extracted_json IS NOT NULL
-        """,
-    ).fetchall()
+    if days is not None:
+        from datetime import timedelta
+
+        cutoff = (now_utc() - timedelta(days=days)).isoformat()
+        rows = conn.execute(
+            """
+            SELECT extracted_json
+            FROM work_items
+            WHERE relevance_score >= 25
+              AND extracted_json IS NOT NULL
+              AND created_at >= %s
+            """,
+            (cutoff,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT extracted_json
+            FROM work_items
+            WHERE relevance_score >= 25
+              AND extracted_json IS NOT NULL
+            """,
+        ).fetchall()
 
     total_pool = len(rows)
     stack_rows: List[List[str]] = []
@@ -204,4 +235,5 @@ def compute_from_pipeline(conn, cfg) -> StackAnalyticsResult:
         stack_rows,
         total_pool=total_pool,
         min_display_sample=min_display_sample,
+        window_days=days,
     )

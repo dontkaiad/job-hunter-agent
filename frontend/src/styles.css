@@ -1734,3 +1734,98 @@ h1::before {
     font-size: 18px;
   }
 }
+
+/* ============================ COMPETENCIES ============================= */
+.competencies-view .view-list {
+  max-width: 1100px;
+}
+.competencies-view h1 {
+  margin-bottom: 20px;
+}
+
+.comp-bucket {
+  margin-bottom: 28px;
+}
+.comp-bucket-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.comp-bucket-head h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.comp-bucket-hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  text-transform: lowercase;
+}
+.comp-bucket-n {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-4);
+}
+
+.comp-table th,
+.comp-table td {
+  vertical-align: top;
+}
+.comp-term-en {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+.comp-explainer {
+  max-width: 320px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.comp-resume {
+  max-width: 260px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.comp-source {
+  max-width: 220px;
+}
+.comp-source-ref {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--teal-bri);
+  word-break: break-word;
+}
+.comp-source-project {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-4);
+  margin-top: 2px;
+}
+.comp-freq {
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+.comp-freq-pct {
+  color: var(--teal-bri);
+  font-weight: 500;
+}
+.comp-freq-n {
+  color: var(--ink-4);
+  font-size: 11px;
+  margin-left: 6px;
+}
+.comp-freq--zero {
+  color: var(--ink-4);
+}
+
+.comp-gaps-note {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 8px;
+}

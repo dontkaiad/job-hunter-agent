@@ -150,6 +150,12 @@ class Config:
     # top-level comments (one IngestMessage per comment) via Firebase API.
     hn_hiring_enabled: bool = False
 
+    # --- Competencies market sync (dashboard "Компетенции" page) ---
+    # Window (days) for the "frequency in vacancies" column: how many days of
+    # harvested postings feed the market_stack frequency each competency term
+    # is matched against. Overridable via COMPETENCIES_MARKET_DAYS.
+    competencies_market_days: int = 30
+
     # --- T1 AI/ML/LLM topic gate (scoring.topic_prefilter) ---
     # TOPIC_GATE_ENFORCE=true switches the gate from dry-run (log only, see
     # pipeline._do_extract) to actually skipping the LLM extract call on a
@@ -269,4 +275,5 @@ def load_config(env: Optional[dict] = None) -> Config:
         ),
         hn_hiring_enabled=(get("HN_HIRING_ENABLED") or "false").lower() in ("1", "true", "yes"),
         topic_gate_enforce=(get("TOPIC_GATE_ENFORCE") or "false").lower() in ("1", "true", "yes"),
+        competencies_market_days=_int_or_none(get("COMPETENCIES_MARKET_DAYS")) or 30,
     )

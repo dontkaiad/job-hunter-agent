@@ -939,6 +939,37 @@ def refresh_market_worth(
     }
 
 
+# --- Competencies endpoint ---------------------------------------------------
+#
+# GET /api/competencies — Kai's hand-curated skill inventory (config/
+# competencies.local.yaml, see job_hunter/competencies.py) crossed against
+# real market demand (job_hunter.stack_analytics, windowed to the last
+# config.competencies_market_days days). Read-only, zero LLM/API cost — same
+# "pure aggregation over the pipeline DB" shape as /market-worth.
+
+
+@router.get("/competencies")
+def get_competencies(
+    config: Config = Depends(get_config),
+    conn: psycopg.Connection = Depends(get_conn),
+) -> dict:
+    from dataclasses import asdict
+
+    from .competencies import load_competencies, sync_with_market
+    from .stack_analytics import compute_from_pipeline as compute_stack
+
+    entries = load_competencies()
+    days = config.competencies_market_days
+    stack = compute_stack(conn, config, days=days)
+    sync = sync_with_market(entries, stack.tech_freq, stack.vacancies_with_stack)
+
+    return {
+        "market": asdict(stack),
+        "entries": sync["matched"],
+        "gap_candidates": sync["gap_candidates"][:20],
+    }
+
+
 # --- Public auth routes (issue #5): NOT gated -------------------------------
 #
 # These three routes are the login flow and MUST be reachable without a session.
