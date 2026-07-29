@@ -41,17 +41,16 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Iterator, List, Optional, Set
+from urllib.parse import quote
 
 import psycopg
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
-    HTMLResponse,
     JSONResponse,
     RedirectResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from . import add_by_url as add_by_url_mod
@@ -257,11 +256,6 @@ APP_NAME = "jobhunter"
 
 # Session cookie name. Defined once in tg_auth; re-exported here for local use.
 SESSION_COOKIE = tg_auth.SESSION_COOKIE
-
-# Templates for the public /login page (HTML kept OUT of this module).
-_TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
-templates = Jinja2Templates(directory=_TEMPLATES_DIR)
-
 
 @dataclass
 class AuthSettings:
@@ -982,31 +976,26 @@ POST_LOGIN_PATH = "/"
 
 
 
-@auth_router.get("/login", response_class=HTMLResponse)
-def login_page(
-    request: Request,
-    settings: AuthSettings = Depends(get_auth_settings),
-) -> HTMLResponse:
-    """Public login page rendering the Telegram Login Widget (uses the login
-    bot's USERNAME) + a remember-me checkbox. Template lives in
-    job_hunter/templates/login.html.
+# Centralized SSO login (heylark-infra). Telegram's classic Login Widget only
+# allows ONE registered domain per bot (BotFather /setdomain); since the
+# dashboard's login bot is the SAME bot used by login.heylark.dev, rendering
+# our own widget here would fight over that single registration ("Bot domain
+# invalid" on whichever host isn't currently registered). Redirecting here and
+# relying on the shared Domain=.heylark.dev session cookie that login.heylark.dev
+# sets avoids the conflict entirely — see tg_auth.py's cross-subdomain SSO note.
+SSO_LOGIN_URL = "https://login.heylark.dev"
 
-    The widget's data-auth-url is rendered ABSOLUTE when DASHBOARD_PUBLIC_URL is
-    configured (required for the mobile oauth.telegram.org flow; behind a reverse
-    proxy the request host is unreliable so it must be explicit). When unset it
-    falls back to the relative "/auth/callback" (today's behavior; works on
-    desktop / local dev where the browser resolves it against the page origin)."""
-    base = settings.dashboard_public_url.rstrip("/")
-    callback_url = f"{base}/auth/callback" if base else "/auth/callback"
-    return templates.TemplateResponse(
-        "login.html",
-        {
-            "request": request,
-            "bot_username": settings.login_bot_username,
-            "callback_url": callback_url,
-            "next_label": None,
-            "error": None,
-        },
+
+@auth_router.get("/login")
+def login_page(
+    settings: AuthSettings = Depends(get_auth_settings),
+) -> RedirectResponse:
+    """Redirect to the centralized heylark-infra login (login.heylark.dev),
+    which sets the shared cross-subdomain session cookie and bounces back."""
+    base = settings.dashboard_public_url.rstrip("/") or "https://jobs.heylark.dev"
+    return RedirectResponse(
+        url=f"{SSO_LOGIN_URL}/?next={quote(base + '/', safe='')}",
+        status_code=307,
     )
 
 

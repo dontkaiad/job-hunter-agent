@@ -303,62 +303,56 @@ def test_logout_clears_cookie_same_domain(conn, auth_conn):
     app.dependency_overrides.clear()
 
 
-# --- /login HTML page -------------------------------------------------------
-
-
-def test_login_page_html(conn, auth_conn):
-    app = _make_app(conn, auth_conn)
-    with TestClient(app) as c:
-        r = c.get("/login")
-        assert r.status_code == 200
-        assert "text/html" in r.headers["content-type"]
-        body = r.text
-        # Widget script + the login bot username present.
-        assert "telegram-widget.js" in body
-        assert "l4rk_test_bot" in body
-    app.dependency_overrides.clear()
+# --- /login: redirect to the centralized SSO login -------------------------
+#
+# The dashboard's login bot is the SAME bot login.heylark.dev uses. Telegram's
+# classic Login Widget only allows ONE registered domain per bot (BotFather
+# /setdomain), so rendering our own widget here fights over that single
+# registration ("Bot domain invalid" on whichever host isn't registered).
+# /login instead redirects to login.heylark.dev, which sets the shared
+# Domain=.heylark.dev session cookie and bounces back — no local widget needed.
 
 
 def test_login_page_is_public_no_auth(conn, auth_conn):
     # /login must not require a session.
     app = _make_app(conn, auth_conn)
     with TestClient(app) as c:  # no cookie
-        assert c.get("/login").status_code == 200
+        r = c.get("/login", follow_redirects=False)
+        assert r.status_code == 307
     app.dependency_overrides.clear()
 
 
-# --- data-auth-url: ABSOLUTE when DASHBOARD_PUBLIC_URL set (mobile fix) ------
-
-
-def test_login_page_absolute_auth_url_when_public_url_set(conn, auth_conn):
-    # With DASHBOARD_PUBLIC_URL configured the widget renders an ABSOLUTE
-    # data-auth-url — required for the mobile oauth.telegram.org flow.
+def test_login_page_redirects_to_sso_with_absolute_next_when_public_url_set(
+    conn, auth_conn
+):
     app = _make_app(conn, auth_conn, dashboard_public_url="https://jobs.heylark.dev")
     with TestClient(app) as c:
-        r = c.get("/login")
-        assert r.status_code == 200
-        assert 'data-auth-url="https://jobs.heylark.dev/auth/callback"' in r.text
+        r = c.get("/login", follow_redirects=False)
+        assert r.status_code == 307
+        location = r.headers["location"]
+        assert location.startswith("https://login.heylark.dev/?next=")
+        assert "https%3A%2F%2Fjobs.heylark.dev%2F" in location
     app.dependency_overrides.clear()
 
 
-def test_login_page_absolute_auth_url_trailing_slash_no_double_slash(conn, auth_conn):
+def test_login_page_redirect_trailing_slash_no_double_slash(conn, auth_conn):
     # A trailing slash on the configured base must NOT produce a double slash.
     app = _make_app(conn, auth_conn, dashboard_public_url="https://jobs.heylark.dev/")
     with TestClient(app) as c:
-        r = c.get("/login")
-        assert r.status_code == 200
-        assert 'data-auth-url="https://jobs.heylark.dev/auth/callback"' in r.text
-        assert "heylark.dev//auth/callback" not in r.text
+        r = c.get("/login", follow_redirects=False)
+        location = r.headers["location"]
+        assert "jobs.heylark.dev%2F%2F" not in location
+        assert "https%3A%2F%2Fjobs.heylark.dev%2F" in location
     app.dependency_overrides.clear()
 
 
-def test_login_page_relative_auth_url_when_public_url_unset(conn, auth_conn):
-    # Empty/unset DASHBOARD_PUBLIC_URL falls back to the relative callback
-    # (today's behavior; desktop resolves it against the page origin).
+def test_login_page_redirect_defaults_next_when_public_url_unset(conn, auth_conn):
+    # Empty/unset DASHBOARD_PUBLIC_URL falls back to the dashboard's own
+    # canonical host, so the SSO login still knows where to bounce back to.
     app = _make_app(conn, auth_conn, dashboard_public_url="")
     with TestClient(app) as c:
-        r = c.get("/login")
-        assert r.status_code == 200
-        assert 'data-auth-url="/auth/callback"' in r.text
-        assert "https://" not in r.text.split('data-auth-url="', 1)[1].split('"', 1)[0]
+        r = c.get("/login", follow_redirects=False)
+        location = r.headers["location"]
+        assert location.startswith("https://login.heylark.dev/?next=")
+        assert "https%3A%2F%2Fjobs.heylark.dev%2F" in location
     app.dependency_overrides.clear()
