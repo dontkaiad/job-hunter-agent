@@ -46,17 +46,18 @@ describe("dateText / stackText", () => {
 });
 
 describe("laneForStatus", () => {
-  it("maps statuses to the three lanes, null otherwise", () => {
+  it("maps statuses to their own lane, null otherwise", () => {
     expect(laneForStatus("surfaced")).toBe("surfaced");
     expect(laneForStatus("approved")).toBe("approved");
     expect(laneForStatus("researched")).toBe("approved");
     expect(laneForStatus("drafted")).toBe("approved");
     expect(laneForStatus("sent")).toBe("sent");
-    // Active post-send funnel rides the "sent" lane; terminals drop out.
-    expect(laneForStatus("screening")).toBe("sent");
-    expect(laneForStatus("interview")).toBe("sent");
-    expect(laneForStatus("offer")).toBe(null);
-    expect(laneForStatus("declined")).toBe(null);
+    // Each post-send funnel step gets its own lane, so stage is visible from
+    // which section a vacancy sits in.
+    expect(laneForStatus("screening")).toBe("screening");
+    expect(laneForStatus("interview")).toBe("interview");
+    expect(laneForStatus("offer")).toBe("offer");
+    expect(laneForStatus("declined")).toBe("declined");
     expect(laneForStatus("rejected")).toBe(null);
     expect(laneForStatus("backlog")).toBe(null);
   });
@@ -169,11 +170,18 @@ describe("scoreBand edge cases", () => {
 });
 
 describe("LANES titles", () => {
-  it("has exactly 3 lanes with correct Russian titles", () => {
-    expect(LANES).toHaveLength(3);
+  it("has one lane per pipeline stage, including the post-send funnel", () => {
+    expect(LANES).toHaveLength(7);
     expect(LANES[0]).toEqual({ key: "surfaced", title: "Ожидают решения" });
     expect(LANES[1]).toEqual({ key: "approved", title: "Одобрено" });
     expect(LANES[2]).toEqual({ key: "sent", title: "Отправлено" });
+    expect(LANES[3]).toEqual({
+      key: "screening",
+      title: "Ответили / скрининг",
+    });
+    expect(LANES[4]).toEqual({ key: "interview", title: "Собес" });
+    expect(LANES[5]).toEqual({ key: "offer", title: "Оффер 🎉" });
+    expect(LANES[6]).toEqual({ key: "declined", title: "Отклонено" });
   });
 });
 

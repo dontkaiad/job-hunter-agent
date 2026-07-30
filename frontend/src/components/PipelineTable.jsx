@@ -17,6 +17,7 @@ export default function PipelineTable({ items, selectedId, onSelect }) {
           <tr>
             <th>Score</th>
             <th>Вакансия</th>
+            <th>Компания</th>
             <th>Стек</th>
             <th>Зарплата</th>
             <th>Дата</th>
@@ -33,6 +34,7 @@ export default function PipelineTable({ items, selectedId, onSelect }) {
                 <ScoreDot score={it.score} />
               </td>
               <td className="cell-role">{it.role || "—"}</td>
+              <td className="cell-company">{it.company || "—"}</td>
               <td className="cell-stack" title={stackText(it.stack)}>
                 {stackText(it.stack)}
               </td>

@@ -8,10 +8,11 @@ import DetailPanel from "../components/DetailPanel.jsx";
 import AddByUrl from "../components/AddByUrl.jsx";
 
 // MAIN pipeline view: a hybrid kanban+table. Rows from GET /api/pipeline are
-// grouped into status LANES (Ожидают решения / Одобрено / Отправлено). Items in
-// other states only appear if a filter surfaces them (handled by an extra
-// "Прочее" group so they are never silently dropped from a filtered view).
-// Clicking a row opens the DetailPanel; an action there refreshes the list.
+// grouped into status LANES (Ожидают решения / Одобрено / Отправлено /
+// Ответили / Собес / Оффер / Отклонено). Items in other states only appear if
+// a filter surfaces them (handled by an extra "Прочее" group so they are
+// never silently dropped from a filtered view). Clicking a row opens the
+// DetailPanel; an action there refreshes the list.
 export default function PipelineView() {
   const { filters } = useFilters();
   const navigate = useNavigate();
@@ -134,7 +135,16 @@ export default function PipelineView() {
 }
 
 function groupByLane(items) {
-  const out = { surfaced: [], approved: [], sent: [], declined: [], other: [] };
+  const out = {
+    surfaced: [],
+    approved: [],
+    sent: [],
+    screening: [],
+    interview: [],
+    offer: [],
+    declined: [],
+    other: [],
+  };
   for (const it of items) {
     const lane = laneForStatus(it.status);
     if (lane) out[lane].push(it);

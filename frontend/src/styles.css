@@ -713,6 +713,13 @@ h1::before {
   font-weight: 500;
   color: var(--ink);
 }
+.cell-company {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
 .cell-stack {
   max-width: 220px;
   overflow: hidden;
@@ -1269,6 +1276,9 @@ h1::before {
   .pipeline-table th,
   .pipeline-table td {
     padding: 12px 12px; /* taller rows = easier tap targets */
+  }
+  .cell-company {
+    max-width: 110px;
   }
   .cell-stack {
     max-width: 160px;

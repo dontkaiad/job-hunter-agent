@@ -9,6 +9,7 @@ import {
   SENT,
   SCREENING,
   INTERVIEW,
+  OFFER,
 } from "./states.js";
 
 // Score band classification. The 50-59 BORDERLINE band is deliberately a
@@ -56,15 +57,18 @@ export function stackText(stack) {
 // Which lane an item belongs to based on its status. Items in any other state
 // (rejected/skipped/backlog/closed/discovered/...) return null and are not
 // shown in the lanes unless a filter surfaces them in a flat list.
+//
+// Each post-send funnel step (sent/screening/interview/offer) gets its OWN
+// lane so a vacancy's stage is visible from the section it sits in, rather
+// than all of them piling into one "sent" bucket.
 export function laneForStatus(status) {
   if (status === SURFACED) return "surfaced";
   if (status === APPROVED || status === RESEARCHED || status === DRAFTED)
     return "approved";
-  // The "sent" lane holds the whole ACTIVE post-send funnel so those items stay
-  // visible+clickable in the kanban (where the funnel buttons live). Terminal
-  // offer/closed drop out of the lanes, like rejected/skipped.
-  if (status === SENT || status === SCREENING || status === INTERVIEW)
-    return "sent";
+  if (status === SENT) return "sent";
+  if (status === SCREENING) return "screening";
+  if (status === INTERVIEW) return "interview";
+  if (status === OFFER) return "offer";
   if (status === "declined") return "declined";
   return null;
 }
@@ -74,6 +78,9 @@ export const LANES = [
   { key: "surfaced", title: "Ожидают решения" },
   { key: "approved", title: "Одобрено" },
   { key: "sent", title: "Отправлено" },
+  { key: "screening", title: "Ответили / скрининг" },
+  { key: "interview", title: "Собес" },
+  { key: "offer", title: "Оффер 🎉" },
   { key: "declined", title: "Отклонено" },
 ];
 
