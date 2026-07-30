@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api.js";
 import { useFilters } from "../state/FiltersContext.jsx";
@@ -7,12 +7,20 @@ import PipelineTable from "../components/PipelineTable.jsx";
 import DetailPanel from "../components/DetailPanel.jsx";
 import AddByUrl from "../components/AddByUrl.jsx";
 
-// MAIN pipeline view: a hybrid kanban+table. Rows from GET /api/pipeline are
-// grouped into status LANES (Ожидают решения / Одобрено / Отправлено /
-// Ответили / Собес / Оффер / Отклонено). Items in other states only appear if
-// a filter surfaces them (handled by an extra "Прочее" group so they are
-// never silently dropped from a filtered view). Clicking a row opens the
-// DetailPanel; an action there refreshes the list.
+// All lanes (+ the filter-only "other" bucket) start COLLAPSED: with the
+// funnel now split into 7 lanes, expanding everything by default buried the
+// at-a-glance "how many where" view the overview strip above exists to give.
+const ALL_COLLAPSED = Object.fromEntries(
+  [...LANES.map((l) => l.key), "other"].map((key) => [key, true])
+);
+
+// MAIN pipeline view: an overview strip (counts per stage, click to jump)
+// above a hybrid kanban+table. Rows from GET /api/pipeline are grouped into
+// status LANES (Ожидают решения / Одобрено / Отправлено / Ответили / Собес /
+// Оффер / Отклонено). Items in other states only appear if a filter surfaces
+// them (handled by an extra "Прочее" group so they are never silently dropped
+// from a filtered view). Clicking a row opens the DetailPanel; an action
+// there refreshes the list.
 export default function PipelineView() {
   const { filters } = useFilters();
   const navigate = useNavigate();
@@ -22,10 +30,21 @@ export default function PipelineView() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [collapsed, setCollapsed] = useState({ declined: true });
+  const [collapsed, setCollapsed] = useState(ALL_COLLAPSED);
+  const laneRefs = useRef({});
 
   const toggleLane = useCallback((key) => {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  // Overview pill click: always EXPAND (never toggle-closed from here — that
+  // would be surprising from a "jump to" control) and scroll the section
+  // into view.
+  const jumpToLane = useCallback((key) => {
+    setCollapsed((prev) => ({ ...prev, [key]: false }));
+    requestAnimationFrame(() => {
+      laneRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }, []);
 
   const fetchList = useCallback(async () => {
@@ -80,8 +99,38 @@ export default function PipelineView() {
         {loading && <div className="loading">Загрузка…</div>}
         {error && <div className="error">{error}</div>}
 
+        {/* Overview: every stage's count at a glance, without expanding
+            anything. Click a pill to open + jump to that section. */}
+        <div className="lane-overview">
+          {LANES.map((lane) => (
+            <button
+              key={lane.key}
+              type="button"
+              className="lane-pill"
+              onClick={() => jumpToLane(lane.key)}
+            >
+              <span className="lane-pill-title">{lane.title}</span>
+              <span className="lane-pill-count">{grouped[lane.key].length}</span>
+            </button>
+          ))}
+          {grouped.other.length > 0 && (
+            <button
+              type="button"
+              className="lane-pill"
+              onClick={() => jumpToLane("other")}
+            >
+              <span className="lane-pill-title">Прочее</span>
+              <span className="lane-pill-count">{grouped.other.length}</span>
+            </button>
+          )}
+        </div>
+
         {LANES.map((lane) => (
-          <section key={lane.key} className="lane">
+          <section
+            key={lane.key}
+            className="lane"
+            ref={(el) => (laneRefs.current[lane.key] = el)}
+          >
             <h2 className="lane-title" onClick={() => toggleLane(lane.key)}>
               <span className="lane-arrow">{collapsed[lane.key] ? "▸" : "▾"}</span>
               {lane.title}
@@ -106,7 +155,10 @@ export default function PipelineView() {
         ))}
 
         {grouped.other.length > 0 && (
-          <section className="lane">
+          <section
+            className="lane"
+            ref={(el) => (laneRefs.current.other = el)}
+          >
             <h2 className="lane-title" onClick={() => toggleLane("other")}>
               <span className="lane-arrow">{collapsed.other ? "▸" : "▾"}</span>
               Прочее (по фильтру)
