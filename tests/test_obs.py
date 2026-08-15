@@ -452,6 +452,26 @@ def test_staleness_threshold_boundary(conn, monkeypatch):
     assert len(sent) == 1
 
 
+def test_paused_harvest_does_not_alert_even_if_stale(conn, monkeypatch):
+    """A dashboard-paused harvest never fires the staleness alert, no matter how
+    old the last heartbeat is -- pausing is intentional, not a failure."""
+    sent = []
+
+    async def fake_send_log(text):
+        sent.append(text)
+
+    monkeypatch.setattr(tg_logger, "send_log", fake_send_log)
+
+    now = clock.now_utc()
+    store.set_last_harvest_at(conn, now - timedelta(hours=72))  # very stale
+    store.set_pipeline_paused(conn, True)
+
+    msg = asyncio.run(obs.check_harvest_staleness(conn, now=now))
+
+    assert sent == []
+    assert msg is None
+
+
 # ---------------------------------------------------------------------------
 # PART 2c: serve wires the SECOND (staleness) scheduler job
 # ---------------------------------------------------------------------------

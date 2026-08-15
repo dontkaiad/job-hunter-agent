@@ -156,3 +156,34 @@ def test_list_pipeline_no_scores_unchanged_when_band_none(conn):
     _seed_scored(conn, None, 2)
     items = store.list_pipeline(conn)
     assert len(items) == 2
+
+
+# --- Harvest pause switch (pipeline_control) --------------------------------
+
+
+def test_pipeline_pause_state_default_not_paused(conn):
+    # No row yet (never toggled) -> not paused, changed_at=None.
+    paused, changed_at = store.get_pipeline_pause_state(conn)
+    assert paused is False
+    assert changed_at is None
+
+
+def test_set_pipeline_paused_true_then_read_back(conn):
+    store.set_pipeline_paused(conn, True)
+    paused, changed_at = store.get_pipeline_pause_state(conn)
+    assert paused is True
+    assert changed_at is not None
+    assert changed_at.tzinfo is not None
+
+
+def test_set_pipeline_paused_toggle_updates_changed_at(conn):
+    store.set_pipeline_paused(conn, True)
+    _, first_changed_at = store.get_pipeline_pause_state(conn)
+
+    store.set_pipeline_paused(conn, False)
+    paused, second_changed_at = store.get_pipeline_pause_state(conn)
+
+    assert paused is False
+    assert second_changed_at is not None
+    # A fresh UPSERT always rewrites changed_at, even resuming after a pause.
+    assert second_changed_at >= first_changed_at

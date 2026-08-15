@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, List, Mapping, Optional
+from typing import Any, List, Mapping, Optional, Tuple
 
 import psycopg
 from psycopg.rows import dict_row
@@ -608,3 +608,63 @@ def get_last_harvest_at(conn: psycopg.Connection) -> Optional[datetime]:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+# --- Harvest pause switch (pipeline_control) ---------------------------------
+#
+# Additive, OBSERVABILITY/CONTROL-ONLY helpers. They write the SEPARATE
+# pipeline_control table, never work_items -- so they do NOT violate the rule
+# that pipeline.advance is the sole writer of work_items state. Mirrors the
+# ops_heartbeat single-row-per-name pattern above.
+
+_HARVEST_CONTROL_NAME = "harvest"
+
+
+def set_pipeline_paused(
+    conn: psycopg.Connection, paused: bool, commit: bool = True
+) -> None:
+    """UPSERT the harvest pause switch (name='harvest') to ``paused``.
+
+    ``changed_at`` records when the row was touched (UTC ISO-8601), so the
+    dashboard can show "paused since <date>" / "active since <date>". Control
+    write only; advance() remains the sole work_items writer.
+    """
+    ts = now_iso()
+    conn.execute(
+        """
+        INSERT INTO pipeline_control (name, paused, changed_at)
+        VALUES (%s, %s, %s)
+        ON CONFLICT(name) DO UPDATE SET
+            paused = excluded.paused,
+            changed_at = excluded.changed_at
+        """,
+        (_HARVEST_CONTROL_NAME, paused, ts),
+    )
+    if commit:
+        conn.commit()
+
+
+def get_pipeline_pause_state(
+    conn: psycopg.Connection,
+) -> Tuple[bool, Optional[datetime]]:
+    """Return (paused, changed_at) for the harvest pause switch.
+
+    No row (never toggled) means NOT paused, with changed_at=None -- the
+    default, pre-toggle state.
+    """
+    row = conn.execute(
+        "SELECT paused, changed_at FROM pipeline_control WHERE name = %s",
+        (_HARVEST_CONTROL_NAME,),
+    ).fetchone()
+    if row is None:
+        return False, None
+    changed_at: Optional[datetime]
+    try:
+        changed_at = datetime.fromisoformat(row["changed_at"])
+    except (ValueError, TypeError):
+        changed_at = None
+    if changed_at is not None:
+        if changed_at.tzinfo is None:
+            changed_at = changed_at.replace(tzinfo=timezone.utc)
+        changed_at = changed_at.astimezone(timezone.utc)
+    return bool(row["paused"]), changed_at

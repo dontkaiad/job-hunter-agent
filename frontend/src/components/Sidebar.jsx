@@ -1,6 +1,7 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import Filters from "./Filters.jsx";
+import HarvestSwitch from "./HarvestSwitch.jsx";
 import { useFilters } from "../state/FiltersContext.jsx";
 
 // Avatar is an OPTIONAL local-only asset. import.meta.glob tolerates ZERO
@@ -64,6 +65,8 @@ export default function Sidebar() {
           </NavLink>
         </div>
       </section>
+
+      <HarvestSwitch />
 
       <nav className="nav">
         <NavLink to="/" end className="nav-link">

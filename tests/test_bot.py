@@ -1852,3 +1852,109 @@ def test_borderline_reason_bullet_only_period_is_skipped():
     assert reason == "реальная причина", (
         f"Period-only bullet must be skipped; got {reason!r}"
     )
+
+
+# --- notify_pause_toggle_sync -------------------------------------------------
+
+
+class _FakeHttpxResponse:
+    def raise_for_status(self):
+        pass
+
+
+class _FakeHttpxClient:
+    """Records every POST; swap in via monkeypatch.setattr(httpx, "Client", ...)."""
+
+    calls: list = []
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def post(self, url, json=None):
+        _FakeHttpxClient.calls.append((url, json))
+        return _FakeHttpxResponse()
+
+
+def _install_fake_httpx_client(monkeypatch):
+    import httpx
+
+    _FakeHttpxClient.calls = []
+    monkeypatch.setattr(httpx, "Client", _FakeHttpxClient)
+    return _FakeHttpxClient
+
+
+def test_notify_pause_toggle_sync_noop_without_bot_config(monkeypatch):
+    """No bot_token/notify_chat_id -> no network call at all (graceful degradation,
+    same contract as tg_logger.send_log)."""
+    fake = _install_fake_httpx_client(monkeypatch)
+    cfg = Config(bot_token=None, notify_chat_id=None, anthropic_api_key=None, allowed_user_ids=set())
+
+    bot.notify_pause_toggle_sync(cfg, True, None)
+
+    assert fake.calls == []
+
+
+def test_notify_pause_toggle_sync_paused_sends_date(monkeypatch):
+    from datetime import datetime, timezone
+
+    fake = _install_fake_httpx_client(monkeypatch)
+    cfg = _cfg()
+    changed_at = datetime(2026, 8, 15, 12, 30, tzinfo=timezone.utc)
+
+    bot.notify_pause_toggle_sync(cfg, True, changed_at)
+
+    assert len(fake.calls) == 1
+    url, payload = fake.calls[0]
+    assert url == f"https://api.telegram.org/bot{cfg.bot_token}/sendMessage"
+    assert payload["chat_id"] == cfg.notify_chat_id
+    assert "приостановлен" in payload["text"]
+    assert "2026-08-15 12:30 UTC" in payload["text"]
+
+
+def test_notify_pause_toggle_sync_resumed_mentions_next_harvest_hour(monkeypatch):
+    from datetime import datetime, timezone
+
+    from job_hunter import serve
+
+    fake = _install_fake_httpx_client(monkeypatch)
+    cfg = _cfg()
+    changed_at = datetime(2026, 8, 16, 9, 0, tzinfo=timezone.utc)
+
+    bot.notify_pause_toggle_sync(cfg, False, changed_at)
+
+    assert len(fake.calls) == 1
+    _, payload = fake.calls[0]
+    assert "возобновлён" in payload["text"]
+    assert f"{serve.HARVEST_HOUR:02d}:{serve.HARVEST_MINUTE:02d}" in payload["text"]
+
+
+def test_notify_pause_toggle_sync_never_raises_on_send_failure(monkeypatch):
+    """A network/Telegram failure must not propagate — the toggle endpoint
+    itself must not 500 just because the notify ping failed."""
+
+    class RaisingClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None):
+            raise RuntimeError("network is down")
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "Client", RaisingClient)
+    cfg = _cfg()
+
+    # Must not raise.
+    bot.notify_pause_toggle_sync(cfg, True, None)

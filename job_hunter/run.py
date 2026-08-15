@@ -83,6 +83,16 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
 
     Returns the list of item ids that were successfully delivered.
     """
+    # 0) Pause switch (dashboard-toggled, store.pipeline_control). Paused means
+    # NO ingest, NO processing, NO notify -- a full no-op for this run. This is
+    # checked BEFORE ingest so a paused harvest makes zero outbound network
+    # calls (no Telegram/Jobicy/etc. fetch), not just zero DB writes.
+    paused, changed_at = store.get_pipeline_pause_state(conn)
+    if paused:
+        since = changed_at.isoformat() if changed_at else "unknown"
+        print(f"[harvest] paused since {since} -- skipping ingest/process/notify")
+        return []
+
     # 1) Ingest new posts (web by default; telethon when INGEST_MODE=telethon).
     new_ids: List[int] = await ingest(cfg, conn)
     print(f"[harvest] ingested {len(new_ids)} new items (mode={cfg.ingest_mode})")

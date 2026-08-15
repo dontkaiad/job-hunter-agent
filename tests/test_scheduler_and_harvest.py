@@ -186,6 +186,71 @@ def test_run_harvest_runs_ingest_score_notify(monkeypatch, pg_dsn):
     assert sorted(sent) == sorted(scored_ids)
 
 
+def test_run_harvest_paused_skips_ingest_gate_and_notify(monkeypatch, pg_dsn):
+    """When store.pipeline_control says paused, run.harvest must no-op BEFORE
+    ingest: no fetch, no run_to_gate, no notify, empty result — the dashboard
+    pause switch is a full stop, not a "processed nothing new" run."""
+    conn = store.connect(pg_dsn)
+    store.init_db(conn)
+    store.set_pipeline_paused(conn, True)
+
+    events = {"ingest": 0, "gate": 0, "notify": 0}
+
+    async def fake_ingest(cfg, c):
+        events["ingest"] += 1
+        return []
+
+    monkeypatch.setattr(run, "ingest", fake_ingest)
+
+    def fake_run_to_gate(conn, item_id, deps=None, **k):
+        events["gate"] += 1
+        return []
+
+    monkeypatch.setattr(run.pipeline, "run_to_gate", fake_run_to_gate)
+
+    class FakeBot:
+        async def notify_surfaced(self, item_id):
+            events["notify"] += 1
+
+        async def notify_text(self, text):
+            events["notify"] += 1
+
+    cfg = _cfg(database_url=pg_dsn)
+
+    sent = asyncio.run(run.harvest(cfg, conn, FakeBot(), object()))
+    conn.close()
+
+    assert sent == []
+    assert events == {"ingest": 0, "gate": 0, "notify": 0}
+
+
+def test_run_harvest_not_paused_runs_normally(monkeypatch, pg_dsn):
+    """Sanity counterpart: the default (never-toggled) state is NOT paused, so
+    harvest proceeds as before (pipeline_control has no row yet)."""
+    conn = store.connect(pg_dsn)
+    store.init_db(conn)
+
+    events = {"ingest": 0}
+
+    async def fake_ingest(cfg, c):
+        events["ingest"] += 1
+        return []
+
+    monkeypatch.setattr(run, "ingest", fake_ingest)
+    monkeypatch.setattr(run.pipeline, "run_to_gate", lambda *a, **k: [])
+
+    class FakeBot:
+        async def notify_text(self, text):
+            pass
+
+    cfg = _cfg(database_url=pg_dsn)
+    sent = asyncio.run(run.harvest(cfg, conn, FakeBot(), object()))
+    conn.close()
+
+    assert sent == []
+    assert events["ingest"] == 1
+
+
 def test_run_main_one_shot_uses_shared_harvest(monkeypatch, pg_dsn):
     """run.main's one-shot path drives the SAME run.harvest callable that the
     scheduled job uses -> manual one-shot == scheduled harvest logic."""

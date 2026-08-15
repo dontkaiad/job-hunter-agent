@@ -815,3 +815,82 @@ def test_filter_q_single_space_is_sane(client, conn):
     assert len(resp.json()) == 2, (
         "whitespace-only q should be stripped and treated as absent (return all)"
     )
+
+
+# --- pipeline pause switch (GET/POST /api/pipeline-status) ------------------
+
+
+def test_pipeline_status_default_not_paused(client, conn):
+    resp = client.get("/api/pipeline-status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"paused": False, "changed_at": None}
+
+
+def test_pipeline_status_post_pauses_and_records_changed_at(client, conn):
+    resp = client.post("/api/pipeline-status", json={"paused": True})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["paused"] is True
+    assert body["changed_at"] is not None
+
+    # GET reflects the same state.
+    resp2 = client.get("/api/pipeline-status")
+    assert resp2.json() == body
+
+
+def test_pipeline_status_post_resumes(client, conn):
+    client.post("/api/pipeline-status", json={"paused": True})
+    resp = client.post("/api/pipeline-status", json={"paused": False})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["paused"] is False
+    assert body["changed_at"] is not None
+
+
+def test_pipeline_status_post_notifies_bot_on_actual_flip(client, conn, monkeypatch):
+    """POST that changes the paused value must ping the operator's bot chat
+    (job_hunter.bot.notify_pause_toggle_sync), with the same paused/changed_at
+    the response carries."""
+    from job_hunter import bot as bot_mod
+
+    calls = []
+    monkeypatch.setattr(
+        bot_mod, "notify_pause_toggle_sync",
+        lambda cfg, paused, changed_at: calls.append((paused, changed_at)),
+    )
+
+    resp = client.post("/api/pipeline-status", json={"paused": True})
+    assert resp.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][0] is True
+    assert calls[0][1] is not None
+
+
+def test_pipeline_status_post_same_value_does_not_renotify(client, conn, monkeypatch):
+    """POSTing the SAME paused value twice must notify only on the first,
+    actual flip -- not on a redundant repeat."""
+    from job_hunter import bot as bot_mod
+
+    calls = []
+    monkeypatch.setattr(
+        bot_mod, "notify_pause_toggle_sync",
+        lambda cfg, paused, changed_at: calls.append(paused),
+    )
+
+    client.post("/api/pipeline-status", json={"paused": True})
+    client.post("/api/pipeline-status", json={"paused": True})  # redundant repeat
+
+    assert calls == [True]
+
+
+def test_pipeline_status_requires_auth(conn, auth_conn):
+    # No session cookie -> 401 (same gate as the other /api routes).
+    app = webapi.create_app()
+    app.dependency_overrides[webapi.get_conn] = lambda: conn
+    app.dependency_overrides[webapi.get_fx] = lambda: FakeFx()
+    apply_auth_overrides(app, auth_conn)
+    with TestClient(app) as c:
+        resp = c.get("/api/pipeline-status")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 401

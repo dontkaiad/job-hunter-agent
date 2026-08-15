@@ -83,3 +83,17 @@ CREATE TABLE IF NOT EXISTS ops_heartbeat (
     last_at    TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- Harvest pause switch (NOT pipeline state). A single row, name='harvest',
+-- toggled from the dashboard. When paused=true, run.harvest short-circuits
+-- BEFORE ingest (no new posts fetched, no items processed, no notify) and
+-- returns immediately -- the scheduled daily job and the one-shot `python -m
+-- job_hunter.run` both honour it, since both call the same run.harvest. This
+-- table is SEPARATE from work_items and does NOT participate in the state
+-- machine (advance() remains the sole work_items writer). changed_at is a UTC
+-- ISO-8601 string, matching the schema's datetime convention.
+CREATE TABLE IF NOT EXISTS pipeline_control (
+    name       TEXT PRIMARY KEY,
+    paused     BOOLEAN NOT NULL DEFAULT FALSE,
+    changed_at TEXT NOT NULL
+);

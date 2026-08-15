@@ -1281,6 +1281,60 @@ async def notify(bot: "JobHunterBot", item_ids: List[int]) -> List[int]:
     return sent
 
 
+def notify_pause_toggle_sync(cfg: Config, paused: bool, changed_at) -> None:
+    """Best-effort ping to the operator's bot chat when the harvest pause
+    switch flips (dashboard POST /api/pipeline-status).
+
+    SYNC + raw Bot API HTTP (httpx, no aiogram Bot/event loop) — deliberately
+    NOT a JobHunterBot method: the dashboard's FastAPI routes are sync and run
+    in a SEPARATE container/process from the polling bot (see
+    docker-compose.yml: `dashboard` vs `job-hunter` services), so there is no
+    live JobHunterBot instance to call notify_text on from here. Mirrors
+    tg_logger's raw-HTTP-call pattern, but targets the OPERATOR chat
+    (cfg.bot_token / cfg.notify_chat_id), not the ops channel.
+
+    NEVER raises: an unconfigured or failed send must not break the toggle
+    itself (same graceful-degradation contract as tg_logger.send_log).
+    """
+    import httpx
+
+    if not cfg.bot_token or not cfg.notify_chat_id:
+        return
+
+    when = changed_at.strftime("%Y-%m-%d %H:%M UTC") if changed_at else "неизвестно когда"
+    if paused:
+        text = (
+            f"⏸ Поиск вакансий приостановлен с {when}.\n"
+            f"Харвест и LLM-вызовы не выполняются, пока не включишь обратно "
+            f"в дашборде."
+        )
+    else:
+        # Local import: serve.py imports FROM bot.py at module load
+        # (`from .bot import JobHunterBot, build_deps`), so a top-level
+        # `from . import serve` here would be a circular import. Deferred to
+        # call time, when both modules are already fully loaded.
+        from . import serve
+
+        text = (
+            f"▶️ Поиск вакансий возобновлён с {when}.\n"
+            f"Следующий сбор — по расписанию, в "
+            f"{serve.HARVEST_HOUR:02d}:{serve.HARVEST_MINUTE:02d} (не сразу)."
+        )
+
+    url = f"https://api.telegram.org/bot{cfg.bot_token}/sendMessage"
+    payload = {
+        "chat_id": cfg.notify_chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(url, json=payload)
+            resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 — must never crash the toggle endpoint
+        print(f"[pipeline-status] failed to notify operator: {exc!r}")
+
+
 def build_deps(cfg: Config) -> Deps:
     """Construct live Deps (LLM client + FX) from config."""
     llm_client = None

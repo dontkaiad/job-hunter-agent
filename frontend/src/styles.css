@@ -333,6 +333,100 @@ h1::before {
   position: relative;
 }
 
+/* harvest pause switch (GET/POST /api/pipeline-status) */
+.harvest-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 18px;
+  background: var(--panel-2);
+  position: relative;
+}
+.harvest-switch-loading,
+.harvest-switch-error {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  padding: 10px 12px;
+  margin-bottom: 18px;
+}
+.harvest-switch-toggle {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 19px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: var(--inset);
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.harvest-switch-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.harvest-switch-knob {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  transition: transform 0.15s, background 0.15s;
+}
+.is-active .harvest-switch-toggle {
+  background: var(--teal-deep);
+  border-color: var(--teal-dim);
+}
+.is-active .harvest-switch-knob {
+  background: var(--teal-bri);
+  transform: translateX(15px);
+}
+.is-paused .harvest-switch-toggle {
+  background: var(--ox-deep);
+  border-color: var(--ox);
+}
+.is-paused .harvest-switch-knob {
+  background: var(--ox-bri);
+  transform: translateX(0);
+}
+.harvest-switch-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.harvest-switch-label {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.is-active .harvest-switch-label {
+  color: var(--teal-bri);
+}
+.is-paused .harvest-switch-label {
+  color: var(--ox-bri);
+}
+.harvest-switch-since {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+.harvest-switch-inline-error {
+  position: absolute;
+  bottom: -16px;
+  left: 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ox-bri);
+}
+
 /* nav */
 .nav {
   display: flex;

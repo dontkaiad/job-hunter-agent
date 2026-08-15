@@ -163,6 +163,18 @@ class AddResult(BaseModel):
     duplicate: bool = False
 
 
+class PipelineStatus(BaseModel):
+    """GET/POST /api/pipeline-status. ``changed_at`` is None only pre-toggle
+    (the switch has never been touched, i.e. still at its paused=false default)."""
+
+    paused: bool
+    changed_at: Optional[str] = None
+
+
+class SetPipelineStatusBody(BaseModel):
+    paused: bool
+
+
 # --- Salary display (reuse the bot's FX + format helper) --------------------
 
 
@@ -962,6 +974,48 @@ def get_competencies(
         "entries": sync["matched"],
         "gap_candidates": sync["gap_candidates"][:20],
     }
+
+
+# --- Pipeline pause switch ---------------------------------------------------
+#
+# GET/POST /api/pipeline-status — dashboard toggle for pausing the daily
+# harvest (run.harvest short-circuits before ingest when paused; see
+# store.pipeline_control / store.get_pipeline_pause_state). Read on `router`,
+# write on `writer_router`, same auth as every other route in each.
+
+
+@router.get("/pipeline-status", response_model=PipelineStatus)
+def get_pipeline_status(
+    conn: psycopg.Connection = Depends(get_conn),
+) -> PipelineStatus:
+    paused, changed_at = store.get_pipeline_pause_state(conn)
+    return PipelineStatus(
+        paused=paused,
+        changed_at=changed_at.isoformat() if changed_at else None,
+    )
+
+
+@writer_router.post("/pipeline-status", response_model=PipelineStatus)
+def set_pipeline_status(
+    body: SetPipelineStatusBody,
+    conn: psycopg.Connection = Depends(get_conn),
+    config: Config = Depends(get_config),
+) -> PipelineStatus:
+    was_paused, _ = store.get_pipeline_pause_state(conn)
+    store.set_pipeline_paused(conn, body.paused)
+    paused, changed_at = store.get_pipeline_pause_state(conn)
+
+    # Only ping the bot chat on an ACTUAL flip, not a redundant same-value POST
+    # (e.g. a double-click racing two requests to the same target state).
+    if paused != was_paused:
+        from .bot import notify_pause_toggle_sync
+
+        notify_pause_toggle_sync(config, paused, changed_at)
+
+    return PipelineStatus(
+        paused=paused,
+        changed_at=changed_at.isoformat() if changed_at else None,
+    )
 
 
 # --- Public auth routes (issue #5): NOT gated -------------------------------

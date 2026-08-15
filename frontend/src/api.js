@@ -4,6 +4,8 @@
 //   GET  /api/items/:id
 //   POST /api/items/:id/{approve|backlog|skip|sent|draft}
 //   POST /api/items/:id/{screening|interview|offer|decline|close}  (funnel)
+//   GET  /api/pipeline-status
+//   POST /api/pipeline-status
 //
 // AUTH: the SPA assumes an existing .heylark.dev Telegram-login session cookie
 // (hl_session). Cookies are same-origin so they ride along automatically with
@@ -125,6 +127,21 @@ export const api = {
       method: "POST",
       headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
+    });
+  },
+
+  // Harvest pause switch: GET returns { paused, changed_at }. changed_at is
+  // an ISO-8601 UTC string, or null if the switch has never been toggled.
+  // POST sets it and returns the same shape.
+  getPipelineStatus() {
+    return request("/api/pipeline-status");
+  },
+
+  setPipelineStatus(paused) {
+    return request("/api/pipeline-status", {
+      method: "POST",
+      headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ paused }),
     });
   },
 };

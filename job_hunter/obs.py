@@ -262,6 +262,10 @@ async def check_harvest_staleness(
     - If there is NO heartbeat row yet (fresh deploy, no harvest has completed),
       we do NOT alert and return None — there is no baseline to compare against,
       so alerting would be a deploy-time false positive.
+    - If the harvest is PAUSED (store.pipeline_control, dashboard-toggled), we
+      do NOT alert and return None — a paused harvest not running is expected,
+      not a failure; the whole point of the pause switch is to stop the job
+      search intentionally without triggering the failure-alerting path.
     - If the last harvest is OLDER than ``stale_after_hours``, send the LOUD ops
       alert via ``tg_logger.send_log`` and return the sent message.
     - Otherwise return None (fresh enough).
@@ -270,6 +274,10 @@ async def check_harvest_staleness(
     advance(). It reads the ops heartbeat table via store.get_last_harvest_at.
     """
     from . import store  # local import: avoid import cycle at module load
+
+    paused, _changed_at = store.get_pipeline_pause_state(conn)
+    if paused:
+        return None
 
     current = now if now is not None else now_utc()
     last = store.get_last_harvest_at(conn)
