@@ -74,13 +74,22 @@ describe("actionsForStatus", () => {
       "approve",
       "skip",
     ]);
+    // approved/researched fork: generate a draft, OR skip straight to sent
+    // (T27/T28) when the vacancy doesn't need a cover letter — plus decline.
     expect(actionsForStatus("approved").map((a) => a.action)).toEqual([
       "draft",
+      "sent",
+      "decline",
     ]);
     expect(actionsForStatus("researched").map((a) => a.action)).toEqual([
       "draft",
+      "sent",
+      "decline",
     ]);
-    expect(actionsForStatus("drafted").map((a) => a.action)).toEqual(["sent"]);
+    expect(actionsForStatus("drafted").map((a) => a.action)).toEqual([
+      "sent",
+      "decline",
+    ]);
     // Post-send funnel (mirrors states.py T13..T21).
     expect(actionsForStatus("sent").map((a) => a.action)).toEqual([
       "screening",
@@ -195,12 +204,19 @@ describe("actionsForStatus — match backend transitions", () => {
     ]);
   });
 
-  it("rejected/skipped/closed/offer/declined return empty (terminal states)", () => {
-    expect(actionsForStatus("rejected")).toEqual([]);
+  it("skipped/closed/offer return empty (actually terminal states)", () => {
     expect(actionsForStatus("skipped")).toEqual([]);
     expect(actionsForStatus("closed")).toEqual([]);
     expect(actionsForStatus("offer")).toEqual([]);
-    expect(actionsForStatus("declined")).toEqual([]);
+  });
+
+  it("rejected/declined are re-approvable (T25/T26), not terminal", () => {
+    expect(actionsForStatus("rejected").map((a) => a.action)).toEqual([
+      "approve",
+    ]);
+    expect(actionsForStatus("declined").map((a) => a.action)).toEqual([
+      "approve",
+    ]);
   });
 
   it("offer is only reachable after interview (not from sent/screening)", () => {
@@ -211,9 +227,9 @@ describe("actionsForStatus — match backend transitions", () => {
     expect(actionsForStatus("interview").map((a) => a.action)).toContain("offer");
   });
 
-  it("drafted returns only [sent] (T12 drafted->sent is the sole HITL from drafted)", () => {
+  it("drafted returns [sent, decline] (T12 drafted->sent, T24 drafted->declined)", () => {
     const actions = actionsForStatus("drafted").map((a) => a.action);
-    expect(actions).toEqual(["sent"]);
+    expect(actions).toEqual(["sent", "decline"]);
   });
 
   it("backlog has no 'backlog' action (cannot self-loop)", () => {

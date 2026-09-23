@@ -557,7 +557,9 @@ def get_item_detail(
 #   approve  -> «✅» -> DECISION_APPROVE -> T7 surfaced->approved / T8 backlog->approved
 #   skip     -> «⏭️» -> DECISION_SKIP    -> T5 surfaced->skipped  / T9 backlog->skipped
 #   backlog  -> «📥» -> DECISION_BACKLOG -> T6 surfaced->backlog
-#   sent     -> «✅ Отправила» -> DECISION_SEND -> T12 drafted->sent
+#   sent     -> «✅ Отправила» -> DECISION_SEND -> T12 drafted->sent, OR
+#               T27 approved->sent / T28 researched->sent when no отклик was
+#               generated (not every vacancy needs a cover letter).
 #   draft    -> (no single button) run_to_gate -> T10 approved->researched,
 #               T11 researched->drafted (the SAME chain the bot fires after a
 #               successful approve).
@@ -698,7 +700,8 @@ def sent_item(
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
 ) -> ItemDetail:
-    """DECISION_SEND: T12 drafted->sent (the bot's «✅ Отправила» manual-confirm)."""
+    """DECISION_SEND: T12 drafted->sent, or T27/T28 approved/researched->sent
+    when no отклик was generated (the bot's «✅ Отправила» manual-confirm)."""
     return _apply_decision(conn, item_id, DECISION_SEND, fx, deps)
 
 

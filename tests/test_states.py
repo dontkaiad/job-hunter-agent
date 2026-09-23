@@ -71,10 +71,16 @@ def test_post_send_funnel_transitions():
         assert t.kind == S.KIND_HITL
 
 
-def test_offer_and_declined_are_terminal():
-    for term in (S.OFFER, S.DECLINED):
-        assert S.is_terminal(term)
-        assert S.allowed_transitions(term) == []
+def test_offer_is_terminal():
+    assert S.is_terminal(S.OFFER)
+    assert S.allowed_transitions(S.OFFER) == []
+
+
+def test_declined_is_not_terminal_reapprovable_via_T25():
+    """DECLINED is deliberately re-approvable (T25) — see the comment on
+    DECLINED in states.py. It must NOT be in TERMINAL_STATES."""
+    assert not S.is_terminal(S.DECLINED)
+    assert S.transition_for_decision(S.DECLINED, S.DECISION_APPROVE).to_state == S.APPROVED
 
 
 def test_declined_is_distinct_from_scoring_rejected():
@@ -93,7 +99,17 @@ def test_offer_not_reachable_before_interview():
 
 
 def test_expected_edge_count():
-    # T1..T21 exactly (T13..T21 are the post-send response funnel).
-    assert len(S.TRANSITIONS) == 21
+    # T1..T28: T13..T21 are the post-send response funnel; T22..T26 are the
+    # pre-send decline/re-approve edges; T27..T28 let approved/researched
+    # skip straight to sent when no отклик is generated.
+    assert len(S.TRANSITIONS) == 28
     names = {t.name for t in S.TRANSITIONS}
-    assert names == {f"T{i}" for i in range(1, 22)}
+    assert names == {f"T{i}" for i in range(1, 29)}
+
+
+def test_approved_and_researched_can_skip_draft_to_sent():
+    """T27/T28: not every vacancy needs a generated отклик."""
+    t27 = S.transition_for_decision(S.APPROVED, S.DECISION_SEND)
+    assert t27 is not None and t27.to_state == S.SENT and t27.name == "T27"
+    t28 = S.transition_for_decision(S.RESEARCHED, S.DECISION_SEND)
+    assert t28 is not None and t28.to_state == S.SENT and t28.name == "T28"

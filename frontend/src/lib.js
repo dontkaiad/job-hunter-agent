@@ -101,8 +101,12 @@ export function actionsForStatus(status) {
       ];
     case APPROVED:
     case RESEARCHED:
+      // Not every vacancy needs a generated cover letter — some are applied
+      // to with just a form/resume. Fork here: generate a draft (T10/T11
+      // chain, then T12 send) or skip straight to sent (T27/T28).
       return [
         { action: "draft", label: "Сгенерировать отклик" },
+        { action: "sent", label: "Отправлено" },
         { action: "decline", label: "Отклонить", needsReason: true },
       ];
     case DRAFTED:

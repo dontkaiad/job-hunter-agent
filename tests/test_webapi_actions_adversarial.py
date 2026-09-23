@@ -6,7 +6,7 @@ Added by the Tester role. Tests are additive only — no production code changed
 Gaps addressed:
   1. Twin-item state_transitions equivalence: kind/actor/from_state/to_state must match.
   2. Draft from non-approved/researched states -> 409 (backlog, sent, skipped).
-  3. sent on approved (not drafted) -> 409, item state unchanged.
+  3. sent on backlog (not yet approved) -> 409, item state unchanged.
   4. skip on sent -> 409, item state unchanged.
   5. Persistence via SEPARATE connection for /sent (spec requires approve AND sent).
   6. Auth gate: overriding require_writer to HTTPException(401) blocks all 5 writes
@@ -35,6 +35,7 @@ from job_hunter.states import (
     DECISION_SEND,
     DECISION_SKIP,
     DRAFTED,
+    RESEARCHED,
     SENT,
     SKIPPED,
     SURFACED,
@@ -185,16 +186,33 @@ def test_draft_from_invalid_state_409(client, conn, bad_state):
 
 
 # ---------------------------------------------------------------------------
-# 3. sent on approved (not drafted) -> 409, state unchanged
+# 3. sent on backlog (not yet approved) -> 409, state unchanged
 # ---------------------------------------------------------------------------
 
 
-def test_sent_on_approved_409_state_unchanged(client, conn):
-    """POST /sent on an approved (not yet drafted) item must 409; item stays approved."""
-    item_id = _seed(conn, state=APPROVED)
+def test_sent_on_backlog_409_state_unchanged(client, conn):
+    """POST /sent on a backlog item (not yet approved) must 409; item stays backlog."""
+    item_id = _seed(conn, state=BACKLOG)
     resp = client.post(f"/api/items/{item_id}/sent")
     assert resp.status_code == 409
-    assert store.get_item(conn, item_id).state == APPROVED  # no partial write
+    assert store.get_item(conn, item_id).state == BACKLOG  # no partial write
+
+
+def test_sent_on_approved_skips_draft_T27(client, conn):
+    """T27: not every vacancy needs a generated отклик — POST /sent directly
+    from approved (no draft) must now succeed, skipping researched/drafted."""
+    item_id = _seed(conn, state=APPROVED)
+    resp = client.post(f"/api/items/{item_id}/sent")
+    assert resp.status_code == 200
+    assert store.get_item(conn, item_id).state == SENT
+
+
+def test_sent_on_researched_skips_draft_T28(client, conn):
+    """T28: same fork, but from researched (research ran, draft didn't)."""
+    item_id = _seed(conn, state=RESEARCHED)
+    resp = client.post(f"/api/items/{item_id}/sent")
+    assert resp.status_code == 200
+    assert store.get_item(conn, item_id).state == SENT
 
 
 # ---------------------------------------------------------------------------

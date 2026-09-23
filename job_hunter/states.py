@@ -101,6 +101,12 @@ TRANSITIONS: List[Transition] = [
     Transition("T25", DECLINED, APPROVED, KIND_HITL, DECISION_APPROVE),
     # Override a system-rejected (salary guard / T3) vacancy manually.
     Transition("T26", REJECTED, APPROVED, KIND_HITL, DECISION_APPROVE),
+    # Not every vacancy needs a generated отклик (draft cover letter) — some
+    # applications are submitted with just a form/resume, no letter. These let
+    # the operator mark "sent" straight from approved/researched, skipping the
+    # draft step, instead of forcing every item through T10->T11->T12.
+    Transition("T27", APPROVED, SENT, KIND_HITL, DECISION_SEND),
+    Transition("T28", RESEARCHED, SENT, KIND_HITL, DECISION_SEND),
 ]
 
 # Index: from_state -> list of outgoing transitions.
