@@ -272,6 +272,18 @@ EXTRACT_SYSTEM = (
     "remote = true (hybrid includes remote work) AND append '(гибрид)' to the "
     "location field to record the hybrid nuance.\n"
     "- remote = null only when NOTHING indicates a work format.\n"
+    "REMOTE LOCATION RESTRICTION: set remote_location_restricted = true ONLY "
+    "when the post explicitly requires a remote candidate to ALREADY reside "
+    "in, hold citizenship of, or already have the legal right to work in a "
+    "specific country or region -- e.g. 'must be EU-based', 'US work "
+    "authorization required', 'only considering candidates located in the "
+    "UK', 'не рассматриваем кандидатов за пределами ЕС', 'must currently "
+    "reside in [country]' -- AND the post does NOT also explicitly offer "
+    "relocation / visa sponsorship to get that right (if it does, this stays "
+    "false/null -- a sponsored posting is not a dead end). A SOFT ask like a "
+    "timezone-overlap preference ('CET +/-3h', 'EU timezone preferred') or a "
+    "simple 'remote' with no residency wording is NOT a restriction -> leave "
+    "false/null. null = cannot tell either way.\n"
     "- LOCATION from hashtags: #Москва/#Moscow -> 'Москва'; #СПб/#Питер/#SPb -> "
     "'Санкт-Петербург'; #Регионы -> 'Регионы'. Set the location field.\n"
     "- SENIORITY from hashtags: #junior/#джун -> junior; #middle/#миддл -> "
@@ -301,6 +313,7 @@ def build_extract_prompt(raw_text: str, source_channel: str, source_link: Option
         "currency": "ISO code like RUB/USD/EUR or null",
         "remote": "true|false|null",
         "relocation": "true|false|null",
+        "remote_location_restricted": "true|false|null (see REMOTE LOCATION RESTRICTION)",
         "location": "string|null",
         "contact_type": "dm|form|link|null",
         "contact": "string|null (recruiter contact from the post BODY, not the channel)",
@@ -426,7 +439,13 @@ _SCORE_SCAFFOLD = (
     "- FLAG / DOWN-WEIGHT (do NOT reject, just lower the score): salary "
     "unstated; an English-required role demanding fluent English 'right now' "
     "when the profile's language note flags that as a current gap; a senior "
-    "role requiring proven tenure / a formal employment record.\n"
+    "role requiring proven tenure / a formal employment record; a 'remote' "
+    "posting with a soft timezone-overlap ask (remote_location_restricted is "
+    "false/null but the text still prefers e.g. CET hours) — a small "
+    "deduction, NOT a rejection (a HARD residency restriction with no "
+    "relocation is already removed before you see it by a deterministic "
+    "guard, so remote_location_restricted=true should not reach you; treat "
+    "it as a reject-worthy signal if it ever does).\n"
     "- LOW / REJECT-WORTHY (low score): backend developer with LLM 'on the "
     "side' (underfit); pure PM; marketing / lead-gen; DS / ML model training; "
     "Python livecoding from scratch / a hardcore algorithmic interview "
@@ -539,6 +558,7 @@ def build_score_prompt(extracted: ExtractResult, raw_text: str) -> str:
         "seniority": extracted.seniority,
         "remote": extracted.remote,
         "relocation": extracted.relocation,
+        "remote_location_restricted": extracted.remote_location_restricted,
         "location": extracted.location,
     }
     return (
@@ -891,41 +911,6 @@ def llm_score(
         cache_system=should_cache_system(system, model),
     )
     return parse_score_response(text)
-
-
-def llm_score_refine(
-    client: LLMClient,
-    extracted: ExtractResult,
-    raw_text: str,
-    fixed_score: int,
-    model: str = JUDGE_MODEL,
-    profile: Optional[Profile] = None,
-) -> str:
-    """Write a quality Обоснование for a vacancy whose score is already fixed.
-
-    Second pass for vacancies that Haiku scored at/above SURFACE_THRESHOLD.
-    ``fixed_score`` (the Haiku score) is anchored in the prompt so the verdict
-    line Sonnet writes matches the stored number — no display inconsistency.
-
-    Returns the reasoning string only (the score is not re-evaluated).
-    """
-    system = build_score_system(profile) if profile is not None else SCORE_SYSTEM
-    anchor = (
-        f"\n\nIMPORTANT: The relevance_score for this vacancy is already "
-        f"determined as {fixed_score}. You MUST output "
-        f'"relevance_score": {fixed_score} in your JSON. '
-        f"Focus on writing a concise, accurate Обоснование that reflects "
-        f"a score of {fixed_score}/100."
-    )
-    text = client.complete(
-        system,
-        build_score_prompt(extracted, raw_text) + anchor,
-        max_tokens=SCORE_MAX_TOKENS,
-        model=model,
-        cache_system=should_cache_system(system, model),
-    )
-    result = parse_score_response(text)
-    return result.get("reasoning", "")
 
 
 def llm_research(

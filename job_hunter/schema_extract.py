@@ -38,6 +38,14 @@ class ExtractResult:
     currency: Optional[str] = None
     remote: Optional[bool] = None
     relocation: Optional[bool] = None
+    # True ONLY when the post explicitly requires a remote candidate to
+    # ALREADY reside in / hold the legal right to work in a specific country
+    # or region (e.g. "must be EU-based", "US work authorization required")
+    # and does NOT also offer relocation/visa support to get there. A soft
+    # timezone-overlap preference is NOT this -> see llm.EXTRACT_SYSTEM.
+    # Purely factual (no candidate-specific judgment); scoring.py's
+    # remote_restriction_reject applies the candidate's own location to it.
+    remote_location_restricted: Optional[bool] = None
     location: Optional[str] = None
     contact_type: Optional[str] = None
     contact: Optional[str] = None
@@ -67,6 +75,7 @@ _FIELD_SPEC = {
     "currency": (str, True),
     "remote": (bool, True),
     "relocation": (bool, True),
+    "remote_location_restricted": (bool, True),
     "location": (str, True),
     "contact_type": (str, True),
     "contact": (str, True),

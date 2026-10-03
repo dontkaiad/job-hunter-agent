@@ -213,35 +213,26 @@ def test_score_routes_haiku_only_below_threshold(conn, fake_llm, fake_fx):
     assert score_calls[0]["model"] == deps.cheap_model
 
 
-def test_score_routes_haiku_then_sonnet_above_threshold(conn, fake_llm, fake_fx):
-    """Haiku score > corridor_hi (75 > 70): above corridor, Haiku score is final,
-    Sonnet refines the Обоснование only (text quality for surfaced items).
+def test_score_routes_haiku_only_above_corridor(conn, fake_llm, fake_fx):
+    """Haiku score > corridor_hi (75 > 70): confident surface, Haiku's score
+    AND text are both final — no Sonnet call (#303: a Sonnet "refine" pass
+    used to run here purely to reword the Обоснование; removed as wasted
+    spend on an already-decided score).
     """
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    # Haiku returns 75 (above corridor_hi=70) → Sonnet refine pass is triggered.
-    # FakeLLM matches by system substring; both score calls share "hiring-fit JUDGE".
-    # Use the responses list so first call → haiku response, second → sonnet response.
-    fake_llm.responses = [
-        '{"relevance_score": 75, "Обоснование": "haiku: strong fit"}',
-        '{"relevance_score": 75, "Обоснование": "sonnet: strong fit — 75/100 ✅ LLM role"}',
-    ]
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 75, "Обоснование": "haiku: strong fit"}')
     item_id = _insert(conn, GOOD_POST)
     pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
     pipeline.advance_by_id(conn, item_id, deps=deps)  # score
 
     item = store.get_item(conn, item_id)
-    # Score is Haiku's (threshold-stable; Sonnet only refines text above corridor).
     assert item.relevance_score == 75.0
-    # Reasoning is Sonnet's (quality).
     blob = json.loads(item.extracted_json)
-    assert "sonnet" in blob["Обоснование"]
+    assert "haiku" in blob["Обоснование"]
 
     score_calls = [c for c in fake_llm.calls if "hiring-fit JUDGE" in c["system"]]
-    assert len(score_calls) == 2, f"expected 2 score calls (haiku + sonnet), got {len(score_calls)}"
-    assert score_calls[0]["model"] == deps.cheap_model, "first call must be Haiku"
-    assert score_calls[1]["model"] == deps.judge_model, "second call must be Sonnet"
-    # Second call user prompt contains the score anchor (llm_score_refine path).
-    assert "75" in score_calls[1]["user"]
+    assert len(score_calls) == 1, f"expected 1 score call (Haiku only), got {len(score_calls)}"
+    assert score_calls[0]["model"] == deps.cheap_model
 
 
 def test_score_below_corridor_haiku_only(conn, fake_llm, fake_fx):

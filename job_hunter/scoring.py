@@ -237,3 +237,30 @@ def location_guard_reject(remote: Optional[bool], relocation: Optional[bool]) ->
     explicitly says "no relocation".
     """
     return remote is False and relocation is not True
+
+
+def remote_restriction_reject(
+    remote: Optional[bool],
+    relocation: Optional[bool],
+    remote_location_restricted: Optional[bool],
+) -> bool:
+    """Deterministic HARD reject for "remote" postings gated by residency. PURE.
+
+    ``location_guard_reject`` only ever trips on ``remote is False`` (an
+    office/on-site posting) — a posting marked remote=True NEVER trips it,
+    even when the post explicitly requires the candidate to already live in /
+    already hold the right to work in a specific country or region ("must be
+    EU-based", "US work authorization required"). That is exactly as
+    unavailable to a candidate who is not already there as an office job with
+    no relocation support, but the office guard is blind to it (#noise
+    report: Kai — "jobs where someone like me is wanted but no relocation is
+    offered" were slipping through because they were coded remote=True).
+
+    Trips ONLY when ``remote_location_restricted`` is explicitly True (a soft
+    timezone preference is extracted as False/None, never True — see
+    llm.EXTRACT_SYSTEM) AND the post does not ALSO offer relocation=True (a
+    restricted-but-sponsored posting is still reachable, so it's spared).
+    Unknown (``None``) on either field does NOT trip the guard — same
+    fail-open-to-a-human posture as the salary/location guards above.
+    """
+    return bool(remote) and remote_location_restricted is True and relocation is not True

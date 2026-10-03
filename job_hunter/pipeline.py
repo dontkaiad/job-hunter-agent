@@ -26,7 +26,7 @@ from . import agents, scoring, store
 from .extract import extract as heuristic_extract
 from .extract import reconcile as reconcile_extract
 from .fx import FxRates
-from .llm import CHEAP_MODEL, JUDGE_MODEL, LLMClient, llm_extract, llm_score, llm_score_refine
+from .llm import CHEAP_MODEL, JUDGE_MODEL, LLMClient, llm_extract, llm_score
 from .profile import Profile, example_profile
 from .schema_extract import ExtractResult, from_dict, serialize
 from .scoring import passes_threshold
@@ -254,8 +254,10 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
       3) Confidence routing on the Haiku score:
          - In [corridor_lo, corridor_hi]: judge re-scores (full llm_score call);
            judge's score becomes FINAL. Catches uncertain near-threshold cases.
-         - Above corridor_hi (confident surface): Haiku score final; Sonnet
-           refines the Обоснование only (text quality for items operator reads).
+         - Above corridor_hi (confident surface): Haiku score AND text both
+           final, no judge call (#303: a judge "refine" pass used to run here
+           just to reword the Обоснование — removed, it burned the expensive
+           model on every confident accept for a cosmetic-only text pass).
          - Below corridor_lo (confident reject): Haiku score final, no second
            call.
     """
@@ -318,24 +320,15 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                         )
 
                 elif haiku_score >= scoring.SURFACE_THRESHOLD:
-                    # Above corridor: Haiku score final; Sonnet refines text only.
+                    # Above corridor: confident surface. Haiku score AND text both
+                    # final — no Sonnet call. (#303: Sonnet used to "refine" the
+                    # Обоснование here even though the score was already decided;
+                    # Kai flagged it as burning the expensive model on cosmetic
+                    # text polish on every single confident-accept item, not just
+                    # the genuinely uncertain corridor cases. Removed.)
                     score = haiku_score
                     reasoning = haiku_reasoning
                     used = "haiku"
-                    try:
-                        sonnet_reasoning = llm_score_refine(
-                            deps.llm_client, extracted, raw, score,
-                            model=deps.judge_model, profile=deps.profile,
-                        )
-                        if sonnet_reasoning:
-                            reasoning = sonnet_reasoning
-                            used = "haiku+sonnet"
-                    except Exception as exc:  # noqa: BLE001
-                        used = "haiku+sonnet(err)"
-                        print(
-                            f"[score] id={item.id} sonnet refine failed: {exc!r}",
-                            flush=True,
-                        )
                     print(
                         f"[score] id={item.id} haiku={score} final={score} (no corridor)",
                         flush=True,
@@ -430,6 +423,23 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
         return AdvanceResult(
             "moved", item.id, item.state, REJECTED, "T3", "hard reject (location)",
             extra={"remote": extracted.remote, "relocation": extracted.relocation},
+        )
+
+    if scoring.remote_restriction_reject(
+        extracted.remote, extracted.relocation, extracted.remote_location_restricted
+    ):
+        store.update_state(
+            conn, item.id, REJECTED,
+            from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,
+            reason="hard reject: удалёнка ограничена резидентством без релокации/визы — физически недоступно",
+        )
+        return AdvanceResult(
+            "moved", item.id, item.state, REJECTED, "T3", "hard reject (remote geo-restricted)",
+            extra={
+                "remote": extracted.remote,
+                "relocation": extracted.relocation,
+                "remote_location_restricted": extracted.remote_location_restricted,
+            },
         )
 
     score = extracted.relevance_score if extracted.relevance_score is not None else 0

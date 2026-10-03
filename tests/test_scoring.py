@@ -137,3 +137,27 @@ def test_location_guard_unknown_remote_not_rejected():
     assert scoring.location_guard_reject(None, False) is False
     assert scoring.location_guard_reject(None, None) is False
     assert scoring.location_guard_reject(None, True) is False
+
+
+def test_remote_restriction_rejects_geo_locked_remote():
+    # "Remote" but must already reside in/hold the right to work in a
+    # specific region, no relocation offered -> physically unavailable.
+    assert scoring.remote_restriction_reject(True, False, True) is True
+    assert scoring.remote_restriction_reject(True, None, True) is True
+
+
+def test_remote_restriction_keeps_sponsored_restricted_remote():
+    # Restricted on paper, but relocation/visa support is explicitly offered
+    # -> reachable, do not reject.
+    assert scoring.remote_restriction_reject(True, True, True) is False
+
+
+def test_remote_restriction_keeps_unrestricted_remote():
+    assert scoring.remote_restriction_reject(True, False, False) is False
+    assert scoring.remote_restriction_reject(True, False, None) is False
+
+
+def test_remote_restriction_does_not_fire_on_office_or_unknown_format():
+    # Office postings are location_guard_reject's job, not this guard's.
+    assert scoring.remote_restriction_reject(False, False, True) is False
+    assert scoring.remote_restriction_reject(None, False, True) is False
