@@ -65,6 +65,7 @@ from . import obs
 from . import run as run_mod
 from . import store
 from . import tg_logger
+from .redact import install_log_redaction, redact_secrets
 from .bot import JobHunterBot, build_deps
 from .config import Config, load_config
 
@@ -269,7 +270,7 @@ async def _amain(cfg: Config | None = None) -> None:
     add_staleness_job(scheduler, _scheduled_staleness_check, tz)
 
     print(
-        f"[serve] long-polling started (db={cfg.database_url}); "
+        f"[serve] long-polling started (db={redact_secrets(cfg.database_url)}); "
         f"daily harvest at {HARVEST_HOUR:02d}:{HARVEST_MINUTE:02d} {tz}; Ctrl-C to stop"
     )
     # Heartbeat: a background task on THIS loop writes the liveness epoch file
@@ -285,6 +286,7 @@ async def _amain(cfg: Config | None = None) -> None:
     # ``asyncio.get_running_loop()`` is valid and the warning handler can hop
     # back onto THIS loop (warnings can fire off-loop from GC finalization).
     loop = asyncio.get_running_loop()
+    install_log_redaction()
     obs.install_all(loop)
 
     try:

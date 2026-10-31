@@ -70,7 +70,9 @@ req = urllib.request.Request(
 try:
     urllib.request.urlopen(req, timeout=10)
 except Exception as exc:
-    print(f"monitor.sh: _tg_send failed: {exc}", file=sys.stderr)
+    import re
+    safe = re.sub(r"bot\d{6,}:[A-Za-z0-9_-]{20,}", "bot***", str(exc))  # token is in the URL
+    print(f"monitor.sh: _tg_send failed: {safe}", file=sys.stderr)
 PYEOF
 }
 

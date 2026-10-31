@@ -26,6 +26,7 @@ from . import fx as fx_mod
 from . import pipeline, research_fetch, store
 from .config import Config, load_config
 from .pipeline import Deps
+from .redact import redact_secrets
 from .schema_extract import from_dict
 from .states import (
     DECISION_APPROVE, DECISION_BACKLOG, DECISION_CLOSE, DECISION_DECLINE,
@@ -1332,7 +1333,7 @@ def notify_pause_toggle_sync(cfg: Config, paused: bool, changed_at) -> None:
             resp = client.post(url, json=payload)
             resp.raise_for_status()
     except Exception as exc:  # noqa: BLE001 — must never crash the toggle endpoint
-        print(f"[pipeline-status] failed to notify operator: {exc!r}")
+        print(f"[pipeline-status] failed to notify operator: {redact_secrets(repr(exc))}")
 
 
 def build_deps(cfg: Config) -> Deps:

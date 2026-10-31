@@ -29,6 +29,8 @@ from typing import Optional
 
 import httpx
 
+from .redact import redact_secrets
+
 logger = logging.getLogger(__name__)
 
 _API = "https://api.telegram.org/bot{token}/sendMessage"
@@ -102,7 +104,7 @@ async def send_log(text: str) -> None:
 
     payload = {
         "chat_id": chat_id,
-        "text": text,
+        "text": redact_secrets(text),
         "disable_web_page_preview": True,
     }
     if thread_id:
@@ -114,7 +116,7 @@ async def send_log(text: str) -> None:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
     except Exception as exc:  # noqa: BLE001 — ops logging must never crash caller
-        logger.warning("tg_logger: failed to send ops log: %r", exc)
+        logger.warning("tg_logger: failed to send ops log: %s", redact_secrets(repr(exc)))
         return
 
 
