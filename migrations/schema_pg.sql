@@ -20,7 +20,11 @@ CREATE TABLE IF NOT EXISTS work_items (
     extracted_json    TEXT,
     relevance_score   DOUBLE PRECISION,
     created_at        TEXT             NOT NULL,
-    updated_at        TEXT             NOT NULL
+    updated_at        TEXT             NOT NULL,
+    -- Scoring-failure bookkeeping: an LLM outage DEFERS a vacancy, never deletes it.
+    -- score_failed = exhausted its attempts; kept in 'extracted', skipped by harvest.
+    score_attempts    INTEGER          NOT NULL DEFAULT 0,
+    score_failed      BOOLEAN          NOT NULL DEFAULT FALSE
 );
 
 -- Valid-state CHECK as a NAMED constraint, applied via idempotent drop+recreate

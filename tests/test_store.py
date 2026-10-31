@@ -187,3 +187,27 @@ def test_set_pipeline_paused_toggle_updates_changed_at(conn):
     assert second_changed_at is not None
     # A fresh UPSERT always rewrites changed_at, even resuming after a pause.
     assert second_changed_at >= first_changed_at
+
+
+def test_init_db_adds_score_columns_to_legacy_table_without_data_loss(pg_dsn):
+    legacy = store.connect(pg_dsn)
+    legacy.execute(
+        """CREATE TABLE work_items (
+            id SERIAL PRIMARY KEY, state TEXT NOT NULL, source_channel TEXT,
+            source_link TEXT, source_message_id TEXT, raw_text TEXT,
+            extracted_json TEXT, relevance_score DOUBLE PRECISION,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""
+    )
+    legacy.execute(
+        "INSERT INTO work_items (state, raw_text, created_at, updated_at) "
+        "VALUES ('extracted', 'keep me', 't', 't')"
+    )
+    legacy.commit()
+
+    store.init_db(legacy)
+    store.init_db(legacy)  # idempotent
+
+    item = store.list_by_state(legacy, "extracted")[0]
+    assert item.raw_text == "keep me"
+    assert item.score_attempts == 0 and item.score_failed is False
+    legacy.close()

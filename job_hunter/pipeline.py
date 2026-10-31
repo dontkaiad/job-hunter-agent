@@ -42,6 +42,54 @@ ACTOR_HUMAN = "human"
 ACTOR_AGENT = "agent"
 
 
+# Account-wide LLM outages (no credits, bad key): every further call in the
+# run would fail too, so scoring stops for the run instead of burning calls.
+FAIL_FATAL = "credits/auth"
+FAIL_TRANSIENT = "rate-limit/5xx/timeout"
+FAIL_PARSE = "parse"
+
+
+def classify_llm_error(exc: BaseException) -> str:
+    """Bucket a scoring exception: FAIL_FATAL | FAIL_TRANSIENT | FAIL_PARSE.
+
+    Matches by class name / status_code so this module never imports anthropic.
+    """
+    names = {c.__name__ for c in type(exc).__mro__}
+    status = getattr(exc, "status_code", None)
+    msg = str(exc).lower()
+    if (
+        names & {"AuthenticationError", "PermissionDeniedError"}
+        or status in (401, 403)
+        or "credit balance" in msg
+    ):
+        return FAIL_FATAL
+    if (
+        names & {"RateLimitError", "APIConnectionError", "APITimeoutError",
+                 "InternalServerError", "TimeoutError", "ConnectionError"}
+        or (isinstance(status, int) and (status == 429 or status >= 500))
+    ):
+        return FAIL_TRANSIENT
+    return FAIL_PARSE
+
+
+@dataclass
+class ScoreRunStats:
+    """Per-harvest scoring counters (feeds the ops alert) + the outage stop flag.
+
+    ``halt_on_fatal`` is True only inside a harvest run; elsewhere (add-by-URL)
+    a credits/auth error just defers the single item.
+    """
+
+    halt_on_fatal: bool = False
+    attempted: int = 0
+    failed: int = 0
+    deferred: int = 0
+    marked_failed: int = 0
+    skipped_halted: int = 0
+    halted: bool = False
+    kinds: Dict[str, int] = field(default_factory=dict)
+
+
 @dataclass
 class Deps:
     """Injected collaborators. Any may be None for deterministic-only runs.
@@ -74,6 +122,9 @@ class Deps:
     # Items scoring below this threshold are DELETED from work_items after
     # scoring — they never reach a terminal 'rejected' row. 0 = disabled.
     min_persist_score: int = 0
+    # Failed scoring attempts before an item is marked score_failed (kept, not deleted).
+    score_max_attempts: int = 3
+    score_stats: ScoreRunStats = field(default_factory=ScoreRunStats)
     # T1 AI/ML/LLM topic gate (scoring.topic_prefilter). False (default):
     # DRY-RUN — a miss is only logged (`[topic-gate]`), extract still runs
     # normally. True: a miss is treated like the other T1 prefilter drops
@@ -244,6 +295,37 @@ def _store_reasoning(extracted_json: str, reasoning: str) -> str:
     return agents.merge_aux(extracted_json, REASONING_KEY, reasoning)
 
 
+def _defer_scoring(
+    conn: psycopg.Connection, item: WorkItem, deps: Deps, exc: BaseException
+) -> AdvanceResult:
+    """Scoring failed: keep the item in EXTRACTED for the next run's retry."""
+    stats = deps.score_stats
+    kind = classify_llm_error(exc)
+    fatal = kind == FAIL_FATAL
+    stats.failed += 1
+    stats.deferred += 1
+    stats.kinds[kind] = stats.kinds.get(kind, 0) + 1
+    if fatal and stats.halt_on_fatal:
+        stats.halted = True
+    # A credits/auth outage is not the vacancy's fault: don't burn its attempts.
+    attempts, failed = store.record_score_failure(
+        conn, item.id, max_attempts=deps.score_max_attempts,
+        reason=f"score deferred ({kind}): {type(exc).__name__}",
+        count_attempt=not fatal,
+    )
+    if failed:
+        stats.marked_failed += 1
+    print(
+        f"[score] id={item.id} haiku=err deferred ({kind}) attempts={attempts}"
+        f"{' -> score_failed' if failed else ''}: {type(exc).__name__}",
+        flush=True,
+    )
+    return AdvanceResult(
+        "noop", item.id, item.state, reason=f"score deferred ({kind})",
+        extra={"score_failed": failed, "attempts": attempts},
+    )
+
+
 def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T2: extracted -> scored.
 
@@ -265,6 +347,9 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
     if extracted is None:
         return AdvanceResult("noop", item.id, item.state, reason="missing extracted_json")
 
+    if item.score_failed:
+        return AdvanceResult("noop", item.id, item.state, reason="score_failed: manual review")
+
     raw = item.raw_text or ""
     pf = scoring.prefilter(extracted, raw)
     dup_id = (
@@ -283,8 +368,15 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         reasoning = ""
         used = "haiku"
         if deps.llm_client is not None:
+            if deps.score_stats.halted:
+                # Credits/auth outage earlier in this run: every call would fail.
+                deps.score_stats.skipped_halted += 1
+                return AdvanceResult(
+                    "noop", item.id, item.state, reason="scoring halted (credits/auth)"
+                )
             try:
                 # First pass: Haiku scores every vacancy (fast + cheap).
+                deps.score_stats.attempted += 1
                 verdict = llm_score(
                     deps.llm_client, extracted, raw, model=deps.cheap_model,
                     profile=deps.profile,
@@ -345,10 +437,9 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                     )
 
             except Exception as exc:  # noqa: BLE001 - degrade, never crash T2
-                score = 0
-                reasoning = f"score failed ({exc}); defaulted low"
-                used = "haiku(error)"
-                print(f"[score] id={item.id} haiku=err final=0 ({exc!r})", flush=True)
+                # Unknown score != zero score: defer, never fabricate score=0
+                # (a 0 below min_persist_score gets the vacancy DELETED).
+                return _defer_scoring(conn, item, deps, exc)
         else:
             # No judge available: surface for manual review rather than silent reject.
             score = scoring.SURFACE_THRESHOLD
@@ -389,7 +480,8 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
 
     score = extracted.relevance_score if extracted.relevance_score is not None else 0
     min_persist = deps.min_persist_score if deps is not None else 0
-    if min_persist > 0 and score < min_persist:
+    # Only drop on a score the model actually produced (never on a NULL score).
+    if min_persist > 0 and extracted.relevance_score is not None and score < min_persist:
         store.delete_item(conn, item.id)
         print(
             f"[harvest] dropped id={item.id} url={item.source_link!r} "

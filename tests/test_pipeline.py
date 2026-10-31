@@ -414,3 +414,127 @@ def test_llm_extract_falls_back_on_error(conn, fake_fx):
     res = pipeline.advance_by_id(conn, item_id, deps=deps)
     assert res.to_state == EXTRACTED
     assert "fallback" in res.reason
+
+
+# --- LLM scoring failure must DEFER the vacancy, never drop it ---------------
+
+
+class BadRequestError(Exception):
+    """Stand-in for anthropic.BadRequestError (matched by class name)."""
+
+    status_code = 400
+
+
+def _credit_error():
+    return BadRequestError(
+        "Error code: 400 - Your credit balance is too low to access the Anthropic API."
+    )
+
+
+def _raising(exc):
+    def _complete(system, user, **kwargs):
+        raise exc
+
+    return _complete
+
+
+def _extract_only(conn, deps, text=GOOD_POST, mid="1"):
+    item_id = _insert(conn, text, mid)
+    pipeline.advance_by_id(conn, item_id, deps=deps)  # T1 extract
+    assert store.get_item(conn, item_id).state == EXTRACTED
+    return item_id
+
+
+def test_credit_error_defers_and_halts_run_scoring(conn, fake_llm, fake_fx):
+    stats = pipeline.ScoreRunStats(halt_on_fatal=True)
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False,
+                min_persist_score=25, score_stats=stats)
+    a = _extract_only(conn, deps, mid="1")
+    b = _extract_only(conn, deps, mid="2")
+    fake_llm.complete = _raising(_credit_error())
+
+    res_a = pipeline.advance_by_id(conn, a, deps=deps)
+    assert res_a.status == "noop" and "deferred" in res_a.reason
+    assert stats.halted
+
+    calls = []
+    fake_llm.complete = lambda *a_, **k: calls.append(1) or "{}"
+    res_b = pipeline.advance_by_id(conn, b, deps=deps)
+    assert res_b.status == "noop" and "halted" in res_b.reason
+    assert calls == []  # no LLM call burned after the outage was detected
+
+    for item_id in (a, b):
+        it = store.get_item(conn, item_id)
+        assert it is not None and it.state == EXTRACTED
+        assert it.relevance_score is None
+    # An account-wide outage does not burn the vacancy's attempts.
+    assert store.get_item(conn, a).score_attempts == 0
+
+
+def test_parse_error_defers_and_counts_attempt(conn, fake_llm, fake_fx):
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, min_persist_score=25)
+    item_id = _extract_only(conn, deps)
+    fake_llm.complete = lambda *a, **k: "sorry, no json here"
+
+    res = pipeline.advance_by_id(conn, item_id, deps=deps)
+
+    assert res.status == "noop"
+    it = store.get_item(conn, item_id)
+    assert it is not None and it.state == EXTRACTED
+    assert it.score_attempts == 1 and not it.score_failed
+    assert deps.score_stats.kinds == {pipeline.FAIL_PARSE: 1}
+
+
+def test_three_failures_mark_score_failed_but_keep_item(conn, fake_llm, fake_fx):
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False,
+                min_persist_score=25, score_max_attempts=3)
+    item_id = _extract_only(conn, deps)
+    fake_llm.complete = lambda *a, **k: "not json"
+
+    for _ in range(3):
+        pipeline.advance_by_id(conn, item_id, deps=deps)
+
+    it = store.get_item(conn, item_id)
+    assert it is not None and it.state == EXTRACTED
+    assert it.score_attempts == 3 and it.score_failed
+    assert deps.score_stats.marked_failed == 1
+    # Harvest no longer picks it up, and a direct advance does nothing.
+    assert store.list_by_state(conn, EXTRACTED, include_score_failed=False) == []
+    assert [i.id for i in store.list_by_state(conn, EXTRACTED)] == [item_id]
+    fake_llm.complete = _raising(AssertionError("must not be called"))
+    assert pipeline.advance_by_id(conn, item_id, deps=deps).status == "noop"
+
+
+def test_normal_low_score_is_still_deleted(conn, fake_llm, fake_fx):
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, min_persist_score=25)
+    item_id = _insert(conn, GOOD_POST)
+    fake_llm.responses = ['{"relevance_score": 10, "Обоснование": "wrong domain"}']
+
+    pipeline.run_to_gate(conn, item_id, deps=deps)
+
+    assert store.get_item(conn, item_id) is None
+
+
+def test_normal_high_score_is_still_surfaced(conn, fake_llm, fake_fx):
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, min_persist_score=25)
+    item_id = _insert(conn, GOOD_POST)
+    fake_llm.responses = ['{"relevance_score": 82, "Обоснование": "strong fit"}']
+
+    results = pipeline.run_to_gate(conn, item_id, deps=deps)
+
+    assert any(r.to_state == SURFACED for r in results)
+    assert store.get_item(conn, item_id).state == SURFACED
+
+
+def test_scoring_alert_text_thresholds():
+    from job_hunter.run import scoring_alert_text
+
+    ok = pipeline.ScoreRunStats(attempted=50, failed=5, kinds={pipeline.FAIL_PARSE: 5})
+    assert scoring_alert_text(ok) is None
+    bad = pipeline.ScoreRunStats(attempted=10, failed=4, deferred=4,
+                                 kinds={pipeline.FAIL_PARSE: 4})
+    assert "4/10" in scoring_alert_text(bad)
+    credits = pipeline.ScoreRunStats(attempted=100, failed=1, deferred=1, halted=True,
+                                     skipped_halted=30, kinds={pipeline.FAIL_FATAL: 1})
+    text = scoring_alert_text(credits)
+    assert "credits/auth" in text and "HALTED" in text and "30" in text

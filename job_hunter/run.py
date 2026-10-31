@@ -20,11 +20,11 @@ one implementation.
 from __future__ import annotations
 
 import asyncio
-from typing import List
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
-from . import clock, ingest_telegram, obs, pipeline, sources, store
+from . import clock, ingest_telegram, obs, pipeline, sources, store, tg_logger
 from .bot import JobHunterBot, build_deps, notify
 from .config import Config, load_config
 from .states import SURFACED
@@ -53,6 +53,44 @@ async def ingest(cfg: Config, conn) -> List[int]:
             await asyncio.to_thread(source.ingest_with_own_connection, cfg)
         )
     return new_ids
+
+
+SCORE_FAIL_ALERT_RATIO = 0.20
+
+
+def _set_score_stats(deps, stats: "pipeline.ScoreRunStats") -> None:
+    """Attach per-run scoring counters to ``deps`` (no-op for non-Deps stand-ins)."""
+    try:
+        deps.score_stats = stats
+    except AttributeError:
+        pass
+
+
+def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
+    """Ops alert body when scoring failed badly this run, else None. PURE.
+
+    Fires on a credits/auth error or when more than 20% of scoring attempts
+    failed. Counts and error buckets only -- never keys or exception bodies.
+    """
+    if stats.attempted <= 0 and not stats.failed:
+        return None
+    fatal = stats.kinds.get(pipeline.FAIL_FATAL, 0) > 0
+    ratio = stats.failed / stats.attempted if stats.attempted else 1.0
+    if not fatal and ratio <= SCORE_FAIL_ALERT_RATIO:
+        return None
+    kinds = ", ".join(f"{k} x{n}" for k, n in sorted(stats.kinds.items())) or "-"
+    lines = [
+        f"\U0001f534 jobhunter scoring: {stats.failed}/{stats.attempted} LLM calls failed "
+        f"({ratio:.0%})",
+        f"error type: {kinds}",
+        f"deferred (kept for retry): {stats.deferred}, marked score_failed: {stats.marked_failed}",
+    ]
+    if stats.halted:
+        lines.append(
+            f"scoring HALTED for this run; {stats.skipped_halted} more vacancies left unscored "
+            "(check Anthropic credits / API key)"
+        )
+    return "\n".join(lines)
 
 
 async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
@@ -112,13 +150,24 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
     # derived from these results, NOT persisted.
     to_process = set(new_ids)
     for st in ("discovered", "extracted", "scored", "approved", "researched"):
-        for item in store.list_by_state(conn, st):
+        for item in store.list_by_state(conn, st, include_score_failed=False):
             to_process.add(item.id)
+    # Fresh per-run scoring counters; halt_on_fatal stops scoring on the first
+    # credits/auth error (every further call would fail too).
+    run_stats = pipeline.ScoreRunStats(halt_on_fatal=True)
+    _set_score_stats(deps, run_stats)
     newly_surfaced: List[int] = []
-    for item_id in sorted(to_process):
-        results = pipeline.run_to_gate(conn, item_id, deps=deps)
-        if any(r.to_state == SURFACED for r in results):
-            newly_surfaced.append(item_id)
+    try:
+        for item_id in sorted(to_process):
+            results = pipeline.run_to_gate(conn, item_id, deps=deps)
+            if any(r.to_state == SURFACED for r in results):
+                newly_surfaced.append(item_id)
+    finally:
+        _set_score_stats(deps, pipeline.ScoreRunStats())  # non-halting again for add-by-URL
+    alert = scoring_alert_text(run_stats)
+    if alert:
+        print(f"[harvest] scoring alert: {run_stats.failed}/{run_stats.attempted} failed", flush=True)
+        await tg_logger.send_log(alert)  # never raises; at most one per run
 
     # 3) Notify the operator about ONLY the items freshly surfaced THIS run.
     # ``notify`` awaits EVERY send to completion (asyncio.gather) before

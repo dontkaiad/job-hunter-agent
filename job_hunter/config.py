@@ -169,6 +169,11 @@ class Config:
     # disable (keep everything). Default: 25.
     min_persist_score: int = 25
 
+    # --- Scoring resilience: failed LLM scoring defers a vacancy, never drops it ---
+    # After this many failed scoring attempts an item is marked score_failed and
+    # kept in the DB (excluded from harvest) for manual review.
+    score_max_attempts: int = 3
+
     # --- Market Worth: pipeline-derived salary benchmark (zero API) ---
     # Aggregates salary data from work_items with score 25–100. No LLM call.
     # Minimum number of vacancies with salary data per market to show a range.
@@ -253,6 +258,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         dashboard_public_url=get("DASHBOARD_PUBLIC_URL"),
         login_public_url=get("LOGIN_PUBLIC_URL"),
         min_persist_score=_int_or_none(get("MIN_PERSIST_SCORE")) or 25,
+        score_max_attempts=_int_or_none(get("SCORE_MAX_ATTEMPTS")) or 3,
         market_min_sample=_int_or_none(get("MARKET_MIN_SAMPLE")) or 5,
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,

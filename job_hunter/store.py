@@ -44,6 +44,8 @@ class WorkItem:
     relevance_score: Optional[float]
     created_at: str
     updated_at: str
+    score_attempts: int = 0
+    score_failed: bool = False
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "WorkItem":
@@ -58,6 +60,8 @@ class WorkItem:
             relevance_score=row["relevance_score"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            score_attempts=row.get("score_attempts") or 0,
+            score_failed=bool(row.get("score_failed")),
         )
 
 
@@ -240,6 +244,33 @@ def init_db(conn: psycopg.Connection, schema_path: str = _SCHEMA_PATH) -> None:
     for stmt in _split_statements(script):
         conn.execute(stmt)
     conn.commit()
+    _ensure_score_failure_columns(conn)
+
+
+def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
+    """Add score_attempts/score_failed to a PRE-EXISTING work_items table.
+
+    init_db runs on every ingest, and ALTER TABLE takes an ACCESS EXCLUSIVE lock
+    even for ADD COLUMN IF NOT EXISTS, so only ALTER when a column is missing.
+    A fresh table already has both from CREATE TABLE.
+    """
+    have = {
+        r["column_name"]
+        for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'work_items'"
+        ).fetchall()
+    }
+    conn.commit()  # end the read transaction; never hold it open across the ALTER
+    for ddl in (
+        ("score_attempts", "ALTER TABLE work_items ADD COLUMN IF NOT EXISTS "
+                           "score_attempts INTEGER NOT NULL DEFAULT 0"),
+        ("score_failed", "ALTER TABLE work_items ADD COLUMN IF NOT EXISTS "
+                         "score_failed BOOLEAN NOT NULL DEFAULT FALSE"),
+    ):
+        if ddl[0] not in have:
+            conn.execute(ddl[1])
+            conn.commit()
 
 
 def insert_item(
@@ -336,9 +367,17 @@ def find_duplicate_by_source_link(
     return row["id"] if row else None
 
 
-def list_by_state(conn: psycopg.Connection, state: str, limit: int = 100) -> List[WorkItem]:
+def list_by_state(
+    conn: psycopg.Connection,
+    state: str,
+    limit: int = 100,
+    include_score_failed: bool = True,
+) -> List[WorkItem]:
+    """Items in ``state``, oldest-updated first. ``include_score_failed=False``
+    hides items that exhausted their scoring attempts (harvest must not retry them)."""
+    where = "state = %s" if include_score_failed else "state = %s AND NOT score_failed"
     rows = conn.execute(
-        "SELECT * FROM work_items WHERE state = %s ORDER BY updated_at ASC LIMIT %s",
+        f"SELECT * FROM work_items WHERE {where} ORDER BY updated_at ASC LIMIT %s",
         (state, limit),
     ).fetchall()
     return [WorkItem.from_row(r) for r in rows]
@@ -388,6 +427,53 @@ def update_state(
         raise
     if commit:
         conn.commit()
+
+
+def record_score_failure(
+    conn: psycopg.Connection,
+    item_id: int,
+    *,
+    max_attempts: int,
+    reason: str,
+    count_attempt: bool = True,
+) -> Tuple[int, bool]:
+    """Record a failed scoring attempt WITHOUT touching the item's state.
+
+    Bumps ``score_attempts`` (unless ``count_attempt`` is False, e.g. an
+    account-wide credits/auth outage that is not the vacancy's fault) and sets
+    ``score_failed`` once ``max_attempts`` is reached. Appends an audit row.
+    Returns (attempts, score_failed).
+    """
+    ts = now_iso()
+    inc = 1 if count_attempt else 0
+    try:
+        row = conn.execute(
+            """
+            UPDATE work_items
+               SET score_attempts = score_attempts + %s,
+                   score_failed = (score_attempts + %s) >= %s,
+                   updated_at = %s
+             WHERE id = %s
+         RETURNING state, score_attempts, score_failed
+            """,
+            (inc, inc, max_attempts, ts, item_id),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return 0, False
+        conn.execute(
+            """
+            INSERT INTO state_transitions
+                (item_id, from_state, to_state, kind, actor, reason, created_at)
+            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s)
+            """,
+            (item_id, row["state"], row["state"], reason, ts),
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return row["score_attempts"], bool(row["score_failed"])
 
 
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:
