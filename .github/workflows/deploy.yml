@@ -12,7 +12,12 @@ on:
     branches: [main]
 
 jobs:
+  # Gate: the deploy job only starts when the whole suite is green.
+  test:
+    uses: ./.github/workflows/test.yml
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH

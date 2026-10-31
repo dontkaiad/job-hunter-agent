@@ -144,6 +144,7 @@ def test_pipeline_shape(client, conn):
         "status",
         "published_at",
         "source",
+        "decline_reason",
     }
     assert isinstance(it["id"], int)
     assert isinstance(it["score"], float)

@@ -165,7 +165,7 @@ def _salary_max_rub(extracted: ExtractResult, deps: Deps) -> Optional[float]:
         return None
     if extracted.currency.upper() == "RUB":
         return float(top)
-    if deps.fx is None:
+    if deps is None or deps.fx is None:
         return None
     try:
         return deps.fx.convert(top, extracted.currency)
@@ -183,7 +183,7 @@ def _salary_floor_rub(deps: Deps) -> Optional[float]:
     posting's currency. Returns None when FX is unavailable, in which case the
     guard simply cannot fire.
     """
-    if deps.fx is None:
+    if deps is None or deps.fx is None:
         return None
     try:
         return deps.fx.convert(deps.profile.salary_floor_eur, "EUR")

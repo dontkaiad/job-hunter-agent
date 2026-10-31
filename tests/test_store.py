@@ -211,3 +211,17 @@ def test_init_db_adds_score_columns_to_legacy_table_without_data_loss(pg_dsn):
     assert item.raw_text == "keep me"
     assert item.score_attempts == 0 and item.score_failed is False
     legacy.close()
+
+
+def test_init_db_does_not_block_behind_an_idle_reader(pg_dsn):
+    """init_db runs on every ingest; it must not need an exclusive lock when the
+    schema is already current (a reader idling in a transaction used to deadlock it)."""
+    reader = store.connect(pg_dsn)
+    store.init_db(reader)
+    reader.execute("SELECT * FROM work_items")  # leaves the transaction open
+
+    other = store.connect(pg_dsn)
+    other.execute("SET lock_timeout = '3s'")
+    store.init_db(other)  # raises LockNotAvailable if it still waits on the reader
+    other.close()
+    reader.close()
