@@ -631,3 +631,13 @@ def test_ssrf_guard_blocks_captured_href_resolving_to_private_ip(monkeypatch):
         "SSRF guard must block a captured URL that resolves to a private IP"
     )
     assert called == [], "HTTP GET must not have been attempted for a private-IP URL"
+
+
+# The canned fixtures carry fixed 2026 dates while ingestion windows are relative
+# to "now" (new_channel_lookback_days), so the suite rotted as real time moved on.
+# Pin the clock the ingest code reads to a moment just after the fixtures.
+@pytest.fixture(autouse=True)
+def _pinned_ingest_clock(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(web, "now_utc", lambda: datetime(2026, 6, 21, tzinfo=timezone.utc))

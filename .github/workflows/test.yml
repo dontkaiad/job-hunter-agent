@@ -1,0 +1,36 @@
+name: Tests
+
+# Runs the pytest suite against a throwaway PostgreSQL. Reused by deploy.yml as a
+# required gate (a red suite blocks the deploy) and runs on every branch push / PR.
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches-ignore: [main]   # main runs this through deploy.yml
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: jobhunter
+          POSTGRES_PASSWORD: jobhunter
+          POSTGRES_DB: jobhunter_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U jobhunter"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"   # matches the Dockerfile base image
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -p no:cacheprovider

@@ -381,9 +381,11 @@ def test_funnel_keyboard_for_screening_and_interview():
 def test_funnel_keyboard_empty_outside_funnel():
     from job_hunter.states import SURFACED, DRAFTED, OFFER, DECLINED, CLOSED
 
-    # Pre-send gates and terminals carry NO funnel buttons.
-    for st in (SURFACED, DRAFTED, OFFER, DECLINED, CLOSED):
+    # Surfaced gate and terminal/declined states carry NO funnel buttons.
+    for st in (SURFACED, OFFER, DECLINED, CLOSED):
         assert bot.funnel_keyboard_spec(st, 1) == []
+    # approved/researched/drafted only offer the manual pre-send decline (T22-T24).
+    assert [b[0] for b in bot.funnel_keyboard_spec(DRAFTED, 1)] == ["Отказ"]
 
 
 def test_funnel_final_state_lines():

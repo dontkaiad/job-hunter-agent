@@ -87,8 +87,10 @@ LOW_SCORE_OK_SALARY = (
     # Salary comfortably above the example profile floor (EUR 1000/mo = ~100k
     # RUB at the test FX rate of 100 RUB/EUR) so the low-score path is a SOFT
     # reject, not a salary hard reject.
-    "Office-based Python developer, Moscow, PyTorch model training. "
-    "Salary 300000 RUB. No remote. @hr"
+    # Remote on purpose: an office-only post is now hard-rejected by the location
+    # guard (8830f8b) before the soft score path this fixture is meant to cover.
+    "Remote Python developer, PyTorch model training. "
+    "Salary 300000 RUB. @hr"
 )
 
 
@@ -760,7 +762,9 @@ def test_handle_callback_send_moves_drafted_to_sent(conn, fake_llm, fake_fx):
     # «✅ Отправлено» line and the keyboard is stripped (no longer actionable).
     assert cb.message.edit_text_calls == 1
     assert "✅ Отправлено" in cb.message.last_text
-    assert cb.message.markup_cleared is True
+    # SENT is a funnel state: the card keeps the post-send funnel keyboard
+    # (screening/decline/...) instead of having its keyboard stripped.
+    assert cb.message.last_markup is not None
 
 
 # ---------------------------------------------------------------------------

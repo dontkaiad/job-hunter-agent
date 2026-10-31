@@ -90,9 +90,10 @@ def test_pct_calculation():
     rows = [["ДМС / медстраховка", "Удалёнка"], ["ДМС / медстраховка"]]
     r = _result(rows)
     dms = next(i for i in r.top_benefits if i["canonical"] == "health_insurance")
-    remote = next(i for i in r.top_benefits if i["canonical"] == "remote_perk")
     assert dms["pct"] == 100.0
-    assert remote["pct"] == 50.0
+    # remote_perk is counted but deliberately NOT displayed: it duplicates the
+    # dedicated Format block (BENEFITS_DISPLAY_EXCLUDE).
+    assert all(i["canonical"] != "remote_perk" for i in r.top_benefits)
 
 
 # ---------------------------------------------------------------------------

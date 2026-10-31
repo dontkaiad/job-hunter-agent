@@ -141,13 +141,16 @@ def test_funnel_screening_interview_offer(conn, deps, fake_llm):
     assert pipeline.advance_by_id(conn, item_id, deps=deps).status == "terminal"
 
 
-def test_funnel_decline_from_sent_is_terminal(conn, deps, fake_llm):
+def test_funnel_decline_from_sent_only_allows_reapprove(conn, deps, fake_llm):
     item_id = _drive_to_sent(conn, deps, fake_llm)
     res = pipeline.advance_by_id(conn, item_id, decision=DECISION_DECLINE, deps=deps)
     assert res.to_state == DECLINED
-    # declined != the scoring REJECTED; and it is terminal.
+    # declined != the scoring REJECTED. Since T25 it is re-approvable, so it is
+    # not terminal -- but funnel decisions like 'close' are illegal from it.
     assert DECLINED != REJECTED
-    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_CLOSE, deps=deps).status == "terminal"
+    assert pipeline.advance_by_id(conn, item_id, decision=DECISION_CLOSE, deps=deps).status == "noop"
+    back = pipeline.advance_by_id(conn, item_id, decision=DECISION_APPROVE, deps=deps)
+    assert back.to_state == APPROVED
 
 
 def test_funnel_offer_illegal_before_interview(conn, deps, fake_llm):
@@ -179,13 +182,11 @@ def test_do_draft_passes_full_raw_text_to_llm(conn, deps, fake_llm):
 def test_score_stored_with_reasoning(conn, fake_llm, fake_fx):
     """T2 stores the relevance_score AND the Обоснование rationale.
 
-    Score >= 60 → two LLM calls (Haiku score + Sonnet refine). The stored score
-    is Haiku's; the stored Обоснование is the Sonnet-refined text.
+    Score above the corridor: ONE Haiku call; its score and text are final (the
+    Sonnet refine pass was removed in b2f6a09).
     """
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    # Two responses: Haiku (score 82, above threshold) → Sonnet refine.
     fake_llm.responses = [
-        '{"relevance_score": 82, "Обоснование": "haiku: applied-LLM роль, remote"}',
         '{"relevance_score": 82, "Обоснование": "applied-LLM роль, remote"}',
     ]
     item_id = _insert(conn, GOOD_POST)
@@ -196,7 +197,7 @@ def test_score_stored_with_reasoning(conn, fake_llm, fake_fx):
     item = store.get_item(conn, item_id)
     assert item.relevance_score == 82.0
     blob = json.loads(item.extracted_json)
-    assert blob["Обоснование"] == "applied-LLM роль, remote"  # Sonnet's text
+    assert blob["Обоснование"] == "applied-LLM роль, remote"  # Haiku's text is final
 
 
 def test_score_routes_haiku_only_below_threshold(conn, fake_llm, fake_fx):

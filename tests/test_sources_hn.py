@@ -300,3 +300,13 @@ def test_http_sources_registry_hn_after_wwr():
     cfg = _cfg(hn_hiring_enabled=True, wwr_enabled=True)
     names = [s.name for s in sources.http_sources(cfg, mode="web")]
     assert names.index("hn_hiring") > names.index("wwr")
+
+
+# The canned fixtures carry fixed 2026 dates while ingestion windows are relative
+# to "now" (new_channel_lookback_days), so the suite rotted as real time moved on.
+# Pin the clock the ingest code reads to a moment just after the fixtures.
+@pytest.fixture(autouse=True)
+def _pinned_ingest_clock(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(sources, "now_utc", lambda: datetime(2026, 7, 4, tzinfo=timezone.utc))

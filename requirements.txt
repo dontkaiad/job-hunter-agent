@@ -35,6 +35,8 @@ jinja2==3.1.4
 # --- dev / test only --------------------------------------------------------
 pytest==8.3.3
 pytest-asyncio==0.24.0
+# Per-test wall-clock limit so a deadlocked test fails the run instead of hanging CI.
+pytest-timeout==2.3.1
 # Ephemeral PostgreSQL for the test suite. With the postgresql_noproc fixture it
 # connects to an externally-provided Postgres (a docker postgres:16 container on
 # this machine) and creates a fresh template-cloned DB per test (function scope),

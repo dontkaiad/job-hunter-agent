@@ -170,12 +170,13 @@ def test_button_approve_finalizes_card_and_drives_draft(conn, fake_llm, fake_fx)
     assert "github.com/example" in draft_text and "[resume: link]" in draft_text
     # Draft was sent back for review.
     assert sent["id"] == item_id
-    # Acked + card finalised to ✅ Принято with the keyboard removed.
+    # Acked + card finalised to ✅ Принято; DRAFTED keeps only the manual
+    # pre-send «Отказ» button (T24), not the old empty keyboard.
     assert cb.answer_calls == 1
     assert cb.answered == "Approved"
     assert cb.message.edit_text_calls == 1
     assert "✅ Принято" in cb.message.last_edit_text
-    assert cb.message.last_edit_markup is None
+    assert [b.text for row in cb.message.last_edit_markup.inline_keyboard for b in row] == ["Отказ"]
 
 
 def _seed_state(conn, deps, state):

@@ -15,6 +15,7 @@ exactly as it did with sqlite3.Row. The whole pipeline stays synchronous.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, List, Mapping, Optional, Tuple
@@ -241,10 +242,34 @@ def init_db(conn: psycopg.Connection, schema_path: str = _SCHEMA_PATH) -> None:
     """Create tables/indexes from migrations/schema_pg.sql (idempotent)."""
     with open(schema_path, "r", encoding="utf-8") as f:
         script = f.read()
+    skip_state_check = _state_check_is_current(conn)
     for stmt in _split_statements(script):
+        if skip_state_check and "work_items_state_check" in stmt:
+            continue
         conn.execute(stmt)
     conn.commit()
     _ensure_score_failure_columns(conn)
+
+
+def _state_check_is_current(conn: psycopg.Connection) -> bool:
+    """True when work_items_state_check already allows exactly states.ALL_STATES.
+
+    init_db runs on every ingest; DROP/ADD CONSTRAINT needs an ACCESS EXCLUSIVE
+    lock, which blocks behind ANY connection idling in a transaction (a reader
+    that never committed) and can deadlock a thread waiting on that reader.
+    Only recreate the constraint when it really differs.
+    """
+    from .states import ALL_STATES
+
+    row = conn.execute(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
+        "WHERE conname = 'work_items_state_check' "
+        "AND conrelid = to_regclass('work_items')"
+    ).fetchone()
+    conn.commit()  # never leave the catalog read transaction open
+    if not row:
+        return False
+    return set(re.findall(r"'([a-z]+)'", row["def"])) == set(ALL_STATES)
 
 
 def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
