@@ -7,63 +7,80 @@
   `job_hunter/run.py` (`scoring_alert_text`), `.github/workflows/test.yml`,
   `deploy.yml`
 - **Sources:** commit `0e14afd` message, `scripts/oneoff/restore_lost_tme.py`
-  docstring, operator-reported recovery figures (marked below)
+  docstring, log extracts on the server (counts re-checked 2026-11-01), and
+  operator-reported facts (marked below)
 
 ## Summary
 
 An Anthropic credit outage (2026-10-20…28) made every scoring call raise. The
 pipeline caught the exception and converted it to `score = 0`; any score under
 `min_persist_score` (25) is deleted together with its audit log. So during the
-outage each newly harvested vacancy was scored 0 and removed, silently, for about
-eight days. Nothing alerted, no test covered the path, and a deleted row leaves no
-trace in the dashboard.
+outage each newly harvested vacancy was scored 0 and removed, silently, for nine
+daily harvests. **Nothing in the system signalled it: the operator noticed on
+2026-10-31 that the dashboard had shown no new vacancies for about a week.** That
+absence of any automatic signal is the main finding of this postmortem.
 
 ## Impact
 
-- Vacancies deleted: **~650** by the estimate in the fix commit message. The
-  deletion also removed their `state_transitions` audit rows, so the exact set is
-  not reconstructible from the DB.
-- Recovered (**operator-reported**): **594 URLs** re-collected from the container
-  logs, which print each dropped URL; the recovery script re-reads `t.me` posts
-  through the public reader and pushes them through the normal pipeline. **8** of
-  the recovered vacancies ended up surfaced after re-scoring.
-- Not established here: how many of the ~650 were not recoverable (the figures
-  differ by ~56 and the difference is unexplained), and whether any non-`t.me`
-  source was recovered.
-- Duration: scoring was failing for the whole eight-day window, so new vacancies
-  harvested in it were affected (the exact count is the ~650 above).
+Counts below were recomputed on 2026-11-01 from the log extracts kept on the server
+(`jh-lost-2026-10-20_28.txt`, saved 2026-10-31 13:08 UTC, and the two URL lists
+derived from it).
+
+- **652 drop events**, every one `score=0.0 < 25`, over nine daily harvests
+  (07:02 UTC): 80, 70, 87, 90, 87, 40, 42, 76, 80 per day for 10-20 … 10-28. The
+  "~650" in the fix commit (`0e14afd`) was the operator's estimate made before the
+  logs were counted; the count confirms it.
+- **594 unique URLs.** 652 events vs 594 URLs is not a discrepancy: the same source
+  URL can produce several work items (e.g. a digest post split into pieces), so
+  58 events repeat a URL already counted. By source: 421 `t.me`, 173 other (110
+  jobicy.com, 35 weworkremotely.com, 28 career.habr.com, the rest long-tail).
+- **593 URLs** are in `jh-lost-urls-failed-only.txt` — the list the operator
+  describes as the URLs whose scoring errored (`haiku=err`). The log extract itself
+  contains only the `dropped … score=0.0` lines, no `haiku=err` lines, so the
+  selection criterion for 593 vs 594 cannot be re-derived from it; the one-URL
+  difference is unexplained and immaterial.
+- The deletion also removed the items' `state_transitions` rows, so the DB holds no
+  trace of them; the logs were the only record.
+- Recovery (**operator-reported**): the URLs were re-collected from the logs; 8 of
+  the recovered vacancies ended up surfaced after re-scoring. The recovery script
+  (`restore_lost_tme.py`) re-reads `t.me` posts only, i.e. 421 of the 594 URLs; what
+  happened to the other 173 is not established here (career.habr.com ones are
+  manual-add-only by policy).
 
 ## Timeline
 
 | When | Event |
 |---|---|
-| 2026-10-20 | Start of the credit outage (window from the fix commit); scoring calls fail. Failures become `score=0` → deletion. |
-| 2026-10-20…28 | Daily harvests keep running; new vacancies are scored 0 and dropped. No alert. |
-| 2026-10-28 | End of the outage window; scoring works again. |
-| after 2026-10-28 | Loss discovered; how and when is **not recorded in the repo**. URLs recovered from logs. |
-| 2026-10-31 17:46 | `0e14afd` — failure defers instead of deleting; attempts, `score_failed`, alert. |
-| 2026-10-31 18:55 | `3e16565` — masks bot tokens / DB passwords in logs and ops messages; the same commit adds the recovery script. |
-| 2026-10-31 19:04 | `5f61eaa` — CI test gate in front of deploy; two latent test/DB fixes. |
-| 2026-11-01 10:06 | New alert fires for a different problem (12/46 parse failures) — first real-world use of the alert; see Case 0002. |
+| 2026-10-20 07:02 UTC | First drop in the extract. Start of the credit outage (window per the fix commit); scoring calls fail → `score=0` → deletion. |
+| 2026-10-20…28 | Nine daily harvests drop 40–90 vacancies each. No alert, no error visible to the operator. |
+| 2026-10-28 07:02 UTC | Last drop in the extract; end of the outage window. |
+| 2026-10-31 (before 13:08 UTC) | **Operator notices zero new vacancies on the dashboard for about a week.** No automatic signal existed. Dropped URLs are extracted from the container logs (saved 13:08 UTC). |
+| 2026-10-31 17:46 MSK | `0e14afd` — failure defers instead of deleting; attempts, `score_failed`, alert. |
+| 2026-10-31 18:55 MSK | `3e16565` — masks bot tokens / DB passwords in logs and ops messages; the same commit adds the recovery script. |
+| 2026-10-31 19:04 MSK | `5f61eaa` — CI test gate in front of deploy; two latent test/DB fixes. |
+| 2026-11-01 10:06 | New alert fires for a different problem (12/46 parse failures) — its first real-world use; see Case 0002. |
 
-The start/end dates come from the fix commit and the recovery script; intermediate
-hours were not reconstructed.
+Times are as recorded (server logs in UTC, commits in MSK); intermediate hours were
+not reconstructed.
 
-## Root causes and contributing factors
+## What went wrong
 
-1. **Unknown was treated as zero.** An exception while scoring produced `score=0`,
+1. **The system could not tell us it was failing — a human noticed after about a
+   week.** No counter of failed LLM calls, no ops message, no heartbeat on
+   "candidates scored vs dropped". The failure was visible only as the *absence* of
+   new vacancies, which also looks like a quiet market (zero new vacancies is a normal
+   harvest outcome), so even a person watching the dashboard needs days to be sure.
+   This was the dominant factor: every other cause below only mattered because
+   nothing detected it.
+2. **Unknown was treated as zero.** An exception while scoring produced `score=0`,
    and the retention rule (`score < min_persist_score` → delete) was written for
    "the model judged this irrelevant". The same code path served "the model never
    judged this".
-2. **Deletion was irreversible and unlogged.** `delete_item` removes the row and its
-   audit trail. A policy meant to keep the database lean had no undo and no record.
-3. **No alert on scoring failures.** The pipeline had no counter of failed LLM calls
-   and no ops message for it.
-4. **A failed day looked like a quiet day.** "0 newly surfaced" is a normal harvest
-   outcome in a slow market, so the output gave no signal (contributing factor, by
-   reasoning rather than measurement).
-5. **No tests in CI.** Before `5f61eaa` the repository had no test workflow at all
-   (`git log -- .github` shows no test workflow before that commit); deploys went out ungated,
+3. **Deletion was irreversible and unlogged.** `delete_item` removes the row and its
+   audit trail. A policy meant to keep the database lean had no undo and no record;
+   recovery depended on container logs happening to print each URL.
+4. **No tests in CI.** Before `5f61eaa` the repository had no test workflow
+   (`git log -- .github` shows none before that commit); deploys went out ungated,
    so a regression in the scoring path could not be caught before production.
 
 ## What changed
@@ -74,7 +91,7 @@ hours were not reconstructed.
 | Retry limit | none | `score_attempts`, `score_failed` after 3 failures; item kept, skipped by harvest, visible for manual review |
 | Account-wide outage | each vacancy burned | credits/auth errors halt scoring for the run and do **not** spend the vacancy's attempts |
 | Deletion rule | any score under 25 | only a score the model actually produced |
-| Detection | none | one ops alert per harvest on a credits/auth error or > 20 % failed calls, with counts and error type only |
+| Detection | none — found by a person after ~a week | one ops alert per harvest on a credits/auth error or > 20 % failed calls, with counts and error type only |
 | Regression gate | none | `test.yml` runs the suite; `deploy.yml` needs it green |
 | Regression tests | none | `test_credit_error_defers_and_halts_run_scoring`, `test_parse_error_defers_and_counts_attempt`, `test_three_failures_mark_score_failed_but_keep_item`, `test_normal_low_score_is_still_deleted` (a real low score is still dropped) |
 
@@ -95,6 +112,14 @@ The fix is encoded in regression tests (needs the test Postgres described in
 
 ```bash
 python -m pytest tests/test_pipeline.py -k "credit_error or parse_error or three_failures or normal_low_score" -q
+```
+
+The impact counts can be re-checked on the server that holds the log extracts:
+
+```bash
+grep -c dropped ~/jh-lost-2026-10-20_28.txt                           # 652 events
+grep -o "url='[^']*'" ~/jh-lost-2026-10-20_28.txt | sort -u | wc -l   # 594 unique URLs
+cut -c1-10 ~/jh-lost-2026-10-20_28.txt | sort | uniq -c               # per day
 ```
 
 The incident itself cannot be re-run (it needed a drained account); the history is
