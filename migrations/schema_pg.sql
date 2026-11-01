@@ -63,6 +63,23 @@ CREATE TABLE IF NOT EXISTS skip_reasons (
     updated_at TEXT NOT NULL
 );
 
+-- Shadow sample for the scoring eval: a deterministic 10% of the vacancies deleted for
+-- scoring below min_persist_score are COPIED here (outside work_items, so no harvest,
+-- dashboard or dedup query ever sees them) to be labelled later: without it the
+-- below-the-cut region can never be measured. Capped by rows and expired by age.
+CREATE TABLE IF NOT EXISTS eval_shadow (
+    id              SERIAL PRIMARY KEY,
+    orig_item_id    INTEGER NOT NULL UNIQUE,
+    source_channel  TEXT,
+    source_link     TEXT,
+    raw_text        TEXT,
+    fetched_text    TEXT,
+    extracted_json  TEXT,
+    score           DOUBLE PRECISION NOT NULL,
+    primary_url_key TEXT,
+    created_at      TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_work_items_state      ON work_items (state);
 CREATE INDEX IF NOT EXISTS idx_work_items_updated_at ON work_items (updated_at);
 

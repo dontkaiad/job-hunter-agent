@@ -136,6 +136,10 @@ class Deps:
     score_max_attempts: int = 3
     # Posts with fewer substantive chars than this are link-only stubs (no LLM).
     link_only_min_chars: int = scoring.DEFAULT_LINK_ONLY_MIN_CHARS
+    # Shadow sample of below-the-cut deletions (eval_shadow). Off unless configured.
+    shadow_rate_percent: int = 0
+    shadow_max_rows: int = 200
+    shadow_ttl_days: int = 90
     # Fetch the real page behind link-only/insufficient posts before scoring.
     # Off by default (no network in tests); live runs enable it via build_deps.
     fetch_enabled: bool = False
@@ -587,6 +591,32 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
     )
 
 
+def _is_prefilter_drop(item: WorkItem) -> bool:
+    """True when the score 0 came from a deterministic prefilter (junk / duplicate),
+    not from the model: those drops say nothing about the scorer, so they are not
+    sampled for the shadow set."""
+    try:
+        note = json.loads(item.extracted_json or "{}").get(REASONING_KEY) or ""
+    except Exception:
+        return False
+    return str(note).startswith("prefilter:")
+
+
+def _maybe_shadow_copy(conn: psycopg.Connection, item: WorkItem, deps: Deps, score) -> None:
+    """Best-effort: keep a copy of a deterministic share of model-scored deletions.
+    A failure here must never block the deletion itself."""
+    if not deps.shadow_rate_percent or _is_prefilter_drop(item):
+        return
+    try:
+        if store.shadow_copy(
+            conn, item, score, rate_percent=deps.shadow_rate_percent,
+            max_rows=deps.shadow_max_rows, ttl_days=deps.shadow_ttl_days,
+        ):
+            print(f"[shadow] id={item.id} score={score} copied to eval_shadow", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[shadow] id={item.id} copy failed (deletion continues): {exc!r}", flush=True)
+
+
 def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T3/T4: scored -> rejected | surfaced.
 
@@ -606,6 +636,7 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
     min_persist = deps.min_persist_score if deps is not None else 0
     # Only drop on a score the model actually produced (never on a NULL score).
     if min_persist > 0 and extracted.relevance_score is not None and score < min_persist:
+        _maybe_shadow_copy(conn, item, deps, score)
         store.delete_item(conn, item.id)
         print(
             f"[harvest] dropped id={item.id} url={item.source_link!r} "

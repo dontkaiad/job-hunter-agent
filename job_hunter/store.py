@@ -738,6 +738,68 @@ def set_skip_reasons(
     conn.commit()
 
 
+SHADOW_SALT = "shadow-v1"
+
+
+def shadow_selected(item_id: int, rate_percent: int) -> bool:
+    """Deterministic share of ids chosen for the shadow sample. PURE.
+
+    sha1("<id>:shadow-v1") mod 100 < rate: the same id always gives the same answer
+    (re-runs, retries and reprocessing never change the sample) and no RNG state is kept.
+    """
+    if rate_percent <= 0:
+        return False
+    import hashlib
+
+    h = int(hashlib.sha1(f"{item_id}:{SHADOW_SALT}".encode()).hexdigest(), 16)
+    return h % 100 < rate_percent
+
+
+def shadow_copy(
+    conn: psycopg.Connection,
+    item: WorkItem,
+    score: float,
+    *,
+    rate_percent: int,
+    max_rows: int,
+    ttl_days: int,
+) -> bool:
+    """Copy a vacancy about to be deleted for scoring below the cut into eval_shadow.
+
+    Returns True when a row was added. Expired rows (older than ``ttl_days``) are
+    purged first; when ``max_rows`` are still held nothing more is added (the earliest
+    stay). Never touches work_items. The caller still deletes the item either way.
+    """
+    if not shadow_selected(item.id, rate_percent):
+        return False
+    from datetime import datetime, timedelta
+
+    ts = now_iso()
+    try:
+        cutoff = (datetime.fromisoformat(ts) - timedelta(days=ttl_days)).isoformat()
+        conn.execute("DELETE FROM eval_shadow WHERE created_at < %s", (cutoff,))
+        held = conn.execute("SELECT count(*) AS n FROM eval_shadow").fetchone()["n"]
+        if held >= max_rows:
+            conn.commit()
+            return False
+        cur = conn.execute(
+            """
+            INSERT INTO eval_shadow
+                (orig_item_id, source_channel, source_link, raw_text, fetched_text,
+                 extracted_json, score, primary_url_key, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (orig_item_id) DO NOTHING
+            """,
+            (item.id, item.source_channel, item.source_link, item.raw_text,
+             item.fetched_text, item.extracted_json, float(score), item.primary_url_key, ts),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:
     """Delete a work_item and its transition audit log.
 

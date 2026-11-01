@@ -181,6 +181,13 @@ class Config:
     # live DB: stubs are 0-19 chars; real short posts with a title are >=66.
     link_only_min_chars: int = 40
 
+    # --- Shadow sample of below-the-cut deletions (eval_shadow) ---
+    # A deterministic (hash of the id) share of vacancies deleted for score <
+    # min_persist_score is copied to eval_shadow for later labelling. 0 disables it.
+    shadow_rate_percent: int = 10
+    shadow_max_rows: int = 200
+    shadow_ttl_days: int = 90
+
     # --- Fetch the real text behind link-only stubs (vacancy_fetch.py) ---
     # Hosts NEVER fetched automatically (subdomains included): their ToS forbid
     # storing the content (fetched_text stores it) -> manual add-by-URL only; or
@@ -278,6 +285,11 @@ def load_config(env: Optional[dict] = None) -> Config:
         min_persist_score=_int_or_none(get("MIN_PERSIST_SCORE")) or 25,
         score_max_attempts=_int_or_none(get("SCORE_MAX_ATTEMPTS")) or 3,
         link_only_min_chars=_int_or_none(get("LINK_ONLY_MIN_CHARS")) or 40,
+        shadow_rate_percent=(
+            int(get("SHADOW_RATE_PERCENT")) if get("SHADOW_RATE_PERCENT").strip().isdigit() else 10
+        ),
+        shadow_max_rows=_int_or_none(get("SHADOW_MAX_ROWS")) or 200,
+        shadow_ttl_days=_int_or_none(get("SHADOW_TTL_DAYS")) or 90,
         fetch_enabled=(get("FETCH_ENABLED") or "true").lower() in ("1", "true", "yes"),
         fetch_denylist=(
             _split_csv(get("FETCH_DENYLIST"))
