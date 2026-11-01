@@ -7,8 +7,9 @@
   `job_hunter/run.py` (`scoring_alert_text`), `.github/workflows/test.yml`,
   `deploy.yml`
 - **Sources:** commit `0e14afd` message, `scripts/oneoff/restore_lost_tme.py`
-  docstring, log extracts on the server (counts re-checked 2026-11-01), and
-  operator-reported facts (marked below)
+  docstring, log extracts on the server (counts re-checked 2026-11-01), the phase-5
+  recovery report (marked, partly re-checked against the DB), and operator-reported
+  facts (marked below)
 
 ## Summary
 
@@ -41,11 +42,33 @@ derived from it).
   difference is unexplained and immaterial.
 - The deletion also removed the items' `state_transitions` rows, so the DB holds no
   trace of them; the logs were the only record.
-- Recovery (**operator-reported**): the URLs were re-collected from the logs; 8 of
-  the recovered vacancies ended up surfaced after re-scoring. The recovery script
-  (`restore_lost_tme.py`) re-reads `t.me` posts only, i.e. 421 of the 594 URLs; what
-  happened to the other 173 is not established here (career.habr.com ones are
-  manual-add-only by policy).
+- **Recovery.** Two paths, both re-scoring through the normal pipeline (figures are
+  **per the phase-5 recovery report**; the right-hand column says what could be
+  re-checked against the DB on 2026-11-01):
+
+  | Source | URLs | already in DB | dead | < 25 again, deleted | returned | returned: rejected / surfaced / deferred |
+  |---|---|---|---|---|---|---|
+  | `t.me` (`restore_lost_tme.py`) | 421 | 0 | 22 | 355 | 80 | 63 / 6 / 11 |
+  | web (standard `add_by_url`) | 173 | 5 | 6 | 105 | 57 | 51 / 2 / 4 |
+
+  Total surfaced: **8**. LLM calls for the whole recovery: Haiku 795, Sonnet 14.
+
+  **Checked against the DB** (rows whose `source_link` is one of the 594 lost URLs and
+  that were created after the outage, 2026-10-29…31): `t.me` — exactly **80** restored
+  rows, 0 older rows; web — **60** restored rows and no pre-outage rows; **6 + 2 = 8**
+  of them have a `surfaced` transition, matching the report's total. Their states
+  today have moved on as the operator acted on them (e.g. `rejected` 66 + 57, a few
+  `sent` / `drafted` / `declined`, 8 + 1 still `extracted`), so the report's
+  rejected / deferred split cannot be reproduced from current states.
+
+  **Not checkable from the DB:** the dead and "< 25 again, deleted" counts (a deleted
+  row leaves nothing behind; 341 `t.me` and 113 web URLs have no row today) and the
+  call counts (no per-call record). One inconsistency in the `t.me` line: its
+  outcomes sum to 22 + 355 + 80 = 457, not 421. Most likely the 355 counts work items
+  while 421 counts URLs (a digest post yields several items — the same reason there
+  are 652 drop events for 594 URLs); this is a hypothesis, not verified. The web line
+  adds up (5 + 6 + 105 + 57 = 173) though the DB shows 60 restored rows against the
+  report's 57 + 5 already-present.
 
 ## Timeline
 
