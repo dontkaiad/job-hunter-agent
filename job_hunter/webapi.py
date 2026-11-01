@@ -364,10 +364,14 @@ def require_auth(app: str):
 
 # --- Router / endpoints -----------------------------------------------------
 
+# ONE shared auth dependency object for both routers and for the actor lookup, so
+# FastAPI runs the cookie/grant check once per request (it caches by callable).
+_api_auth = require_auth(app=APP_NAME)
+
 router = APIRouter(
     prefix="/api",
     tags=["pipeline"],
-    dependencies=[Depends(require_auth(app=APP_NAME))],
+    dependencies=[Depends(_api_auth)],
 )
 
 
@@ -592,8 +596,27 @@ def get_deps(config: Config = Depends(get_config)) -> Deps:
 writer_router = APIRouter(
     prefix="/api",
     tags=["actions"],
-    dependencies=[Depends(require_auth(app=APP_NAME))],
+    dependencies=[Depends(_api_auth)],
 )
+
+
+class Actor(BaseModel):
+    """Who is behind a write request: provenance recorded on the transition."""
+
+    channel: str          # dashboard | api
+    actor_id: str         # Telegram id of the signed-in user
+
+
+def get_actor(request: Request, tg_id: int = Depends(_api_auth)) -> Actor:
+    """The signed-in user plus the channel the request came through.
+
+    A browser SPA request carries an ``Origin`` (or ``Referer``) header; a bare
+    HTTP client (curl, a script reusing the session cookie) normally does not, so
+    that is recorded as ``api``. A heuristic, not a security boundary: a script can
+    forge the header, a careless one will not.
+    """
+    browser = bool(request.headers.get("origin") or request.headers.get("referer"))
+    return Actor(channel="dashboard" if browser else "api", actor_id=str(tg_id))
 
 
 # Maps the action route -> the HITL decision the bot's button sends.
@@ -621,6 +644,7 @@ def _apply_decision(
     fx: Optional[fx_mod.FxRates],
     deps: Deps,
     reason: Optional[str] = None,
+    actor: Optional["Actor"] = None,
 ) -> ItemDetail:
     """Run a single HITL decision through advance_by_id and serialize the result.
 
@@ -635,7 +659,11 @@ def _apply_decision(
         raise HTTPException(status_code=404, detail=f"work item {item_id} not found")
 
     current_state = item.state
-    result = pipeline_mod.advance_by_id(conn, item_id, decision=decision, deps=deps, reason=reason)
+    result = pipeline_mod.advance_by_id(
+        conn, item_id, decision=decision, deps=deps, reason=reason,
+        channel=actor.channel if actor else "api",
+        actor_id=actor.actor_id if actor else None,
+    )
 
     if result.status != "moved":
         label = _DECISION_LABELS.get(decision, decision)
@@ -663,12 +691,13 @@ def approve_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_APPROVE: T7 surfaced->approved or T8 backlog->approved.
 
     ONLY the approve transition (split from auto-draft; see module note). The
     item ends in 'approved'; call POST /draft next to generate the отклик."""
-    return _apply_decision(conn, item_id, DECISION_APPROVE, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_APPROVE, fx, deps, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/skip", response_model=ItemDetail)
@@ -677,9 +706,10 @@ def skip_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_SKIP: T5 surfaced->skipped or T9 backlog->skipped."""
-    return _apply_decision(conn, item_id, DECISION_SKIP, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_SKIP, fx, deps, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/backlog", response_model=ItemDetail)
@@ -688,9 +718,10 @@ def backlog_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_BACKLOG: T6 surfaced->backlog."""
-    return _apply_decision(conn, item_id, DECISION_BACKLOG, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_BACKLOG, fx, deps, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/sent", response_model=ItemDetail)
@@ -699,10 +730,11 @@ def sent_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_SEND: T12 drafted->sent, or T27/T28 approved/researched->sent
     when no отклик was generated (the bot's «✅ Отправила» manual-confirm)."""
-    return _apply_decision(conn, item_id, DECISION_SEND, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_SEND, fx, deps, actor=actor)
 
 
 # Post-send response funnel (all manual, KIND_HITL). Each route mirrors the bot
@@ -721,9 +753,10 @@ def screening_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_SCREENING: T13 sent->screening (employer replied)."""
-    return _apply_decision(conn, item_id, DECISION_SCREENING, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_SCREENING, fx, deps, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/interview", response_model=ItemDetail)
@@ -732,9 +765,10 @@ def interview_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_INTERVIEW: T16 screening->interview."""
-    return _apply_decision(conn, item_id, DECISION_INTERVIEW, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_INTERVIEW, fx, deps, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/offer", response_model=ItemDetail)
@@ -743,9 +777,10 @@ def offer_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_OFFER: T19 interview->offer (terminal)."""
-    return _apply_decision(conn, item_id, DECISION_OFFER, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_OFFER, fx, deps, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/decline", response_model=ItemDetail)
@@ -755,9 +790,10 @@ def decline_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_DECLINE: T14/T17/T20/T22/T23/T24 *->declined. Optional reason body."""
-    return _apply_decision(conn, item_id, DECISION_DECLINE, fx, deps, reason=body.reason)
+    return _apply_decision(conn, item_id, DECISION_DECLINE, fx, deps, reason=body.reason, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/close", response_model=ItemDetail)
@@ -766,9 +802,10 @@ def close_item(
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
     deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
 ) -> ItemDetail:
     """DECISION_CLOSE: T15/T18/T21 *->closed (withdrawn / no longer relevant)."""
-    return _apply_decision(conn, item_id, DECISION_CLOSE, fx, deps)
+    return _apply_decision(conn, item_id, DECISION_CLOSE, fx, deps, actor=actor)
 
 
 @writer_router.post("/items/{item_id}/draft", response_model=ItemDetail)

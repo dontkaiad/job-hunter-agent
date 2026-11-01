@@ -308,6 +308,18 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
         if ddl[0] not in have:
             conn.execute(ddl[1])
             conn.commit()
+    have_tr = {
+        r["column_name"]
+        for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'state_transitions'"
+        ).fetchall()
+    }
+    conn.commit()
+    for col in ("channel", "actor_id"):
+        if col not in have_tr:
+            conn.execute(f"ALTER TABLE state_transitions ADD COLUMN IF NOT EXISTS {col} TEXT")
+            conn.commit()
     for col, ddl in (
         ("defer_reason", "defer_reason TEXT"),
         ("fetched_text", "fetched_text TEXT"),
@@ -377,8 +389,8 @@ def insert_item(
     conn.execute(
         """
         INSERT INTO state_transitions
-            (item_id, from_state, to_state, kind, actor, reason, created_at)
-        VALUES (%s, NULL, %s, 'deterministic', 'system', 'ingested', %s)
+            (item_id, from_state, to_state, kind, actor, reason, created_at, channel)
+        VALUES (%s, NULL, %s, 'deterministic', 'system', 'ingested', %s, 'system')
         """,
         (item_id, state, ts),
     )
@@ -459,9 +471,15 @@ def update_state(
     extracted_json: Optional[str] = None,
     relevance_score: Optional[float] = None,
     commit: bool = True,
+    channel: Optional[str] = None,
+    actor_id: Optional[str] = None,
 ) -> None:
     """Atomically update work_items.state (+ optional fields) and append a
     state_transitions row in the SAME transaction.
+
+    ``channel`` / ``actor_id`` record WHO moved it: dashboard | bot | api | script |
+    system. A human (hitl) decision made by code that did not say where it came from
+    is recorded as ``script`` -- never silently as the dashboard or the bot.
 
     Only ``pipeline.advance`` should call this.
     """
@@ -482,10 +500,13 @@ def update_state(
         conn.execute(
             """
             INSERT INTO state_transitions
-                (item_id, from_state, to_state, kind, actor, reason, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (item_id, from_state, to_state, kind, actor, reason, created_at,
+                 channel, actor_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (item_id, from_state, new_state, kind, actor, reason, ts),
+            (item_id, from_state, new_state, kind, actor, reason, ts,
+             channel or ("script" if kind == "hitl" else "system"),
+             None if actor_id is None else str(actor_id)),
         )
     except Exception:
         conn.rollback()
@@ -529,8 +550,8 @@ def record_score_failure(
         conn.execute(
             """
             INSERT INTO state_transitions
-                (item_id, from_state, to_state, kind, actor, reason, created_at)
-            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s)
+                (item_id, from_state, to_state, kind, actor, reason, created_at, channel)
+            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s, 'system')
             """,
             (item_id, row["state"], row["state"], reason, ts),
         )
@@ -585,8 +606,8 @@ def set_defer_reason(
         conn.execute(
             """
             INSERT INTO state_transitions
-                (item_id, from_state, to_state, kind, actor, reason, created_at)
-            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s)
+                (item_id, from_state, to_state, kind, actor, reason, created_at, channel)
+            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s, 'system')
             """,
             (item_id, row["state"], row["state"],
              audit_reason or f"score parked: {reason}", ts),
@@ -675,8 +696,8 @@ def record_fetch(
         conn.execute(
             """
             INSERT INTO state_transitions
-                (item_id, from_state, to_state, kind, actor, reason, created_at)
-            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s)
+                (item_id, from_state, to_state, kind, actor, reason, created_at, channel)
+            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s, 'system')
             """,
             (item_id, row["state"], row["state"],
              f"fetch {status} host={host} chars={len(text) if text else 0}", ts),

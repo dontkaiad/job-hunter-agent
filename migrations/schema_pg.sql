@@ -81,7 +81,12 @@ CREATE TABLE IF NOT EXISTS state_transitions (
     kind       TEXT,
     actor      TEXT,
     reason     TEXT,
-    created_at TEXT    NOT NULL
+    created_at TEXT    NOT NULL,
+    -- Provenance (added 2026-11-01, NOT back-filled: NULL = unknown/older row).
+    -- channel: dashboard | bot | api | script | system. actor_id: the Telegram id of
+    -- the person behind a dashboard/bot action (DB only), NULL for system rows.
+    channel    TEXT,
+    actor_id   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_transitions_item       ON state_transitions (item_id);

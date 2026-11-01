@@ -1226,7 +1226,11 @@ class JobHunterBot:
         # the gap between daily harvests when the connection can die undetected.
         self.conn = await store.ensure_reconnected(self.conn, self.cfg.database_url)
 
-        result = pipeline.advance_by_id(self.conn, item_id, decision=decision, deps=self.deps)
+        uid = _user_id_of(cb)
+        result = pipeline.advance_by_id(
+            self.conn, item_id, decision=decision, deps=self.deps,
+            channel="bot", actor_id=None if uid is None else str(uid),
+        )
 
         # On approve, drive the LLM pipeline forward to a draft, then surface it.
         followup = None

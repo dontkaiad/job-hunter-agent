@@ -752,6 +752,8 @@ def advance(
     decision: Optional[str] = None,
     deps: Optional[Deps] = None,
     reason: Optional[str] = None,
+    channel: Optional[str] = None,
+    actor_id: Optional[str] = None,
 ) -> AdvanceResult:
     """Single dispatcher for ALL transitions (DESIGN.md §1.5).
 
@@ -761,6 +763,8 @@ def advance(
         decision: a human decision (states.DECISION_*) for HITL gates.
         deps: injected LLM/FX collaborators.
         reason: optional human-supplied note recorded with HITL moves.
+        channel / actor_id: provenance of a HITL decision (dashboard | bot | api |
+            script) and the Telegram id behind it; stored on the transition row.
     """
     deps = deps or Deps()
 
@@ -784,6 +788,7 @@ def advance(
             conn, item.id, t.to_state,
             from_state=item.state, kind=KIND_HITL, actor=ACTOR_HUMAN,
             reason=reason or f"human:{decision}",
+            channel=channel, actor_id=actor_id,
         )
         return AdvanceResult("moved", item.id, item.state, t.to_state, t.name,
                              reason or decision)
@@ -811,12 +816,15 @@ def advance_by_id(
     decision: Optional[str] = None,
     deps: Optional[Deps] = None,
     reason: Optional[str] = None,
+    channel: Optional[str] = None,
+    actor_id: Optional[str] = None,
 ) -> AdvanceResult:
     """Re-read the item by id (fresh state) then advance it."""
     item = store.get_item(conn, item_id)
     if item is None:
         return AdvanceResult("noop", item_id, "?", reason="item not found")
-    return advance(conn, item, decision=decision, deps=deps, reason=reason)
+    return advance(conn, item, decision=decision, deps=deps, reason=reason,
+                   channel=channel, actor_id=actor_id)
 
 
 def run_to_gate(
