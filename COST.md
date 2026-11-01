@@ -7,31 +7,74 @@ low.
 ![Daily cost](docs/cost.png)
 <!-- Drop the daily-cost chart screenshot at docs/cost.png (see docs/README.md). -->
 
-## Method & honesty caveat
+## Status (checked 2026-11-01)
 
-The dollar figures below are **modeled** from the actual code constants
-(per-step model routing, `max_tokens`, and the prompt-caching decisions in
-`job_hunter/llm.py`) multiplied by current Anthropic list prices. Token counts
-were measured by running the repo's own prompt builders and token estimator over
-a representative ~830-character Cyrillic posting and a 6,000-character fetched
-page (the real per-page research cap).
+**Prices are current; the cost model below it is partly superseded.**
 
-They are **not** drawn from billing telemetry: the repo intentionally logs no
-per-call token usage, so these are estimates, not invoice line items. Stating
-this plainly is the honest framing — the numbers are a faithful model of the
-code, accurate to within the variance of real posting size and model output
-length.
+- The per-token prices below were checked on **2026-11-01** against the official
+  pricing page (<https://platform.claude.com/docs/en/about-claude/pricing>) for the two
+  models the pipeline uses (`claude-haiku-4-5`, `claude-sonnet-4-6`) and match. For
+  reference the same page now lists newer, cheaper models (e.g. Haiku 5.5 at
+  $0.10 / $0.50 per MTok, Sonnet 5.5 at $2 / $10); the pipeline does not use them and
+  this document does not evaluate a switch.
+- The sections **"Per-step model + token map"**, **"Cost of one normal daily harvest"**
+  and **"Cost of one approval"** are the 2026-06 model and are **no longer accurate for
+  scoring**: scoring is now a Haiku first pass on every posting plus a Sonnet judge
+  only when the Haiku score falls in the 50–70 corridor (the Sonnet "refine" pass was
+  removed), through a forced tool call, at `temperature=0`, with a much larger system
+  prompt. Sonnet is therefore **not** "⅔ of the daily bill" any more, and the
+  $0.13/day and $4.8/month figures should not be quoted. They are kept as history.
+- **Measured replacement:** see "Measured per-call cost" below. A new daily total is
+  **not** claimed: it needs today's ingest volume and the real corridor share, neither
+  of which is recorded.
 
-**Prices (Anthropic API, standard tier, per million tokens):**
+## Measured per-call cost (2026-11-01)
+
+Taken from the `usage` block of real API responses (not modelled), by
+`python -m evals.cost_probe run --n 5`: the 5 most recent ordinary posts (500–3,000
+characters) through the production extract, Haiku score and Sonnet judge code paths,
+prices as in the table below.
+
+| Step | Model | Mean USD / call | Mean input tokens | Cache read / write | Mean output tokens |
+|---|---|---|---|---|---|
+| extract | Haiku 4.5 | **$0.0031** | 2,107 | 0 / 0 | 203 |
+| score, first pass | Haiku 4.5 | **$0.0066** | 4,536 | 0 / 0 | 414 |
+| score, corridor judge | Sonnet 4.6 | **$0.0132** | 1,108 | 2,707 / 677 | 435 |
+
+So one ordinary posting costs about **$0.0097** (extract + Haiku score) and about
+**$0.0229** when the Haiku score lands in the 50–70 corridor and the Sonnet judge runs.
+Caveats: n = 5 postings, one run; the Sonnet figure includes whatever cache state the
+run happened to have (per-call range $0.0098–$0.0218, the highest being the first call
+of the run); the share of postings that reach the corridor is **not measured here**;
+research and draft (post-approval) were not re-measured. Observation, not a diagnosis:
+the Haiku scoring prompt is ~4.5k input tokens per call with no cache reads, whereas
+the 2026-06 model assumed ~1.9k.
+
+**Prices (Anthropic API, standard tier, per million tokens; verified 2026-11-01):**
 
 | Model | Input | Output | Cache read | Cache write (5-min) |
 |---|---|---|---|---|
 | Claude Haiku 4.5 | $1.00 | $5.00 | $0.10 | $1.25 |
 | Claude Sonnet 4.6 | $3.00 | $15.00 | $0.30 | $3.75 |
 
-Source: [Anthropic API pricing](https://platform.claude.com/docs/en/about-claude/pricing)
-(corroborated by [CloudZero](https://www.cloudzero.com/blog/claude-api-pricing/)
-and [Finout](https://www.finout.io/blog/anthropic-api-pricing), June 2026).
+Source: [Anthropic API pricing](https://platform.claude.com/docs/en/about-claude/pricing),
+read directly on 2026-11-01. The evals use the same table
+(`evals/common.py: PRICES`, `PRICES_VERIFIED`) and report **measured** cost for every
+live run; re-verify the table when a model or its price changes.
+
+## Method & honesty caveat (2026-06 model)
+
+The dollar figures in the sections below ("Per-step model + token map" through
+"Cost-aware design") are **modeled** from the code constants
+(per-step model routing, `max_tokens`, and the prompt-caching decisions in
+`job_hunter/llm.py`) multiplied by Anthropic list prices as of June 2026. Token counts
+were measured by running the repo's own prompt builders and token estimator over
+a representative ~830-character Cyrillic posting and a 6,000-character fetched
+page (the real per-page research cap).
+
+They are **not** drawn from billing telemetry: the repo intentionally logs no
+per-call token usage, so these are estimates, not invoice line items. The measured
+section above is the current source for per-call numbers.
 
 ## Per-step model + token map
 
