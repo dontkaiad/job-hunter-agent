@@ -53,6 +53,93 @@ def load_json(path: Path) -> Any:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+# --- measured API cost -------------------------------------------------------
+# Live runs report the cost they ACTUALLY incurred, summed from the `usage` block of
+# every API response -- never a modelled figure. Prices are USD per million tokens,
+# verified against the official pricing page on PRICES_VERIFIED; re-check them when
+# the models change (an unknown model is reported as unpriced, not as $0).
+PRICES_SOURCE = "https://platform.claude.com/docs/en/about-claude/pricing"
+PRICES_VERIFIED = "2026-11-01"
+PRICES = {
+    "claude-haiku-4-5": {"input": 1.00, "cache_write_5m": 1.25, "cache_read": 0.10, "output": 5.00},
+    "claude-sonnet-4-6": {"input": 3.00, "cache_write_5m": 3.75, "cache_read": 0.30, "output": 15.00},
+}
+
+
+def price_for(model):
+    """Price row for ``model`` (exact id, or a dated variant of it); None if unknown."""
+    if model in PRICES:
+        return PRICES[model]
+    for name, row in PRICES.items():
+        if (model or "").startswith(name):
+            return row
+    return None
+
+
+def usage_cost(model, usage):
+    """USD for one response's usage dict (None if the model is unpriced). PURE."""
+    p = price_for(model)
+    if p is None:
+        return None
+    return (
+        usage.get("input_tokens", 0) * p["input"]
+        + usage.get("cache_creation_input_tokens", 0) * p["cache_write_5m"]
+        + usage.get("cache_read_input_tokens", 0) * p["cache_read"]
+        + usage.get("output_tokens", 0) * p["output"]
+    ) / 1_000_000
+
+
+class UsageMeter:
+    """Records the usage of every call made through a client. Attach before use."""
+
+    def __init__(self):
+        self.calls = []   # (model, usage dict)
+
+    def attach(self, client):
+        orig = client._client.messages.create
+
+        def create(**kw):
+            resp = orig(**kw)
+            u = getattr(resp, "usage", None)
+            self.calls.append((kw.get("model"), {
+                k: int(getattr(u, k, 0) or 0)
+                for k in ("input_tokens", "output_tokens",
+                          "cache_creation_input_tokens", "cache_read_input_tokens")
+            } if u is not None else {}))
+            return resp
+
+        client._client.messages.create = create
+        return self
+
+    def report(self):
+        """Measured totals per model + overall (aggregates only)."""
+        by = {}
+        unpriced = 0
+        for model, usage in self.calls:
+            row = by.setdefault(model, {"calls": 0, "input_tokens": 0, "output_tokens": 0,
+                                        "cache_creation_input_tokens": 0,
+                                        "cache_read_input_tokens": 0, "usd": 0.0})
+            row["calls"] += 1
+            for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens",
+                      "cache_read_input_tokens"):
+                row[k] += usage.get(k, 0)
+            c = usage_cost(model, usage)
+            if c is None:
+                unpriced += 1
+            else:
+                row["usd"] += c
+        for row in by.values():
+            row["usd"] = round(row["usd"], 4)
+        return {
+            "measured": True,
+            "prices_verified": PRICES_VERIFIED,
+            "total_usd": round(sum(r["usd"] for r in by.values()), 4),
+            "calls": len(self.calls),
+            "unpriced_calls": unpriced,
+            "by_model": by,
+        }
+
+
 # --- live-mode helpers (DB + API); imported lazily by the live commands ------
 
 def live_env():
@@ -68,7 +155,9 @@ def live_env():
         cfg.database_url, options="-c default_transaction_read_only=on",
         row_factory=psycopg.rows.dict_row,
     )
-    return cfg, load_profile(), llm.AnthropicClient(cfg.anthropic_api_key, cfg.cheap_model), conn
+    client = llm.AnthropicClient(cfg.anthropic_api_key, cfg.cheap_model)
+    client.meter = UsageMeter().attach(client)   # every live run reports measured cost
+    return cfg, load_profile(), client, conn
 
 
 def fetch_items(conn, ids: List[int]) -> List[Dict[str, Any]]:

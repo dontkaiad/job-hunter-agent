@@ -4,13 +4,14 @@ Live runs (paid API / production DB) are per-module and explicit, never in CI:
   python -m evals.score_stability_eval run --ids <id> <id> <id>
   python -m evals.parse_robustness_eval run --ids <id> ...
   python -m evals.link_fetch_eval run
+  python -m evals.cost_probe run
 """
 from __future__ import annotations
 
 import json
 import sys
 
-from evals import link_fetch_eval, parse_robustness_eval, score_stability_eval
+from evals import cost_probe, link_fetch_eval, parse_robustness_eval, score_stability_eval
 
 
 def run_all():
@@ -18,6 +19,7 @@ def run_all():
         "score_stability": score_stability_eval.run_offline(),
         "parse_robustness": parse_robustness_eval.run_offline(),
         "link_fetch": link_fetch_eval.run_offline(),
+        "cost_probe": cost_probe.run_offline(),
     }
 
 

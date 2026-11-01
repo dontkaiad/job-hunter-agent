@@ -88,7 +88,8 @@ def run_live(ids: List[int], runs: int, save: Optional[str]) -> Dict[str, Any]:
 
     rows = measure(score_once, [("default", None), ("t0", 0)],
                    [cfg.cheap_model, cfg.judge_model], items, runs)
-    out = {"runs_per_cell": runs, "vacancies": len(items), "rows": rows}
+    out = {"runs_per_cell": runs, "vacancies": len(items), "rows": rows,
+           "cost": client.meter.report()}
     if save:
         save_result(save, out)
     return out

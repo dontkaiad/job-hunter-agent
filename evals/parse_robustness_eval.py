@@ -136,6 +136,7 @@ def run_live(ids: List[int]) -> Dict[str, Any]:
         "text_path_stop_reason_max_tokens": max_tokens_hits,
         "text_path_input_chars": {k: sorted(v) for k, v in in_chars.items()},
         "tool_path": dict(tool_outcomes),
+        "cost": client.meter.report(),
     }
 
 

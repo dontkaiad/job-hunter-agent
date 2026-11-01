@@ -118,6 +118,7 @@ def run_live(ids: Optional[List[int]]) -> Dict[str, Any]:
         "pages_seen_more_than_once": sum(1 for n in page_hashes.values() if n > 1),
         "score_buckets": dict(buckets),
         "by_host": {h: dict(c) for h, c in sorted(by_host.items())},
+        "cost": client.meter.report(),
     }
 
 
