@@ -27,7 +27,12 @@ CREATE TABLE IF NOT EXISTS work_items (
     score_failed      BOOLEAN          NOT NULL DEFAULT FALSE,
     -- Why scoring is parked WITHOUT being a failure: 'link_only' (stub post, no
     -- text) or 'insufficient' (LLM said the posting lacks content). No attempt spent.
-    defer_reason      TEXT
+    defer_reason      TEXT,
+    -- Real page text fetched for a link-only stub (vacancy_fetch.py), its status
+    -- (ok|denylisted|no_url|failed) and the number of failed fetch tries.
+    fetched_text      TEXT,
+    fetch_status      TEXT,
+    fetch_attempts    INTEGER          NOT NULL DEFAULT 0
 );
 
 -- Valid-state CHECK as a NAMED constraint, applied via idempotent drop+recreate

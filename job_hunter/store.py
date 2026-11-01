@@ -48,6 +48,9 @@ class WorkItem:
     score_attempts: int = 0
     score_failed: bool = False
     defer_reason: Optional[str] = None
+    fetched_text: Optional[str] = None
+    fetch_status: Optional[str] = None
+    fetch_attempts: int = 0
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "WorkItem":
@@ -65,6 +68,9 @@ class WorkItem:
             score_attempts=row.get("score_attempts") or 0,
             score_failed=bool(row.get("score_failed")),
             defer_reason=row.get("defer_reason"),
+            fetched_text=row.get("fetched_text"),
+            fetch_status=row.get("fetch_status"),
+            fetch_attempts=row.get("fetch_attempts") or 0,
         )
 
 
@@ -298,9 +304,15 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
         if ddl[0] not in have:
             conn.execute(ddl[1])
             conn.commit()
-    if "defer_reason" not in have:
-        conn.execute("ALTER TABLE work_items ADD COLUMN IF NOT EXISTS defer_reason TEXT")
-        conn.commit()
+    for col, ddl in (
+        ("defer_reason", "defer_reason TEXT"),
+        ("fetched_text", "fetched_text TEXT"),
+        ("fetch_status", "fetch_status TEXT"),
+        ("fetch_attempts", "fetch_attempts INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if col not in have:
+            conn.execute(f"ALTER TABLE work_items ADD COLUMN IF NOT EXISTS {ddl}")
+            conn.commit()
 
 
 def insert_item(
@@ -562,6 +574,54 @@ def set_defer_reason(
         raise
     conn.commit()
     return True
+
+
+def record_fetch(
+    conn: psycopg.Connection,
+    item_id: int,
+    status: str,
+    *,
+    text: Optional[str] = None,
+    url: Optional[str] = None,
+    count_attempt: bool = False,
+) -> int:
+    """Persist the outcome of fetching a stub's link. Never touches state/score.
+
+    ``status`` is ok|denylisted|no_url|failed. ``count_attempt`` bumps
+    fetch_attempts (used for real failed requests only). Returns fetch_attempts.
+    """
+    ts = now_iso()
+    try:
+        row = conn.execute(
+            """
+            UPDATE work_items
+               SET fetch_status = %s,
+                   fetched_text = COALESCE(%s, fetched_text),
+                   fetch_attempts = fetch_attempts + %s,
+                   updated_at = %s
+             WHERE id = %s
+         RETURNING state, fetch_attempts
+            """,
+            (status, text, 1 if count_attempt else 0, ts, item_id),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return 0
+        host = url.split("/")[2] if url and "//" in url else "-"
+        conn.execute(
+            """
+            INSERT INTO state_transitions
+                (item_id, from_state, to_state, kind, actor, reason, created_at)
+            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s)
+            """,
+            (item_id, row["state"], row["state"],
+             f"fetch {status} host={host} chars={len(text) if text else 0}", ts),
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return row["fetch_attempts"]
 
 
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:

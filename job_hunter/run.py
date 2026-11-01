@@ -71,11 +71,23 @@ def parked_line(stats: "pipeline.ScoreRunStats") -> str:
     return f"deferred: link_only {stats.link_only}, insufficient {stats.insufficient}"
 
 
+def fetch_line(stats: "pipeline.ScoreRunStats") -> str:
+    """The `fetch: ok N, failed N, denylisted N` ops line. PURE."""
+    return (
+        f"fetch: ok {stats.fetched}, failed {stats.fetch_failed}, "
+        f"denylisted {stats.denylisted}"
+    )
+
+
 def parked_info_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
-    """Quiet (non-red) ops line when items were parked this run, else None. PURE."""
-    if not (stats.link_only or stats.insufficient):
+    """Quiet (non-red) ops lines when items were parked/fetched this run, else
+    None. PURE."""
+    if not (
+        stats.link_only or stats.insufficient or stats.fetched
+        or stats.fetch_failed or stats.denylisted
+    ):
         return None
-    return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats)
+    return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + fetch_line(stats)
 
 
 def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
@@ -99,6 +111,7 @@ def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
         f"error type: {kinds}",
         f"deferred (kept for retry): {stats.deferred}, marked score_failed: {stats.marked_failed}",
         parked_line(stats),
+        fetch_line(stats),
     ]
     if stats.halted:
         lines.append(

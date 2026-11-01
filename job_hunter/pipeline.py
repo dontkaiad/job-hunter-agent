@@ -17,12 +17,13 @@ HITL transitions without a legal decision return 'needs_human' and do not move.
 from __future__ import annotations
 
 import json
+import time
 
 import psycopg
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import agents, scoring, store
+from . import agents, scoring, store, vacancy_fetch
 from .extract import extract as heuristic_extract
 from .extract import reconcile as reconcile_extract
 from .fx import FxRates
@@ -92,6 +93,9 @@ class ScoreRunStats:
     kinds: Dict[str, int] = field(default_factory=dict)
     # Parked, NOT failures: no attempt spent, never counted in failed/deferred.
     link_only: int = 0       # stub posts skipped before the LLM
+    fetched: int = 0         # stub text successfully fetched from its link
+    fetch_failed: int = 0    # fetch attempted and failed (retried, max N)
+    denylisted: int = 0      # stub on a denylisted host: never fetched
     insufficient: int = 0    # LLM said the posting has no content to judge
 
 
@@ -131,6 +135,13 @@ class Deps:
     score_max_attempts: int = 3
     # Posts with fewer substantive chars than this are link-only stubs (no LLM).
     link_only_min_chars: int = scoring.DEFAULT_LINK_ONLY_MIN_CHARS
+    # Fetch the real page behind link-only/insufficient posts before scoring.
+    # Off by default (no network in tests); live runs enable it via build_deps.
+    fetch_enabled: bool = False
+    fetch_denylist: Tuple[str, ...] = vacancy_fetch.DEFAULT_DENYLIST
+    fetch_max_attempts: int = 3
+    fetch_pause_s: float = 0.0
+    fetch_fn: Optional[Callable[..., vacancy_fetch.FetchResult]] = None
     score_stats: ScoreRunStats = field(default_factory=ScoreRunStats)
     # T1 AI/ML/LLM topic gate (scoring.topic_prefilter). False (default):
     # DRY-RUN — a miss is only logged (`[topic-gate]`), extract still runs
@@ -302,6 +313,44 @@ def _store_reasoning(extracted_json: str, reasoning: str) -> str:
     return agents.merge_aux(extracted_json, REASONING_KEY, reasoning)
 
 
+def _maybe_fetch(
+    conn: psycopg.Connection, item: WorkItem, deps: Deps, raw: str
+) -> Tuple[Optional[str], Optional[str]]:
+    """Fetch the stub's link once per harvest. Returns (text|None, fetch_status).
+
+    Denylisted / no-link stubs are settled WITHOUT a request; real failures are
+    retried up to ``fetch_max_attempts`` harvests. NEVER raises, never scores.
+    """
+    stats = deps.score_stats
+    st = item.fetch_status
+    if st == vacancy_fetch.DENYLISTED:
+        stats.denylisted += 1
+        return None, st
+    if st == vacancy_fetch.NO_URL:
+        return None, st
+    if item.fetch_attempts >= deps.fetch_max_attempts:
+        return None, st
+    fn = deps.fetch_fn or vacancy_fetch.fetch_vacancy_text
+    res = fn(raw, item.source_link, denylist=deps.fetch_denylist)
+    if res.status not in (vacancy_fetch.DENYLISTED, vacancy_fetch.NO_URL) and deps.fetch_pause_s:
+        time.sleep(deps.fetch_pause_s)
+    if res.status == vacancy_fetch.OK:
+        store.record_fetch(conn, item.id, res.status, text=res.text, url=res.url)
+        stats.fetched += 1
+        print(f"[fetch] id={item.id} ok host={res.host} chars={len(res.text)}", flush=True)
+        return res.text, res.status
+    if res.status == vacancy_fetch.DENYLISTED:
+        store.record_fetch(conn, item.id, res.status, url=res.url)
+        stats.denylisted += 1
+    elif res.status == vacancy_fetch.NO_URL:
+        store.record_fetch(conn, item.id, res.status)
+    else:
+        n = store.record_fetch(conn, item.id, vacancy_fetch.FAILED, url=res.url, count_attempt=True)
+        stats.fetch_failed += 1
+        print(f"[fetch] id={item.id} failed host={res.host} attempts={n}", flush=True)
+    return None, res.status
+
+
 def _park_item(
     conn: psycopg.Connection, item: WorkItem, deps: Deps, reason: str, detail: str = ""
 ) -> AdvanceResult:
@@ -384,9 +433,24 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         store.find_duplicate_by_source_link(conn, item.source_link, item.id)
         if pf.keep else None
     )
-    if pf.keep and dup_id is None and scoring.is_link_only(raw, deps.link_only_min_chars):
-        # Stub post (just a link): nothing to judge, so no LLM call and no attempt.
-        return _park_item(conn, item, deps, "link_only")
+    fetched_text = item.fetched_text
+    fetch_status = item.fetch_status
+    if (
+        pf.keep and dup_id is None and deps.fetch_enabled and not fetched_text
+        and deps.llm_client is not None and not deps.score_stats.halted
+        and (
+            item.defer_reason in ("link_only", "insufficient")
+            or scoring.is_link_only(raw, deps.link_only_min_chars)
+        )
+    ):
+        fetched_text, fetch_status = _maybe_fetch(conn, item, deps, raw)
+    if (
+        pf.keep and dup_id is None and scoring.is_link_only(raw, deps.link_only_min_chars)
+        and len(fetched_text or "") < deps.link_only_min_chars
+    ):
+        # Stub post (just a link) and no page text: nothing to judge, so no LLM
+        # call and no attempt.
+        return _park_item(conn, item, deps, "link_only", f"fetch={fetch_status}" if fetch_status else "")
     if not pf.keep or dup_id is not None:
         score = 0
         reasoning = (
@@ -411,6 +475,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                 verdict = llm_score(
                     deps.llm_client, extracted, raw, model=deps.cheap_model,
                     profile=deps.profile,
+                    fetched_text=fetched_text,
                 )
                 haiku_score = scoring.clamp_score(verdict["score"])
                 haiku_reasoning = verdict.get("reasoning", "")
@@ -423,6 +488,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                         judge_verdict = llm_score(
                             deps.llm_client, extracted, raw,
                             model=deps.judge_model, profile=deps.profile,
+                            fetched_text=fetched_text,
                         )
                         score = scoring.clamp_score(judge_verdict["score"])
                         reasoning = judge_verdict.get("reasoning", "")

@@ -621,7 +621,9 @@ def build_score_system(profile: Profile, tool: bool = False) -> str:
 SCORE_SYSTEM = build_score_system(example_profile())
 
 
-def build_score_prompt(extracted: ExtractResult, raw_text: str) -> str:
+def build_score_prompt(
+    extracted: ExtractResult, raw_text: str, fetched_text: Optional[str] = None
+) -> str:
     payload = {
         "title": extracted.title,
         "company": extracted.company,
@@ -636,6 +638,11 @@ def build_score_prompt(extracted: ExtractResult, raw_text: str) -> str:
         "Rate this job's role-fit and explain why.\n"
         "Structured fields:\n" + json.dumps(payload, ensure_ascii=False)
         + "\n\nOriginal posting:\n" + raw_text
+        + (
+            "\n\nFETCHED PAGE TEXT (the full vacancy from the link in the posting):\n"
+            + fetched_text
+            if fetched_text else ""
+        )
     )
 
 
@@ -1019,6 +1026,7 @@ def llm_score(
     raw_text: str,
     model: str = JUDGE_MODEL,
     profile: Optional[Profile] = None,
+    fetched_text: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Rubric relevance score -> routed to the judgment (Sonnet) model.
 
@@ -1035,7 +1043,7 @@ def llm_score(
         system = build_score_system(profile or example_profile(), tool=True)
         data = client.complete_tool(
             system,
-            build_score_prompt(extracted, raw_text),
+            build_score_prompt(extracted, raw_text, fetched_text),
             SCORE_TOOL,
             max_tokens=SCORE_MAX_TOKENS,
             model=model,
@@ -1046,7 +1054,7 @@ def llm_score(
     system = build_score_system(profile) if profile is not None else SCORE_SYSTEM
     text = client.complete(
         system,
-        build_score_prompt(extracted, raw_text),
+        build_score_prompt(extracted, raw_text, fetched_text),
         max_tokens=SCORE_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(system, model),

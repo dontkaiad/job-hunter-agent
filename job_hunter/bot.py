@@ -1360,6 +1360,10 @@ def build_deps(cfg: Config) -> Deps:
         min_persist_score=cfg.min_persist_score,
         score_max_attempts=cfg.score_max_attempts,
         link_only_min_chars=cfg.link_only_min_chars,
+        fetch_enabled=cfg.fetch_enabled,
+        fetch_denylist=tuple(cfg.fetch_denylist),
+        fetch_max_attempts=cfg.fetch_max_attempts,
+        fetch_pause_s=0.5,
         topic_gate_enforce=cfg.topic_gate_enforce,
     )
 

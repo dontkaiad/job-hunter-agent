@@ -181,6 +181,17 @@ class Config:
     # live DB: stubs are 0-19 chars; real short posts with a title are >=66.
     link_only_min_chars: int = 40
 
+    # --- Fetch the real text behind link-only stubs (vacancy_fetch.py) ---
+    # Hosts NEVER fetched automatically (subdomains included): their ToS forbid
+    # storing the content (fetched_text stores it) -> manual add-by-URL only; or
+    # (linkedin) unreachable from RU and only burns attempts. Such stubs stay
+    # link_only with fetch_status='denylisted' and no request is made.
+    fetch_enabled: bool = True
+    fetch_denylist: List[str] = field(
+        default_factory=lambda: ["career.habr.com", "habr.com", "getmatch.ru", "linkedin.com"]
+    )
+    fetch_max_attempts: int = 3
+
     # --- Market Worth: pipeline-derived salary benchmark (zero API) ---
     # Aggregates salary data from work_items with score 25–100. No LLM call.
     # Minimum number of vacancies with salary data per market to show a range.
@@ -267,6 +278,13 @@ def load_config(env: Optional[dict] = None) -> Config:
         min_persist_score=_int_or_none(get("MIN_PERSIST_SCORE")) or 25,
         score_max_attempts=_int_or_none(get("SCORE_MAX_ATTEMPTS")) or 3,
         link_only_min_chars=_int_or_none(get("LINK_ONLY_MIN_CHARS")) or 40,
+        fetch_enabled=(get("FETCH_ENABLED") or "true").lower() in ("1", "true", "yes"),
+        fetch_denylist=(
+            _split_csv(get("FETCH_DENYLIST"))
+            if get("FETCH_DENYLIST")
+            else ["career.habr.com", "habr.com", "getmatch.ru", "linkedin.com"]
+        ),
+        fetch_max_attempts=_int_or_none(get("FETCH_MAX_ATTEMPTS")) or 3,
         market_min_sample=_int_or_none(get("MARKET_MIN_SAMPLE")) or 5,
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,
