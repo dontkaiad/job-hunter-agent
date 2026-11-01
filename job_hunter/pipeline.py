@@ -23,7 +23,7 @@ import psycopg
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import agents, scoring, store, vacancy_fetch
+from . import agents, scoring, store, vacancy_fetch, vacancy_url
 from .extract import extract as heuristic_extract
 from .extract import reconcile as reconcile_extract
 from .fx import FxRates
@@ -96,6 +96,7 @@ class ScoreRunStats:
     fetched: int = 0         # stub text successfully fetched from its link
     fetch_failed: int = 0    # fetch attempted and failed (retried, max N)
     denylisted: int = 0      # stub on a denylisted host: never fetched
+    duplicates: int = 0      # same vacancy URL as an older row: dropped like a source_link dup
     insufficient: int = 0    # LLM said the posting has no content to judge
 
 
@@ -315,8 +316,9 @@ def _store_reasoning(extracted_json: str, reasoning: str) -> str:
 
 def _maybe_fetch(
     conn: psycopg.Connection, item: WorkItem, deps: Deps, raw: str
-) -> Tuple[Optional[str], Optional[str]]:
-    """Fetch the stub's link once per harvest. Returns (text|None, fetch_status).
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Fetch the stub's link once per harvest. Returns (text|None, fetch_status,
+    final_url|None).
 
     Denylisted / no-link stubs are settled WITHOUT a request; real failures are
     retried up to ``fetch_max_attempts`` harvests. NEVER raises, never scores.
@@ -325,11 +327,11 @@ def _maybe_fetch(
     st = item.fetch_status
     if st == vacancy_fetch.DENYLISTED:
         stats.denylisted += 1
-        return None, st
+        return None, st, None
     if st == vacancy_fetch.NO_URL:
-        return None, st
+        return None, st, None
     if item.fetch_attempts >= deps.fetch_max_attempts:
-        return None, st
+        return None, st, None
     fn = deps.fetch_fn or vacancy_fetch.fetch_vacancy_text
     res = fn(raw, item.source_link, denylist=deps.fetch_denylist)
     if res.status not in (vacancy_fetch.DENYLISTED, vacancy_fetch.NO_URL) and deps.fetch_pause_s:
@@ -338,7 +340,7 @@ def _maybe_fetch(
         store.record_fetch(conn, item.id, res.status, text=res.text, url=res.url)
         stats.fetched += 1
         print(f"[fetch] id={item.id} ok host={res.host} chars={len(res.text)}", flush=True)
-        return res.text, res.status
+        return res.text, res.status, res.url
     if res.status == vacancy_fetch.DENYLISTED:
         store.record_fetch(conn, item.id, res.status, url=res.url)
         stats.denylisted += 1
@@ -348,7 +350,7 @@ def _maybe_fetch(
         n = store.record_fetch(conn, item.id, vacancy_fetch.FAILED, url=res.url, count_attempt=True)
         stats.fetch_failed += 1
         print(f"[fetch] id={item.id} failed host={res.host} attempts={n}", flush=True)
-    return None, res.status
+    return None, res.status, None
 
 
 def _park_item(
@@ -433,6 +435,20 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         store.find_duplicate_by_source_link(conn, item.source_link, item.id)
         if pf.keep else None
     )
+    dup_by = "source_link"
+    if pf.keep and dup_id is None:
+        # Same vacancy posted again (other channel / source): its own post link
+        # differs, but the vacancy link in the body is the same. Checked BEFORE any
+        # fetch or LLM call so a duplicate costs nothing.
+        pkey = item.primary_url_key
+        if pkey is None:
+            pkey = vacancy_url.primary_url_key(raw, item.source_link)
+            if pkey:
+                store.set_url_keys(conn, item.id, primary=pkey)
+        dup_id = store.find_duplicate_by_url_keys(
+            conn, [pkey, item.final_url_key], item.id
+        )
+        dup_by = "vacancy URL"
     fetched_text = item.fetched_text
     fetch_status = item.fetch_status
     if (
@@ -443,7 +459,13 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
             or scoring.is_link_only(raw, deps.link_only_min_chars)
         )
     ):
-        fetched_text, fetch_status = _maybe_fetch(conn, item, deps, raw)
+        fetched_text, fetch_status, final_url = _maybe_fetch(conn, item, deps, raw)
+        fkey = vacancy_url.canonical_url(final_url)
+        if fkey and fkey != item.final_url_key:
+            # A short / redirecting link can resolve to a vacancy we already have.
+            store.set_url_keys(conn, item.id, final=fkey)
+            dup_id = store.find_duplicate_by_url_keys(conn, [fkey], item.id)
+            dup_by = "vacancy URL"
     if (
         pf.keep and dup_id is None and scoring.is_link_only(raw, deps.link_only_min_chars)
         and len(fetched_text or "") < deps.link_only_min_chars
@@ -455,8 +477,10 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         score = 0
         reasoning = (
             f"prefilter: {pf.reason}" if not pf.keep
-            else f"prefilter: duplicate of #{dup_id} (same source_link)"
+            else f"prefilter: duplicate of #{dup_id} (same {dup_by})"
         )
+        if pf.keep and dup_by == "vacancy URL":
+            deps.score_stats.duplicates += 1
         used = "prefilter-drop"
         print(f"[score] id={item.id} haiku=0 final=0 (prefilter)", flush=True)
     else:

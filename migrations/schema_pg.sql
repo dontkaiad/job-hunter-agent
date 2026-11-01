@@ -32,7 +32,12 @@ CREATE TABLE IF NOT EXISTS work_items (
     -- (ok|denylisted|no_url|failed) and the number of failed fetch tries.
     fetched_text      TEXT,
     fetch_status      TEXT,
-    fetch_attempts    INTEGER          NOT NULL DEFAULT 0
+    fetch_attempts    INTEGER          NOT NULL DEFAULT 0,
+    -- Canonical key of the vacancy's main link (vacancy_url.canonical_url): the
+    -- one in the post body, and the final URL after fetching. Same key on two
+    -- rows = the same vacancy posted twice (cross-channel duplicate).
+    primary_url_key   TEXT,
+    final_url_key     TEXT
 );
 
 -- Valid-state CHECK as a NAMED constraint, applied via idempotent drop+recreate

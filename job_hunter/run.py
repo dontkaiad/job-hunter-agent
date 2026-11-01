@@ -84,10 +84,12 @@ def parked_info_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
     None. PURE."""
     if not (
         stats.link_only or stats.insufficient or stats.fetched
-        or stats.fetch_failed or stats.denylisted
+        or stats.fetch_failed or stats.denylisted or stats.duplicates
     ):
         return None
-    return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + fetch_line(stats)
+    return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + fetch_line(stats) + (
+        f"\nduplicates dropped (same vacancy URL): {stats.duplicates}" if stats.duplicates else ""
+    )
 
 
 def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:

@@ -51,6 +51,8 @@ class WorkItem:
     fetched_text: Optional[str] = None
     fetch_status: Optional[str] = None
     fetch_attempts: int = 0
+    primary_url_key: Optional[str] = None
+    final_url_key: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "WorkItem":
@@ -71,6 +73,8 @@ class WorkItem:
             fetched_text=row.get("fetched_text"),
             fetch_status=row.get("fetch_status"),
             fetch_attempts=row.get("fetch_attempts") or 0,
+            primary_url_key=row.get("primary_url_key"),
+            final_url_key=row.get("final_url_key"),
         )
 
 
@@ -309,9 +313,27 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
         ("fetched_text", "fetched_text TEXT"),
         ("fetch_status", "fetch_status TEXT"),
         ("fetch_attempts", "fetch_attempts INTEGER NOT NULL DEFAULT 0"),
+        ("primary_url_key", "primary_url_key TEXT"),
+        ("final_url_key", "final_url_key TEXT"),
     ):
         if col not in have:
             conn.execute(f"ALTER TABLE work_items ADD COLUMN IF NOT EXISTS {ddl}")
+            conn.commit()
+    # Indexes AFTER the columns exist (init_db runs the schema script first, so an
+    # index there would fail on an old table). Only build when missing: CREATE INDEX
+    # blocks writes, and init_db runs on every ingest.
+    have_idx = {
+        r["indexname"]
+        for r in conn.execute(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE schemaname = current_schema() AND tablename = 'work_items'"
+        ).fetchall()
+    }
+    conn.commit()
+    for name, col in (("idx_work_items_primary_url", "primary_url_key"),
+                      ("idx_work_items_final_url", "final_url_key")):
+        if name not in have_idx:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON work_items ({col})")
             conn.commit()
 
 
@@ -574,6 +596,48 @@ def set_defer_reason(
         raise
     conn.commit()
     return True
+
+
+def set_url_keys(
+    conn: psycopg.Connection,
+    item_id: int,
+    *,
+    primary: Optional[str] = None,
+    final: Optional[str] = None,
+    commit: bool = True,
+) -> None:
+    """Store the canonical vacancy-URL keys (only the ones given). No audit row."""
+    sets, params = [], []
+    if primary is not None:
+        sets.append("primary_url_key = %s")
+        params.append(primary)
+    if final is not None:
+        sets.append("final_url_key = %s")
+        params.append(final)
+    if not sets:
+        return
+    params.append(item_id)
+    conn.execute(f"UPDATE work_items SET {', '.join(sets)} WHERE id = %s", params)
+    if commit:
+        conn.commit()
+
+
+def find_duplicate_by_url_keys(
+    conn: psycopg.Connection, keys: List[str], item_id: int
+) -> Optional[int]:
+    """Id of an OLDER row (any state) whose primary/final URL key matches one of
+    ``keys``. READ-ONLY. Only older ids count, so two copies can never both be
+    judged the duplicate of each other: the earliest-ingested row is canonical."""
+    keys = [k for k in keys if k]
+    if not keys:
+        return None
+    row = conn.execute(
+        "SELECT id FROM work_items WHERE id < %s "
+        "AND (primary_url_key = ANY(%s) OR final_url_key = ANY(%s)) "
+        "ORDER BY id ASC LIMIT 1",
+        (item_id, keys, keys),
+    ).fetchone()
+    return row["id"] if row else None
 
 
 def record_fetch(
