@@ -115,13 +115,11 @@ def test_button_skip_finalizes_card(conn, deps):
     assert store.get_item(conn, item_id).state == SKIPPED
     # Acked.
     assert cb.answer_calls == 1
-    assert cb.answered == "Skipped"
-    # Card edited to the final-state line; the keyboard is swapped for the optional
-    # skip-reason chips (6 chips + Done) instead of being removed.
+    assert cb.answered == "Отклонено"
+    # Card edited to the final-state line WITH the keyboard removed.
     assert cb.message.edit_text_calls == 1
-    assert "⏭️ Пропущено" in cb.message.last_edit_text
-    kb = cb.message.last_edit_markup
-    assert kb is not None and len(kb.inline_keyboard) == 7
+    assert "❌ Отклонено" in cb.message.last_edit_text
+    assert cb.message.last_edit_markup is None
 
 
 def test_button_backlog_finalizes_card(conn, deps):
@@ -344,11 +342,10 @@ def test_finalize_card_falls_back_when_edit_text_raises(conn, deps):
 
     assert status == "moved"
     assert store.get_item(conn, item_id).state == SKIPPED
-    # edit_text was attempted and failed; the fallback still swaps in the skip-reason
-    # chips (it no longer strips the keyboard on Skip).
+    # edit_text was attempted and failed; fallback stripped the keyboard.
     assert msg.edit_text_calls == 1
     assert msg.last_edit_text is None  # edit_text body never recorded (it raised)
-    assert msg.markup_cleared is False
+    assert msg.markup_cleared is True
 
 
 def test_finalize_card_robust_called_directly(conn, deps):

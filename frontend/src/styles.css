@@ -2284,3 +2284,25 @@ h1::before {
   --bucket-accent: var(--amber);
   --bucket-accent-bg: rgba(224, 138, 43, 0.1);
 }
+
+/* Reason chips on «Отклонить» (entry-gate reject). */
+.reason-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.chip {
+  border: 1px solid var(--border, #cbd5e1);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.chip-on {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+  color: #fff;
+}

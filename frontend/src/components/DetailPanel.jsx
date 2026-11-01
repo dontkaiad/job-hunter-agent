@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../api.js";
-import { actionsForStatus, salaryText } from "../lib.js";
+import { actionsForStatus, REJECT_CHIPS, salaryText } from "../lib.js";
 
 // Side panel showing one item's full detail (GET /api/items/:id) plus the
 // per-state action buttons (POST /api/items/:id/<action>). On a successful
@@ -14,7 +14,9 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const [declineReason, setDeclineReason] = useState("");
-  const [awaitingReason, setAwaitingReason] = useState(false);
+  // Which reason-taking action is open: null | "decline" | "reject".
+  const [awaitingReason, setAwaitingReason] = useState(null);
+  const [chips, setChips] = useState([]);
   const panelRef = useRef(null);
 
   const load = useCallback(async (id) => {
@@ -50,8 +52,9 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
     try {
       const updated = await api.act(itemId, action, body);
       setDetail(updated);
-      setAwaitingReason(false);
+      setAwaitingReason(null);
       setDeclineReason("");
+      setChips([]);
       if (onUpdated) onUpdated(updated);
     } catch (e) {
       if (e.status === 409) {
@@ -68,15 +71,33 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
 
   function handleActionClick(action, needsReason) {
     if (needsReason) {
-      setAwaitingReason(true);
+      setAwaitingReason(action);
       setDeclineReason("");
+      setChips([]);
     } else {
       runAction(action);
     }
   }
 
-  function submitDecline() {
-    runAction("decline", declineReason.trim() ? { reason: declineReason.trim() } : null);
+  function toggleChip(code) {
+    setChips((cur) => (cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code]));
+  }
+
+  function cancelReason() {
+    setAwaitingReason(null);
+    setDeclineReason("");
+    setChips([]);
+  }
+
+  // Submit the open reason box: decline -> { reason }, reject -> { reason, chips }.
+  // Everything is optional; an empty reject sends {} (a plain «Отклонить»).
+  function submitReason() {
+    const reason = declineReason.trim();
+    if (awaitingReason === "reject") {
+      runAction("reject", { ...(reason && { reason }), chips });
+    } else {
+      runAction("decline", reason ? { reason } : null);
+    }
   }
 
   if (itemId == null) return null;
@@ -138,10 +159,12 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
             notice={notice}
             onAction={handleActionClick}
             awaitingReason={awaitingReason}
-            declineReason={declineReason}
-            onDeclineReasonChange={setDeclineReason}
-            onDeclineSubmit={submitDecline}
-            onDeclineCancel={() => { setAwaitingReason(false); setDeclineReason(""); }}
+            reasonText={declineReason}
+            onReasonTextChange={setDeclineReason}
+            chips={chips}
+            onToggleChip={toggleChip}
+            onReasonSubmit={submitReason}
+            onReasonCancel={cancelReason}
           />
 
           {/* Бенефиты — после действий, свёрнуто */}
@@ -175,7 +198,7 @@ function DetailField({ label, value }) {
 
 function Actions({
   status, busy, notice, onAction,
-  awaitingReason, declineReason, onDeclineReasonChange, onDeclineSubmit, onDeclineCancel,
+  awaitingReason, reasonText, onReasonTextChange, chips, onToggleChip, onReasonSubmit, onReasonCancel,
 }) {
   const actions = actionsForStatus(status);
   return (
@@ -197,19 +220,36 @@ function Actions({
       ))}
       {awaitingReason && (
         <div className="decline-reason-box">
+          {awaitingReason === "reject" && (
+            <div className="reason-chips" role="group" aria-label="Причины отклонения">
+              {REJECT_CHIPS.map((c) => (
+                <button
+                  key={c.code}
+                  type="button"
+                  className={"chip" + (chips.includes(c.code) ? " chip-on" : "")}
+                  aria-pressed={chips.includes(c.code)}
+                  data-chip={c.code}
+                  disabled={busy}
+                  onClick={() => onToggleChip(c.code)}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             className="decline-reason-input"
             placeholder="Причина отклонения (необязательно)"
-            value={declineReason}
-            onChange={(e) => onDeclineReasonChange(e.target.value)}
+            value={reasonText}
+            onChange={(e) => onReasonTextChange(e.target.value)}
             rows={2}
             autoFocus
           />
           <div className="decline-reason-btns">
-            <button type="button" className="btn btn-action" disabled={busy} onClick={onDeclineSubmit}>
-              Подтвердить отклонение
+            <button type="button" className="btn btn-action" disabled={busy} onClick={onReasonSubmit}>
+              {awaitingReason === "reject" ? "Отклонить" : "Подтвердить отклонение"}
             </button>
-            <button type="button" className="btn" disabled={busy} onClick={onDeclineCancel}>
+            <button type="button" className="btn" disabled={busy} onClick={onReasonCancel}>
               Отмена
             </button>
           </div>

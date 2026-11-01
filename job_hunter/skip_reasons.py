@@ -1,4 +1,5 @@
-"""PURE: the reason chips offered on a skipped vacancy (and how they are analysed).
+"""PURE: the reason chips offered when a card is rejected at the entry gate («Отклонить»
+in the dashboard; the state is still ``skipped``) and how they are analysed.
 
 Why a skip happened is what makes the skip a usable label for the scoring eval:
 the operator skips a vacancy for reasons the scorer cannot or should not know

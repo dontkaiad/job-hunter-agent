@@ -86,9 +86,10 @@ export const api = {
   },
 
   // The action endpoints. Each returns the updated ItemDetail. action is one of:
-  // approve | backlog | skip | sent | draft (pre-send) or the post-send funnel
-  // screening | interview | offer | decline | close.
-  // body is optional JSON payload (e.g. { reason: "..." } for decline).
+  // approve | backlog | reject | sent | draft (pre-send) or the post-send funnel
+  // screening | interview | offer | decline | close. («reject» = «Отклонить» at the
+  // entry gate; /skip stays server-side as a bare alias but has no button.)
+  // body is optional JSON payload: { reason } for decline, { reason, chips } for reject.
   act(id, action, body = null) {
     return request(`/api/items/${id}/${action}`, {
       method: "POST",

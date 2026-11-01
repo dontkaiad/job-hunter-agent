@@ -53,8 +53,8 @@ ALTER TABLE work_items ADD CONSTRAINT work_items_state_check CHECK (state IN (
 ));
 
 -- Why the operator skipped a vacancy (chips, several allowed; see skip_reasons.py).
--- reasons = comma-joined codes, '' = reviewed with no reason. source: live (right
--- after Skip) | retro (the /reasons pass over old skips).
+-- reasons = comma-joined codes, '' = reviewed with no reason. source: dashboard
+-- (the «Отклонить» reason chips).
 CREATE TABLE IF NOT EXISTS skip_reasons (
     item_id    INTEGER PRIMARY KEY REFERENCES work_items(id) ON DELETE CASCADE,
     reasons    TEXT NOT NULL,

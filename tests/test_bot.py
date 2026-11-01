@@ -50,7 +50,8 @@ def test_render_draft(conn):
 def test_keyboard_specs():
     spec = bot.surfaced_keyboard_spec(7)
     actions = [bot.decode_callback(cb)[0] for _, cb, _ in spec]
-    assert actions == ["approve", "backlog", "skip"]
+    assert actions == ["approve", "backlog", "skip"]   # token kept: old cards still work
+    assert [lbl for lbl, _, _ in spec] == ["✅ Approve", "📥 Backlog", "❌ Отклонить"]
     # Draft gate: the only state-affecting button is the manual-confirm
     # «✅ Отправила» (operator taps it AFTER sending the отклик by hand). It
     # keeps the stable "send" action token -> DECISION_SEND -> T12.
@@ -265,7 +266,7 @@ def test_surfaced_buttons_have_style_emoji_and_unchanged_callback():
     assert by_action["backlog"][2] == "primary"
     # Emoji fallback labels for colour-blind clients.
     assert by_action["approve"][0].startswith("✅")
-    assert by_action["skip"][0].startswith("⏭️")
+    assert by_action["skip"][0].startswith("❌")
     assert by_action["backlog"][0].startswith("📥")
 
 
@@ -533,10 +534,8 @@ def test_handle_callback_skip(conn, deps):
     status = asyncio.run(b.handle_callback(cb))
     assert status == "moved"
     assert store.get_item(conn, item_id).state == SKIPPED
-    assert cb.answered == "Skipped"
-    # The card now keeps a keyboard: the optional skip-reason chips (see
-    # tests/test_skip_reasons.py); it is no longer cleared on Skip.
-    assert not cb.message.markup_cleared
+    assert cb.answered == "Отклонено"
+    assert cb.message.markup_cleared
 
 
 def test_handle_callback_backlog(conn, deps):

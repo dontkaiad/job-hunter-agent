@@ -56,6 +56,7 @@ from pydantic import BaseModel
 from . import add_by_url as add_by_url_mod
 from . import fx as fx_mod
 from . import pipeline as pipeline_mod
+from . import skip_reasons as skip_reasons_mod
 from . import store
 from . import tg_auth
 from .config import Config, load_config
@@ -637,6 +638,13 @@ class DeclineBody(BaseModel):
     reason: Optional[str] = None
 
 
+class RejectBody(BaseModel):
+    """Reject a card at the entry gate (surfaced / backlog). Everything optional."""
+
+    reason: Optional[str] = None        # free text, stored on the transition row
+    chips: List[str] = []               # skip_reasons codes (stale, geo, fit, ...)
+
+
 def _apply_decision(
     conn: psycopg.Connection,
     item_id: int,
@@ -710,6 +718,27 @@ def skip_item(
 ) -> ItemDetail:
     """DECISION_SKIP: T5 surfaced->skipped or T9 backlog->skipped."""
     return _apply_decision(conn, item_id, DECISION_SKIP, fx, deps, actor=actor)
+
+
+@writer_router.post("/items/{item_id}/reject", response_model=ItemDetail)
+def reject_item(
+    item_id: int,
+    body: RejectBody = RejectBody(),
+    conn: psycopg.Connection = Depends(get_conn),
+    fx: fx_mod.FxRates = Depends(get_fx),
+    deps: Deps = Depends(get_deps),
+    actor: Actor = Depends(get_actor),
+) -> ItemDetail:
+    """«Отклонить» on a card awaiting a decision: T5 surfaced->skipped or T9
+    backlog->skipped, with an OPTIONAL free-text reason (kept verbatim on the
+    transition) and optional reason chips (skip_reasons). ``skipped`` therefore
+    means exactly "rejected at the entry gate". ``/skip`` stays as a bare alias."""
+    reason = (body.reason or "").strip() or None
+    detail = _apply_decision(conn, item_id, DECISION_SKIP, fx, deps, reason=reason, actor=actor)
+    chips = skip_reasons_mod.normalize(body.chips or [])
+    if chips:
+        store.set_skip_reasons(conn, item_id, chips, "dashboard")
+    return detail
 
 
 @writer_router.post("/items/{item_id}/backlog", response_model=ItemDetail)

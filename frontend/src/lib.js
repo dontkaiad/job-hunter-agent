@@ -84,6 +84,16 @@ export const LANES = [
   { key: "declined", title: "Отклонено" },
 ];
 
+// Reason chips offered on «Отклонить» (codes match job_hunter/skip_reasons.py).
+export const REJECT_CHIPS = [
+  { code: "stale", label: "неактуальна" },
+  { code: "geo", label: "не возьмут: гео/виза" },
+  { code: "fit", label: "не мой профиль/стек" },
+  { code: "seniority", label: "seniority" },
+  { code: "pay", label: "зарплата" },
+  { code: "other", label: "другое" },
+];
+
 // The per-state action buttons shown INSIDE the detail panel. Each entry is
 // {action, label}; action maps 1:1 to a POST endpoint.
 export function actionsForStatus(status) {
@@ -92,12 +102,12 @@ export function actionsForStatus(status) {
       return [
         { action: "approve", label: "Одобрить" },
         { action: "backlog", label: "В бэклог" },
-        { action: "skip", label: "Пропустить" },
+        { action: "reject", label: "Отклонить", needsReason: true, chips: true },
       ];
     case "backlog":
       return [
         { action: "approve", label: "Одобрить" },
-        { action: "skip", label: "Пропустить" },
+        { action: "reject", label: "Отклонить", needsReason: true, chips: true },
       ];
     case APPROVED:
     case RESEARCHED:

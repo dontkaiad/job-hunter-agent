@@ -738,24 +738,6 @@ def set_skip_reasons(
     conn.commit()
 
 
-def next_unreviewed_skip(conn: psycopg.Connection) -> Optional[WorkItem]:
-    """Oldest skipped item with no reason row yet (the /reasons queue)."""
-    row = conn.execute(
-        "SELECT w.* FROM work_items w LEFT JOIN skip_reasons r ON r.item_id = w.id "
-        "WHERE w.state = 'skipped' AND r.item_id IS NULL ORDER BY w.id ASC LIMIT 1"
-    ).fetchone()
-    return WorkItem.from_row(row) if row else None
-
-
-def skip_reason_progress(conn: psycopg.Connection) -> Tuple[int, int]:
-    """(skipped items reviewed, skipped items total)."""
-    row = conn.execute(
-        "SELECT count(*) AS total, count(r.item_id) AS done FROM work_items w "
-        "LEFT JOIN skip_reasons r ON r.item_id = w.id WHERE w.state = 'skipped'"
-    ).fetchone()
-    return int(row["done"]), int(row["total"])
-
-
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:
     """Delete a work_item and its transition audit log.
 

@@ -23,7 +23,7 @@ import psycopg
 
 from . import add_by_url as add_by_url_mod
 from . import fx as fx_mod
-from . import pipeline, research_fetch, skip_reasons, store
+from . import pipeline, research_fetch, store
 from .config import Config, load_config
 from .pipeline import Deps
 from .redact import redact_secrets
@@ -31,7 +31,7 @@ from .schema_extract import from_dict
 from .states import (
     DECISION_APPROVE, DECISION_BACKLOG, DECISION_CLOSE, DECISION_DECLINE,
     DECISION_INTERVIEW, DECISION_OFFER, DECISION_SCREENING, DECISION_SEND,
-    DECISION_SKIP, DRAFTED, SKIPPED, SURFACED, allowed_transitions,
+    DECISION_SKIP, DRAFTED, SURFACED, allowed_transitions,
 )
 
 CALLBACK_PREFIX = "jh"
@@ -563,7 +563,7 @@ def render_draft(item: store.WorkItem) -> str:
 _FINAL_STATE_LINE = {
     DECISION_APPROVE: "✅ Принято",
     DECISION_BACKLOG: "📥 В бэклоге",
-    DECISION_SKIP: "⏭️ Пропущено",
+    DECISION_SKIP: "❌ Отклонено",
     DECISION_SEND: "✅ Отправлено",
     # Post-send response funnel. For non-terminal stages (screening/interview)
     # this line is appended AND the card keeps the next-step keyboard.
@@ -598,7 +598,7 @@ def surfaced_keyboard_spec(item_id: int) -> List[Tuple[str, str, Optional[str]]]
     return [
         ("✅ Approve", encode_callback("approve", item_id), BUTTON_STYLE_SUCCESS),
         ("📥 Backlog", encode_callback("backlog", item_id), BUTTON_STYLE_PRIMARY),
-        ("⏭️ Skip", encode_callback("skip", item_id), BUTTON_STYLE_DANGER),
+        ("❌ Отклонить", encode_callback("skip", item_id), BUTTON_STYLE_DANGER),
     ]
 
 
@@ -743,56 +743,6 @@ def _build_keyboard(spec):
     )
 
 
-# --- Skip-reason chips -------------------------------------------------------
-# Callback action tokens: ``rsl_<code>`` (right after Skip) / ``rsr_<code>``
-# (the /reasons retro pass); ``<code>`` is a skip_reasons chip or ``done``.
-REASON_LIVE = "rsl_"
-REASON_RETRO = "rsr_"
-
-
-def reason_keyboard_spec(item_id: int, selected, source: str) -> List[List[Tuple[str, str, Optional[str]]]]:
-    """Rows of chip buttons (selected ones prefixed ✅) + a Done row. PURE."""
-    prefix = REASON_LIVE if source == "live" else REASON_RETRO
-    sel = set(selected or ())
-    buttons = [
-        (("✅ " if code in sel else "") + label, encode_callback(prefix + code, item_id), None)
-        for code, label in skip_reasons.CHIPS.items()
-    ]
-    rows = [[b] for b in buttons]  # labels are long: one chip per row stays readable
-    done = "✔ Готово" if source == "live" else "✔ Готово → следующая"
-    rows.append([(done, encode_callback(prefix + "done", item_id), BUTTON_STYLE_PRIMARY)])
-    return rows
-
-
-def render_reason_card(item: store.WorkItem, done: int, total: int) -> str:
-    """Compact card for the retro reasons pass. PURE.
-
-    Deliberately WITHOUT the score and the rationale, so the reasons are the
-    operator's own, independent of what the scorer said.
-    """
-    try:
-        ex = from_dict(json.loads(item.extracted_json or "{}"))
-    except Exception:
-        ex = from_dict({})
-    lines = [f"🏷 Причина пропуска · {done + 1}/{total}", "", f"<b>{_esc(ex.title or '(без названия)')}</b>"]
-    for label, value in (
-        ("Компания", ex.company),
-        ("Seniority", ex.seniority),
-        ("Стек", ", ".join(ex.stack) if ex.stack else None),
-        ("Локация", ex.location),
-    ):
-        if value:
-            lines.append(f"{label}: {_esc(value)}")
-    lines.append(f"Удалёнка: {_esc(_yesno(ex.remote, _LABELS['ru']))}")
-    snippet = " ".join((item.raw_text or "").split())[:600]
-    if snippet:
-        lines += ["", _esc(snippet) + ("…" if len(" ".join((item.raw_text or "").split())) > 600 else "")]
-    if item.source_link:
-        lines += ["", f"🔗 {_esc(item.source_link)}"]
-    lines += ["", "Отметьте причины (можно несколько) и нажмите «Готово»."]
-    return "\n".join(lines)
-
-
 class JobHunterBot:
     """Encapsulates the aiogram Bot/Dispatcher + a DB connection + Deps."""
 
@@ -839,11 +789,6 @@ class JobHunterBot:
         @self._dp.message(Command("borderline"))
         async def on_borderline(message: Message) -> None:  # noqa: ANN001
             await self.handle_borderline(message)
-
-        # Retro pass: label WHY old skips were skipped (reason chips).
-        @self._dp.message(Command("reasons"))
-        async def on_reasons(message: Message) -> None:  # noqa: ANN001
-            await self.handle_reasons(message)
 
         # Market Worth: /worth or /worth refresh
         @self._dp.message(Command("worth"))
@@ -966,68 +911,6 @@ class JobHunterBot:
             text,
             link_preview_options=_no_preview(),
         )
-
-    async def handle_reasons(self, message) -> None:  # noqa: ANN001
-        """/reasons: send the next skipped vacancy without a reason, with chips."""
-        self.conn = await store.ensure_reconnected(self.conn, self.cfg.database_url)
-        text, kb = self._next_reason_card()
-        await message.answer(
-            text, parse_mode="HTML", reply_markup=kb, link_preview_options=_no_preview()
-        )
-
-    def _next_reason_card(self):
-        """(text, keyboard|None) for the next unreviewed skip, or the all-done text."""
-        item = store.next_unreviewed_skip(self.conn)
-        done, total = store.skip_reason_progress(self.conn)
-        if item is None:
-            return f"Все пропуски размечены: {done} из {total}. ✅", None
-        return (
-            render_reason_card(item, done, total),
-            _build_keyboard(reason_keyboard_spec(item.id, [], "retro")),
-        )
-
-    async def handle_reason_callback(self, cb, action: str, item_id: int) -> str:  # noqa: ANN001
-        """A reason-chip tap: toggle a chip, or finish the card."""
-        source = "live" if action.startswith(REASON_LIVE) else "retro"
-        code = action[len(REASON_LIVE):]  # both prefixes have the same length
-        item = store.get_item(self.conn, item_id)
-        if item is None or item.state != SKIPPED:
-            await cb.answer("карточка не в skipped")
-            return "not_skipped"
-        message = getattr(cb, "message", None)
-        current = store.get_skip_reasons(self.conn, item_id)
-
-        if code == "done":
-            if source == "retro":
-                if current is None:  # reviewed with no reason: do not show it again
-                    store.set_skip_reasons(self.conn, item_id, [], "retro")
-                await cb.answer("Сохранено")
-                text, kb = self._next_reason_card()
-                try:
-                    await message.edit_text(
-                        text, parse_mode="HTML", reply_markup=kb,
-                        link_preview_options=_no_preview(),
-                    )
-                except Exception:
-                    pass
-                return "next"
-            await cb.answer("Ок")
-            await self._strip_keyboard(cb)
-            return "done"
-
-        if code not in skip_reasons.CHIPS:
-            await cb.answer("unknown reason")
-            return "unknown_reason"
-        new = skip_reasons.toggle(current or [], code)
-        store.set_skip_reasons(self.conn, item_id, new, source)
-        await cb.answer(skip_reasons.CHIPS[code] + (" ✓" if code in new else " ✗"))
-        try:
-            await message.edit_reply_markup(
-                reply_markup=_build_keyboard(reason_keyboard_spec(item_id, new, source))
-            )
-        except Exception:
-            pass
-        return "toggled"
 
     async def handle_worth(self, message) -> None:  # noqa: ANN001
         """/worth — show salary benchmark computed from the pipeline vacancies."""
@@ -1213,9 +1096,6 @@ class JobHunterBot:
             await cb.answer("bad callback")
             return "bad_callback"
         action, item_id = decoded
-        if action.startswith((REASON_LIVE, REASON_RETRO)):
-            self.conn = await store.ensure_reconnected(self.conn, self.cfg.database_url)
-            return await self.handle_reason_callback(cb, action, item_id)
         decision = ACTION_TO_DECISION.get(action)
         if decision is None:
             await cb.answer("unknown action")
@@ -1250,11 +1130,7 @@ class JobHunterBot:
         # actionable. For a no-op leave the text untouched but strip defensively.
         if result.status == "moved":
             next_spec = funnel_keyboard_spec(result.to_state, item_id)
-            if decision == DECISION_SKIP:
-                # The skip is already recorded. Offer the reason chips on the same
-                # card (optional: ignoring them loses nothing).
-                await self._restage_card(cb, decision, reason_keyboard_spec(item_id, [], "live"))
-            elif next_spec:
+            if next_spec:
                 await self._restage_card(cb, decision, next_spec)
             else:
                 await self._finalize_card(cb, decision)
@@ -1329,7 +1205,7 @@ class JobHunterBot:
             return f"no-op ({status})"
         return {
             DECISION_APPROVE: "Approved",
-            DECISION_SKIP: "Skipped",
+            DECISION_SKIP: "Отклонено",
             DECISION_BACKLOG: "Backlogged",
             DECISION_SEND: "Sent",
             DECISION_SCREENING: "Скрининг",

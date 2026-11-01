@@ -68,12 +68,16 @@ describe("actionsForStatus", () => {
     expect(actionsForStatus("surfaced").map((a) => a.action)).toEqual([
       "approve",
       "backlog",
-      "skip",
+      "reject",
     ]);
     expect(actionsForStatus("backlog").map((a) => a.action)).toEqual([
       "approve",
-      "skip",
+      "reject",
     ]);
+    // «Отклонить» takes an optional reason + chips; «Пропустить» is gone.
+    const reject = actionsForStatus("surfaced").find((a) => a.action === "reject");
+    expect(reject).toMatchObject({ label: "Отклонить", needsReason: true, chips: true });
+    expect(actionsForStatus("surfaced").map((a) => a.label)).not.toContain("Пропустить");
     // approved/researched fork: generate a draft, OR skip straight to sent
     // (T27/T28) when the vacancy doesn't need a cover letter — plus decline.
     expect(actionsForStatus("approved").map((a) => a.action)).toEqual([
