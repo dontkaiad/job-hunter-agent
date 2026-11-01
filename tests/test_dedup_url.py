@@ -42,6 +42,9 @@ def test_different_vacancies_different_key(a, b):
 @pytest.mark.parametrize("url", [
     "https://weworkremotely.com", "https://weworkremotely.com/", "https://x.io/?utm_source=a",
     "ftp://x.io/a", "not a url", "", None,
+    # company / index pages: a site-level link, not one vacancy
+    "https://posthog.com/careers", "https://x.io/about/careers/", "https://x.io/jobs",
+    "https://x.io/en/vacancies?rp=1", "https://x.io/join-us",
 ])
 def test_landing_pages_and_junk_have_no_key(url):
     assert canonical_url(url) is None
@@ -214,3 +217,23 @@ def test_ops_info_mentions_duplicates():
     s = pipeline.ScoreRunStats(attempted=3, duplicates=2)
     assert run.scoring_alert_text(s) is None
     assert "duplicates dropped (same vacancy URL): 2" in run.parked_info_text(s)
+
+
+def test_specific_job_pages_under_a_jobs_path_still_get_a_key():
+    assert canonical_url("https://x.io/jobs/12345") and canonical_url("https://x.io/careers/senior-llm-engineer")
+
+
+def test_hn_hiring_posts_are_never_url_deduped():
+    assert primary_url_key(f"We hire. {BASE}", None, "hn_hiring") is None
+    assert primary_url_key(f"We hire. {BASE}", None, "@somechannel") == canonical_url(BASE)
+
+
+def test_two_roles_at_one_company_careers_page_are_both_kept(conn, fake_fx):
+    fetch, llm = _fetch_counter(), ToolLLM(SCORE(40), SCORE(40))
+    deps = _deps(llm, fake_fx, fetch)
+    a = _post(conn, deps, "Prompt engineer wanted, remote. Apply: https://acme.io/careers", "@a", "1")
+    b = _post(conn, deps, "Backend developer wanted, remote. Apply: https://acme.io/careers", "@b", "2")
+    for i in (a, b):
+        pipeline.run_to_gate(conn, i, deps=deps)
+    assert store.get_item(conn, a) and store.get_item(conn, b)
+    assert deps.score_stats.duplicates == 0

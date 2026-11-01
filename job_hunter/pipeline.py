@@ -442,7 +442,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         # fetch or LLM call so a duplicate costs nothing.
         pkey = item.primary_url_key
         if pkey is None:
-            pkey = vacancy_url.primary_url_key(raw, item.source_link)
+            pkey = vacancy_url.primary_url_key(raw, item.source_link, item.source_channel)
             if pkey:
                 store.set_url_keys(conn, item.id, primary=pkey)
         dup_id = store.find_duplicate_by_url_keys(

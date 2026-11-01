@@ -30,7 +30,7 @@ def plan(rows) -> Tuple[Dict[int, str], Dict[str, List[Tuple[int, str]]]]:
     for r in rows:
         key = r["primary_url_key"]
         if key is None:
-            key = vacancy_url.primary_url_key(r["raw_text"], r["source_link"])
+            key = vacancy_url.primary_url_key(r["raw_text"], r["source_link"], r.get("source_channel"))
             if key:
                 new_keys[r["id"]] = key
         if key:
@@ -44,7 +44,7 @@ def main(argv) -> int:
     conn = store.connect(cfg.database_url)
     store.init_db(conn)  # adds the columns / indexes if missing
     rows = conn.execute(
-        "SELECT id, state, raw_text, source_link, primary_url_key FROM work_items"
+        "SELECT id, state, raw_text, source_link, source_channel, primary_url_key FROM work_items"
     ).fetchall()
     new_keys, groups = plan(rows)
     dup_groups = {k: sorted(v) for k, v in groups.items() if len(v) > 1}
