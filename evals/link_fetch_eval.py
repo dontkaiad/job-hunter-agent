@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
 import time
 from typing import Any, Dict, List, Optional
@@ -88,10 +89,14 @@ def run_live(ids: Optional[List[int]]) -> Dict[str, Any]:
         or scoring.is_link_only(r["raw_text"], cfg.link_only_min_chars)))]
     by_host: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     buckets: collections.Counter = collections.Counter()
+    status_counts: collections.Counter = collections.Counter()
+    page_hashes: collections.Counter = collections.Counter()
     for r in rows:
         res = vf.fetch_vacancy_text(r["raw_text"], r["source_link"], denylist=cfg.fetch_denylist)
         label = res.status
+        status_counts[res.status] += 1
         if res.status == vf.OK:
+            page_hashes[hashlib.sha1(res.text.encode()).hexdigest()] += 1
             try:
                 s = llm.llm_score(client, from_dict(json.loads(r["extracted_json"])), r["raw_text"] or "",
                                   model=cfg.cheap_model, profile=profile, fetched_text=res.text)["score"]
@@ -108,7 +113,9 @@ def run_live(ids: Optional[List[int]]) -> Dict[str, Any]:
         by_host[res.host or host_of(r["source_link"])][label] += 1
     return {
         "candidates": len(rows),
-        "fetch_ok": sum(c[k] for c in by_host.values() for k in c if k.startswith("ok")),
+        "fetch_status": dict(status_counts),
+        "distinct_pages": len(page_hashes),
+        "pages_seen_more_than_once": sum(1 for n in page_hashes.values() if n > 1),
         "score_buckets": dict(buckets),
         "by_host": {h: dict(c) for h, c in sorted(by_host.items())},
     }

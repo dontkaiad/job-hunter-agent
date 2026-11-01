@@ -102,6 +102,8 @@ def run_live(ids: List[int]) -> Dict[str, Any]:
     cfg, profile, client, conn = live_env()
     text_types: collections.Counter = collections.Counter()
     tool_outcomes: collections.Counter = collections.Counter()
+    in_chars: Dict[str, List[int]] = {"OK": [], "failed": []}
+    max_tokens_hits = 0
     rows = fetch_items(conn, ids)
     for r in rows:
         ex = from_dict(json.loads(r["extracted_json"]))
@@ -112,7 +114,10 @@ def run_live(ids: List[int]) -> Dict[str, Any]:
             messages=[{"role": "user", "content": llm.build_score_prompt(ex, r["raw_text"] or "")}],
         )
         text = "".join(getattr(b, "text", "") or "" for b in resp.content)
-        text_types[classify_reply(text, resp.stop_reason)] += 1
+        kind = classify_reply(text, resp.stop_reason)
+        text_types[kind] += 1
+        in_chars["OK" if kind == "OK" else "failed"].append(len(r["raw_text"] or ""))
+        max_tokens_hits += resp.stop_reason == "max_tokens"
         # production path (gate -> forced tool)
         if scoring.is_link_only(r["raw_text"], cfg.link_only_min_chars):
             tool_outcomes["link_only (no LLM call)"] += 1
@@ -124,7 +129,14 @@ def run_live(ids: List[int]) -> Dict[str, Any]:
             tool_outcomes["insufficient_content"] += 1
         except Exception as exc:  # noqa: BLE001
             tool_outcomes[f"FAILED {type(exc).__name__}"] += 1
-    return {"n": len(rows), "text_path": dict(text_types), "tool_path": dict(tool_outcomes)}
+    return {
+        "n": len(rows),
+        "model": cfg.cheap_model,
+        "text_path": dict(text_types),
+        "text_path_stop_reason_max_tokens": max_tokens_hits,
+        "text_path_input_chars": {k: sorted(v) for k, v in in_chars.items()},
+        "tool_path": dict(tool_outcomes),
+    }
 
 
 def main(argv=None) -> int:

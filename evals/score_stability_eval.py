@@ -28,7 +28,8 @@ def measure(score_once, conditions, models, items, runs: int) -> List[Dict[str, 
     rows = []
     for model in models:
         for item in items:
-            row: Dict[str, Any] = {"model": model, "id": item["id"]}
+            row: Dict[str, Any] = {"model": model, "id": item["id"],
+                                   "stored": item.get("relevance_score")}
             for label, temp in conditions:
                 scores = []
                 for _ in range(runs):
