@@ -52,6 +52,11 @@ EXTRACT_MAX_TOKENS = 1200
 #   rationale easily exceeded the old 400 -> truncation -> silent score
 #   degradation. 800 comfortably fits the verdict + four full sentences.
 SCORE_MAX_TOKENS = 800
+# score: temperature 0 so the same posting gets the same score on every run
+#   (measured 2026-11-01, 5 runs/vacancy: Haiku spread 13/4/0 pts and Sonnet 3 pts
+#   at the default 1.0, all 0 at temperature 0). Applies to the Haiku first pass
+#   AND the Sonnet corridor judge; the rubric and thresholds are unchanged.
+SCORE_TEMPERATURE = 0.0
 # research: with FETCHED PAGE TEXT grounding, summary + talking_points +
 #   questions + sourced_facts is large; the old 900 truncated mid-output (the
 #   confirmed #20 break, cut at ``"questions":``). 2000 fits the bounded
@@ -149,6 +154,7 @@ class LLMClient(Protocol):
         max_tokens: int = 1024,
         model: Optional[str] = None,
         cache_system: bool = False,
+        temperature: Optional[float] = None,
     ) -> str:
         ...
 
@@ -170,17 +176,22 @@ class AnthropicClient:
         max_tokens: int = 1024,
         model: Optional[str] = None,
         cache_system: bool = False,
+        temperature: Optional[float] = None,
     ) -> str:
         # cache_system marks the CONSTANT system prefix with cache_control. The
         # per-item VARIABLE content (vacancy text) stays in the USER message, so
         # the cached prefix is byte-identical across every item in a run. This is
         # cost-only: the system TEXT and the request's model/max_tokens/messages
         # are unchanged, so the response is identical.
+        kwargs: Dict[str, Any] = {}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         resp = self._client.messages.create(
             model=model or self.model,
             max_tokens=max_tokens,
             system=build_system_param(system, cache_system),
             messages=[{"role": "user", "content": user}],
+            **kwargs,
         )
         parts: List[str] = []
         for block in resp.content:
@@ -198,6 +209,7 @@ class AnthropicClient:
         max_tokens: int = 1024,
         model: Optional[str] = None,
         cache_system: bool = False,
+        temperature: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Force a single tool call and return its input object.
 
@@ -206,11 +218,15 @@ class AnthropicClient:
         Raises ValueError when the response has no tool_use block (or was cut
         off by max_tokens), so callers treat it as a normal parse failure.
         """
+        kwargs: Dict[str, Any] = {}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         resp = self._client.messages.create(
             model=model or self.model,
             max_tokens=max_tokens,
             system=build_system_param(system, cache_system),
             messages=[{"role": "user", "content": user}],
+            **kwargs,
             tools=[tool],
             tool_choice={"type": "tool", "name": tool["name"]},
         )
@@ -1024,6 +1040,7 @@ def llm_score(
             max_tokens=SCORE_MAX_TOKENS,
             model=model,
             cache_system=should_cache_system(system, model),
+            temperature=SCORE_TEMPERATURE,
         )
         return parse_score_tool_input(data)
     system = build_score_system(profile) if profile is not None else SCORE_SYSTEM
@@ -1033,6 +1050,7 @@ def llm_score(
         max_tokens=SCORE_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(system, model),
+        temperature=SCORE_TEMPERATURE,
     )
     return parse_score_response(text)
 

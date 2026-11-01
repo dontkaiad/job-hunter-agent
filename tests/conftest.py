@@ -116,6 +116,7 @@ class FakeLLM:
         max_tokens: int = 1024,
         model=None,
         cache_system: bool = False,
+        temperature=None,
     ) -> str:
         # Record the structured ``system`` shape the real transport would build,
         # so caching tests can assert on cache_control without a live client.

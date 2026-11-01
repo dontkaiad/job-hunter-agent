@@ -28,12 +28,15 @@ class ToolLLM:
         self.results = list(results)
         self.calls = 0
         self.tools = []
+        self.temps = []
 
     def complete(self, *a, **k):  # pragma: no cover - must not be used on the tool path
         raise AssertionError("text path used")
 
-    def complete_tool(self, system, user, tool, max_tokens=1024, model=None, cache_system=False):
+    def complete_tool(self, system, user, tool, max_tokens=1024, model=None, cache_system=False,
+                      temperature=None):
         self.calls += 1
+        self.temps.append(temperature)
         self.tools.append((system, tool))
         r = self.results.pop(0)
         if isinstance(r, Exception):
@@ -251,3 +254,40 @@ def test_complete_tool_raises_on_prose_or_truncation():
     c, _ = _client_with(_Resp([blk], "max_tokens"))
     with pytest.raises(ValueError):
         c.complete_tool("s", "u", llm.SCORE_TOOL)
+
+
+# --- temperature -------------------------------------------------------------
+
+def test_scoring_uses_temperature_zero_on_tool_path():
+    from job_hunter.schema_extract import ExtractResult
+    c = ToolLLM({"relevance_score": 50, "insufficient_content": False, "reasoning": "x"},
+                {"relevance_score": 50, "insufficient_content": False, "reasoning": "x"})
+    ex = ExtractResult(title="t", source_channel="c")
+    llm.llm_score(c, ex, "text", model="claude-haiku-4-5")
+    llm.llm_score(c, ex, "text", model="claude-sonnet-4-6")  # corridor judge
+    assert c.temps == [0.0, 0.0]
+
+
+def test_scoring_uses_temperature_zero_on_text_path(fake_llm):
+    from job_hunter.schema_extract import ExtractResult
+    seen = {}
+    orig = fake_llm.complete
+    fake_llm.complete = lambda *a, **k: seen.update(k) or '{"relevance_score": 40}'
+    llm.llm_score(fake_llm, ExtractResult(title="t", source_channel="c"), "text")
+    assert seen["temperature"] == 0.0
+
+
+def test_non_scoring_steps_keep_default_temperature(fake_llm):
+    # extract/research/draft must NOT be pinned to 0 (draft wants variety).
+    import inspect
+    assert inspect.signature(llm.AnthropicClient.complete).parameters["temperature"].default is None
+
+
+def test_transport_sends_temperature_only_when_given():
+    blk = _Blk("tool_use", name="submit_score", input={"relevance_score": 5})
+    c, seen = _client_with(_Resp([blk]))
+    c.complete_tool("s", "u", llm.SCORE_TOOL, temperature=0.0)
+    assert seen["temperature"] == 0.0
+    c, seen = _client_with(_Resp([blk]))
+    c.complete_tool("s", "u", llm.SCORE_TOOL)
+    assert "temperature" not in seen

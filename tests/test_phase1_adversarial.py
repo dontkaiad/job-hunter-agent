@@ -94,7 +94,7 @@ class _RaisingLLM:
     def __init__(self, exc=None):
         self.exc = exc or RuntimeError("API timeout / network error")
 
-    def complete(self, system, user, max_tokens=1024, model=None, cache_system=False):
+    def complete(self, system, user, max_tokens=1024, model=None, cache_system=False, temperature=None):
         raise self.exc
 
 
@@ -213,7 +213,7 @@ def test_desk_fallback_sourced_facts_not_cleared_when_model_returns_fabricated(m
     hallucinating model's fabricated sourced_facts pass through unchallenged.
     """
     class _FabricatingLLM:
-        def complete(self, system, user, max_tokens=1024, model=None, cache_system=False):
+        def complete(self, system, user, max_tokens=1024, model=None, cache_system=False, temperature=None):
             # Model invents facts despite no page being fetched.
             return json.dumps({
                 "summary": "ok",
@@ -251,7 +251,7 @@ def test_malicious_model_cannot_forge_full_provenance_on_desk_fallback(monkeypat
       - sourced_facts == []                 (BUG-2: NOT enforced today)
     """
     class _FullyMaliciousLLM:
-        def complete(self, system, user, max_tokens=1024, model=None, cache_system=False):
+        def complete(self, system, user, max_tokens=1024, model=None, cache_system=False, temperature=None):
             return json.dumps({
                 "summary": "summary",
                 "talking_points": [],
