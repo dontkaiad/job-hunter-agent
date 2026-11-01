@@ -80,6 +80,43 @@ CREATE TABLE IF NOT EXISTS eval_shadow (
     created_at      TEXT NOT NULL
 );
 
+-- Golden set for the scoring eval (see job_hunter/golden.py, docs/CASES). Private: the
+-- scores, the sample and the operator's labels live ONLY in the database.
+-- eval_frame: every vacancy in the sampling frame scored on the CURRENT system.
+CREATE TABLE IF NOT EXISTS eval_frame (
+    item_id       INTEGER PRIMARY KEY,
+    stratum       TEXT NOT NULL,             -- core | hard
+    status        TEXT NOT NULL,             -- scored | insufficient | error
+    current_score DOUBLE PRECISION,
+    band          TEXT,
+    judge_used    BOOLEAN,
+    cost_usd      DOUBLE PRECISION,          -- measured from API usage
+    scored_at     TEXT NOT NULL
+);
+-- eval_sample: the ordered cards of each labelling wave (controls repeat earlier cards).
+CREATE TABLE IF NOT EXISTS eval_sample (
+    id              SERIAL PRIMARY KEY,
+    item_id         INTEGER NOT NULL,
+    wave            INTEGER NOT NULL,
+    order_no        INTEGER NOT NULL,
+    stratum         TEXT NOT NULL,
+    band            TEXT NOT NULL,
+    is_control      BOOLEAN NOT NULL,
+    control_of_item INTEGER,
+    held_out        BOOLEAN NOT NULL,
+    created_at      TEXT NOT NULL,
+    UNIQUE (wave, order_no)
+);
+-- eval_labels: blind labels. chips = comma-joined skip_reasons codes (only for 'no').
+CREATE TABLE IF NOT EXISTS eval_labels (
+    sample_id  INTEGER PRIMARY KEY REFERENCES eval_sample(id) ON DELETE CASCADE,
+    label      TEXT NOT NULL CHECK (label IN ('yes', 'no', 'unsure')),
+    chips      TEXT NOT NULL DEFAULT '',
+    labeled_by TEXT,
+    labeled_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_work_items_state      ON work_items (state);
 CREATE INDEX IF NOT EXISTS idx_work_items_updated_at ON work_items (updated_at);
 
