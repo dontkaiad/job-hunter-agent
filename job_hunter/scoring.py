@@ -65,6 +65,42 @@ MIN_SALARY_EUR_PER_MONTH = DEFAULT_SALARY_FLOOR_EUR
 # this the post is almost certainly junk (a sticker caption, a one-word ping).
 _MIN_MEANINGFUL_CHARS = 25
 
+# Default floor of "real" text (after stripping URLs/emoji/punctuation) below
+# which a post is a link-only stub. Overridable via Config.link_only_min_chars.
+DEFAULT_LINK_ONLY_MIN_CHARS = 40
+
+_URL_RE = re.compile(
+    r"(?:https?://|www\.|t\.me/)\S+|\b[\w.-]+\.(?:com|io|in|org|net|ru|app)/\S*",
+    re.I,
+)
+_EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200d]")
+
+
+def substantive_text_len(raw_text: Optional[str]) -> int:
+    """Length of the post's content after dropping URLs, emoji, punctuation and
+    whitespace. PURE."""
+    t = _URL_RE.sub("", raw_text or "")
+    t = _EMOJI_RE.sub("", t)
+    t = re.sub(r"[^\w\s]", "", t)
+    return len(re.sub(r"\s+", "", t))
+
+
+def is_link_only(raw_text: Optional[str], min_chars: int = DEFAULT_LINK_ONLY_MIN_CHARS) -> bool:
+    """True for a stub post that is (almost) only a link: no text to score. PURE.
+
+    Requires a URL in the text AND fewer than ``min_chars`` substantive chars.
+    Empty text is handled by ``text_prefilter`` (junk drop), so it is not a
+    link-only stub here.
+    """
+    if not (raw_text or "").strip():
+        return False
+    # "Link-only" means there IS a link: a short URL-less post still goes to the
+    # LLM (it may be a genuine one-liner vacancy).
+    if not _URL_RE.search(raw_text or ""):
+        return False
+    return substantive_text_len(raw_text) < min_chars
+
+
 # Signals that a post is clearly NOT a vacancy. Kept deliberately SMALL so the
 # prefilter stays lenient (high recall). Only unambiguous non-jobs are dropped.
 _NON_JOB_PATTERNS = [

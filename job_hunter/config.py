@@ -174,6 +174,13 @@ class Config:
     # kept in the DB (excluded from harvest) for manual review.
     score_max_attempts: int = 3
 
+    # --- Link-only stubs: a post whose text, after stripping URLs/emoji/
+    # punctuation, is shorter than this carries no vacancy content (just a link
+    # to a teletype page / job card). It is NOT sent to the LLM and keeps
+    # defer_reason='link_only' without spending a score attempt. Measured on the
+    # live DB: stubs are 0-19 chars; real short posts with a title are >=66.
+    link_only_min_chars: int = 40
+
     # --- Market Worth: pipeline-derived salary benchmark (zero API) ---
     # Aggregates salary data from work_items with score 25–100. No LLM call.
     # Minimum number of vacancies with salary data per market to show a range.
@@ -259,6 +266,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         login_public_url=get("LOGIN_PUBLIC_URL"),
         min_persist_score=_int_or_none(get("MIN_PERSIST_SCORE")) or 25,
         score_max_attempts=_int_or_none(get("SCORE_MAX_ATTEMPTS")) or 3,
+        link_only_min_chars=_int_or_none(get("LINK_ONLY_MIN_CHARS")) or 40,
         market_min_sample=_int_or_none(get("MARKET_MIN_SAMPLE")) or 5,
         fx_provider=get("FX_PROVIDER") or "frankfurter",
         fx_cache_ttl=_int_or_none(get("FX_CACHE_TTL")) or 86400,

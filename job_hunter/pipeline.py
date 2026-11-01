@@ -26,7 +26,9 @@ from . import agents, scoring, store
 from .extract import extract as heuristic_extract
 from .extract import reconcile as reconcile_extract
 from .fx import FxRates
-from .llm import CHEAP_MODEL, JUDGE_MODEL, LLMClient, llm_extract, llm_score
+from .llm import (
+    CHEAP_MODEL, JUDGE_MODEL, InsufficientContent, LLMClient, llm_extract, llm_score,
+)
 from .profile import Profile, example_profile
 from .schema_extract import ExtractResult, from_dict, serialize
 from .scoring import passes_threshold
@@ -88,6 +90,9 @@ class ScoreRunStats:
     skipped_halted: int = 0
     halted: bool = False
     kinds: Dict[str, int] = field(default_factory=dict)
+    # Parked, NOT failures: no attempt spent, never counted in failed/deferred.
+    link_only: int = 0       # stub posts skipped before the LLM
+    insufficient: int = 0    # LLM said the posting has no content to judge
 
 
 @dataclass
@@ -124,6 +129,8 @@ class Deps:
     min_persist_score: int = 0
     # Failed scoring attempts before an item is marked score_failed (kept, not deleted).
     score_max_attempts: int = 3
+    # Posts with fewer substantive chars than this are link-only stubs (no LLM).
+    link_only_min_chars: int = scoring.DEFAULT_LINK_ONLY_MIN_CHARS
     score_stats: ScoreRunStats = field(default_factory=ScoreRunStats)
     # T1 AI/ML/LLM topic gate (scoring.topic_prefilter). False (default):
     # DRY-RUN — a miss is only logged (`[topic-gate]`), extract still runs
@@ -295,6 +302,27 @@ def _store_reasoning(extracted_json: str, reasoning: str) -> str:
     return agents.merge_aux(extracted_json, REASONING_KEY, reasoning)
 
 
+def _park_item(
+    conn: psycopg.Connection, item: WorkItem, deps: Deps, reason: str, detail: str = ""
+) -> AdvanceResult:
+    """Park an item that cannot be scored for lack of content. NOT a failure:
+    no attempt spent, no score written, no deletion; it stays in EXTRACTED."""
+    stats = deps.score_stats
+    if reason == "link_only":
+        stats.link_only += 1
+    else:
+        stats.insufficient += 1
+    store.set_defer_reason(
+        conn, item.id, reason,
+        audit_reason=f"score parked ({reason})" + (f": {detail}" if detail else ""),
+    )
+    print(f"[score] id={item.id} parked ({reason})", flush=True)
+    return AdvanceResult(
+        "noop", item.id, item.state, reason=f"score parked ({reason})",
+        extra={"defer_reason": reason},
+    )
+
+
 def _defer_scoring(
     conn: psycopg.Connection, item: WorkItem, deps: Deps, exc: BaseException
 ) -> AdvanceResult:
@@ -356,6 +384,9 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
         store.find_duplicate_by_source_link(conn, item.source_link, item.id)
         if pf.keep else None
     )
+    if pf.keep and dup_id is None and scoring.is_link_only(raw, deps.link_only_min_chars):
+        # Stub post (just a link): nothing to judge, so no LLM call and no attempt.
+        return _park_item(conn, item, deps, "link_only")
     if not pf.keep or dup_id is not None:
         score = 0
         reasoning = (
@@ -436,6 +467,9 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                         flush=True,
                     )
 
+            except InsufficientContent as exc:
+                # Not a failure and not a zero: park it, keep it, spend no attempt.
+                return _park_item(conn, item, deps, "insufficient", str(exc)[:200])
             except Exception as exc:  # noqa: BLE001 - degrade, never crash T2
                 # Unknown score != zero score: defer, never fabricate score=0
                 # (a 0 below min_persist_score gets the vacancy DELETED).

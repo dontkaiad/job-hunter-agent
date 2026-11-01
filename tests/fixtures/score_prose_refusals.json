@@ -1,0 +1,15 @@
+{
+  "_note": "Truncated (first/last ~100 chars) real Haiku replies of 2026-11-01 07:02 harvest that broke JSON parsing: the model refused in prose because the post was a bare link. stop_reason=end_turn, no truncation.",
+  "refusals": [
+    {"id": 11063, "head": "I appreciate the request, but I cannot access external links or web content, including the Teletype ", "tail": " data, I will rate the role fit and return a JSON output with the relevance score and justification."},
+    {"id": 11211, "head": "I cannot access external URLs or browse web content. The posting data you've provided contains only ", "tail": ") with the actual job details.\n\nOnce you provide the content, I will score the role-fit immediately."},
+    {"id": 11351, "head": "I appreciate your submission, but I need to flag a critical issue: **I cannot access external URLs o", "tail": "\n**Please paste the full job description text here, and I'll provide a detailed score + rationale.**"},
+    {"id": 11009, "head": "I cannot access external URLs or browse web content. The posting you've provided contains only a lin", "tail": "e score.\n\n**Send the full posting text and I'll give you a precise score.**"}
+  ],
+  "stubs": [
+    "👉👉 ( Job Description & Apply ) 👈️👈️: https://weworkremotely.com/remote-jobs/example-ai-engineer",
+    "Remote AI Job\nhttps://teletype.in/@remote_ai_jobs/AbCdEf123",
+    "https://teletype.in/@relocats/XyZ987"
+  ],
+  "real_short": "AI ENGINEER | RELOCATION TO SPAIN | KIWI.COM #relocation #spain #fulltime #itjob #ai #engineer https://teletype.in/@courierus/q6IDtIzkKzx"
+}

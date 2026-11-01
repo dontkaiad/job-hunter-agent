@@ -66,6 +66,18 @@ def _set_score_stats(deps, stats: "pipeline.ScoreRunStats") -> None:
         pass
 
 
+def parked_line(stats: "pipeline.ScoreRunStats") -> str:
+    """The `deferred: link_only N, insufficient N` ops line. PURE."""
+    return f"deferred: link_only {stats.link_only}, insufficient {stats.insufficient}"
+
+
+def parked_info_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
+    """Quiet (non-red) ops line when items were parked this run, else None. PURE."""
+    if not (stats.link_only or stats.insufficient):
+        return None
+    return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats)
+
+
 def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
     """Ops alert body when scoring failed badly this run, else None. PURE.
 
@@ -74,6 +86,8 @@ def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
     """
     if stats.attempted <= 0 and not stats.failed:
         return None
+    # link_only / insufficient are parked, not failures: they never count toward
+    # `failed`, so only real API / parse failures can turn this alert red.
     fatal = stats.kinds.get(pipeline.FAIL_FATAL, 0) > 0
     ratio = stats.failed / stats.attempted if stats.attempted else 1.0
     if not fatal and ratio <= SCORE_FAIL_ALERT_RATIO:
@@ -84,6 +98,7 @@ def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
         f"({ratio:.0%})",
         f"error type: {kinds}",
         f"deferred (kept for retry): {stats.deferred}, marked score_failed: {stats.marked_failed}",
+        parked_line(stats),
     ]
     if stats.halted:
         lines.append(
@@ -168,6 +183,10 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
     if alert:
         print(f"[harvest] scoring alert: {run_stats.failed}/{run_stats.attempted} failed", flush=True)
         await tg_logger.send_log(alert)  # never raises; at most one per run
+    else:
+        info = parked_info_text(run_stats)
+        if info:
+            await tg_logger.send_log(info)
 
     # 3) Notify the operator about ONLY the items freshly surfaced THIS run.
     # ``notify`` awaits EVERY send to completion (asyncio.gather) before

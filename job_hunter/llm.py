@@ -190,6 +190,40 @@ class AnthropicClient:
         return "".join(parts)
 
 
+    def complete_tool(
+        self,
+        system: str,
+        user: str,
+        tool: Dict[str, Any],
+        max_tokens: int = 1024,
+        model: Optional[str] = None,
+        cache_system: bool = False,
+    ) -> Dict[str, Any]:
+        """Force a single tool call and return its input object.
+
+        ``tool_choice`` pins the model to ``tool['name']``, so it physically
+        answers with a schema-shaped object instead of prose / fenced text.
+        Raises ValueError when the response has no tool_use block (or was cut
+        off by max_tokens), so callers treat it as a normal parse failure.
+        """
+        resp = self._client.messages.create(
+            model=model or self.model,
+            max_tokens=max_tokens,
+            system=build_system_param(system, cache_system),
+            messages=[{"role": "user", "content": user}],
+            tools=[tool],
+            tool_choice={"type": "tool", "name": tool["name"]},
+        )
+        for block in resp.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == tool["name"]:
+                if getattr(resp, "stop_reason", None) == "max_tokens":
+                    raise ValueError("tool call truncated by max_tokens")
+                return dict(block.input)
+        raise ValueError(
+            f"no tool_use block in response (stop_reason={getattr(resp, 'stop_reason', None)})"
+        )
+
+
 # --- Pure helpers: prompt building + response parsing -----------------------
 
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.S)
@@ -412,6 +446,25 @@ def render_profile_block(profile: Profile) -> str:
 
 # JUDGE + RUBRIC scaffold (no personal DATA — the profile block is injected).
 # {profile_block} is replaced with the rendered CANDIDATE PROFILE.
+# HOW to answer (presentation only; the judgment above is untouched). Text mode
+# asks for a raw JSON object; tool mode (production) asks for a forced tool call.
+_SCORE_JSON_TAIL = (
+    'Output ONLY JSON: {"relevance_score": <int 0-100>, "Обоснование": '
+    '"<verdict line WITH the score number, then 2-4 ✅/⚠️ FULL-SENTENCE bullets, '
+    'all in the SAME language as the posting>"}.'
+)
+_SCORE_TOOL_TAIL = (
+    "Answer by calling the `submit_score` tool (it is the only way to answer). "
+    "`relevance_score` is the int 0-100; `reasoning` is the «Обоснование» "
+    "(verdict line WITH the score number, then 2-4 ✅/⚠️ FULL-SENTENCE bullets, "
+    "all in the SAME language as the posting).\n"
+    "If the posting contains NO actual vacancy content to judge (only a link, a "
+    "title with nothing else, or a request to open a page you cannot open), do "
+    "NOT guess a score: set `insufficient_content` to true and `relevance_score` "
+    "to null, and say in `reasoning` what is missing. Otherwise set "
+    "`insufficient_content` to false."
+)
+
 _SCORE_SCAFFOLD = (
     "You are a hiring-fit JUDGE for a specific candidate. Read ONE job posting "
     "and rate how well the ROLE itself (responsibilities + stack, NOT the title) "
@@ -496,9 +549,7 @@ _SCORE_SCAFFOLD = (
     "- Keep it scannable (the verdict line plus the bullets), but every bullet a "
     "complete sentence. Do NOT write a single flowing paragraph / wall of text, "
     "and do NOT write single-word fragments.\n\n"
-    'Output ONLY JSON: {"relevance_score": <int 0-100>, "Обоснование": '
-    '"<verdict line WITH the score number, then 2-4 ✅/⚠️ FULL-SENTENCE bullets, '
-    'all in the SAME language as the posting>"}.'
+    + _SCORE_JSON_TAIL
 )
 
 
@@ -529,7 +580,7 @@ def _build_calibration_block(profile: Profile) -> str:
     )
 
 
-def build_score_system(profile: Profile) -> str:
+def build_score_system(profile: Profile, tool: bool = False) -> str:
     """Render the full SCORE system prompt from the loaded profile. PURE.
 
     The JUDGE instructions + RUBRIC structure + OUTPUT FORMAT live in
@@ -537,11 +588,15 @@ def build_score_system(profile: Profile) -> str:
     ``render_profile_block(profile)`` and ``_build_calibration_block(profile)``.
     No personal specifics are hardcoded.
     """
-    return (
+    system = (
         _SCORE_SCAFFOLD
         .replace("{profile_block}", render_profile_block(profile))
         .replace("{calibration_block}", _build_calibration_block(profile))
     )
+    if tool:
+        assert _SCORE_JSON_TAIL in system
+        system = system.replace(_SCORE_JSON_TAIL, _SCORE_TOOL_TAIL)
+    return system
 
 
 # Module-level constant rendered from the GENERIC example profile so the module
@@ -566,6 +621,61 @@ def build_score_prompt(extracted: ExtractResult, raw_text: str) -> str:
         "Structured fields:\n" + json.dumps(payload, ensure_ascii=False)
         + "\n\nOriginal posting:\n" + raw_text
     )
+
+
+class InsufficientContent(Exception):
+    """The posting has no vacancy content to judge (model said so, or null score).
+
+    Not a failure: the item is parked (no attempt spent, never scored 0, never
+    deleted). Carries the model's explanation for the audit log.
+    """
+
+
+# Forced-tool schema for scoring. NOTE: Anthropic tool property names must match
+# ^[a-zA-Z0-9_.-]+$, so the «Обоснование» goes in `reasoning` (the parser already
+# accepts it). Semantics of the score are unchanged -- this only fixes the SHAPE.
+SCORE_TOOL: Dict[str, Any] = {
+    "name": "submit_score",
+    "description": "Submit the role-fit verdict for the job posting.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "relevance_score": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Role-fit 0-100, or null when insufficient_content is true.",
+            },
+            "insufficient_content": {
+                "type": "boolean",
+                "description": "True when the posting has no actual vacancy content to judge.",
+            },
+            "reasoning": {
+                "type": "string",
+                "description": "The «Обоснование»: verdict line with the score, then 2-4 bullets.",
+            },
+        },
+        "required": ["relevance_score", "insufficient_content", "reasoning"],
+    },
+}
+
+
+def parse_score_tool_input(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate a ``submit_score`` tool input. PURE.
+
+    Returns {'score': int 0-100, 'reasoning': str}. Raises InsufficientContent
+    when insufficient_content is true or the score is null; ValueError for a
+    malformed score (a real parse failure).
+    """
+    reasoning = str(data.get("reasoning") or data.get("Обоснование") or "").strip()
+    raw_score = data.get("relevance_score")
+    if data.get("insufficient_content") is True or raw_score is None:
+        raise InsufficientContent(reasoning[:300])
+    try:
+        score = int(round(float(raw_score)))
+    except (TypeError, ValueError):
+        raise ValueError(f"score not numeric: {raw_score!r}")
+    return {"score": max(0, min(100, score)), "reasoning": reasoning}
 
 
 def parse_score_response(text: str) -> Dict[str, Any]:
@@ -896,12 +1006,26 @@ def llm_score(
 ) -> Dict[str, Any]:
     """Rubric relevance score -> routed to the judgment (Sonnet) model.
 
-    Returns {'score': int 0-100, 'reasoning': str (Обоснование)}.
+    Returns {'score': int 0-100, 'reasoning': str (Обоснование)}. Raises
+    InsufficientContent when the posting has nothing to judge (tool path).
 
     ``profile`` injects the candidate-specific rubric block. When None, the
     module default (rendered from the GENERIC example profile) is used — live
     runs pass the loaded local profile via the pipeline.
     """
+    use_tool = hasattr(client, "complete_tool")
+    if use_tool:
+        # Production path: forced tool call -> schema-shaped object, no prose.
+        system = build_score_system(profile or example_profile(), tool=True)
+        data = client.complete_tool(
+            system,
+            build_score_prompt(extracted, raw_text),
+            SCORE_TOOL,
+            max_tokens=SCORE_MAX_TOKENS,
+            model=model,
+            cache_system=should_cache_system(system, model),
+        )
+        return parse_score_tool_input(data)
     system = build_score_system(profile) if profile is not None else SCORE_SYSTEM
     text = client.complete(
         system,

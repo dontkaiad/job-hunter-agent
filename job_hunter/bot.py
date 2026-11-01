@@ -1359,6 +1359,7 @@ def build_deps(cfg: Config) -> Deps:
         profile=profile,
         min_persist_score=cfg.min_persist_score,
         score_max_attempts=cfg.score_max_attempts,
+        link_only_min_chars=cfg.link_only_min_chars,
         topic_gate_enforce=cfg.topic_gate_enforce,
     )
 

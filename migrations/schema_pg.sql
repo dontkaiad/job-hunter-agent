@@ -24,7 +24,10 @@ CREATE TABLE IF NOT EXISTS work_items (
     -- Scoring-failure bookkeeping: an LLM outage DEFERS a vacancy, never deletes it.
     -- score_failed = exhausted its attempts; kept in 'extracted', skipped by harvest.
     score_attempts    INTEGER          NOT NULL DEFAULT 0,
-    score_failed      BOOLEAN          NOT NULL DEFAULT FALSE
+    score_failed      BOOLEAN          NOT NULL DEFAULT FALSE,
+    -- Why scoring is parked WITHOUT being a failure: 'link_only' (stub post, no
+    -- text) or 'insufficient' (LLM said the posting lacks content). No attempt spent.
+    defer_reason      TEXT
 );
 
 -- Valid-state CHECK as a NAMED constraint, applied via idempotent drop+recreate

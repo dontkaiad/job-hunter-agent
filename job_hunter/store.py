@@ -47,6 +47,7 @@ class WorkItem:
     updated_at: str
     score_attempts: int = 0
     score_failed: bool = False
+    defer_reason: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "WorkItem":
@@ -63,6 +64,7 @@ class WorkItem:
             updated_at=row["updated_at"],
             score_attempts=row.get("score_attempts") or 0,
             score_failed=bool(row.get("score_failed")),
+            defer_reason=row.get("defer_reason"),
         )
 
 
@@ -296,6 +298,9 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
         if ddl[0] not in have:
             conn.execute(ddl[1])
             conn.commit()
+    if "defer_reason" not in have:
+        conn.execute("ALTER TABLE work_items ADD COLUMN IF NOT EXISTS defer_reason TEXT")
+        conn.commit()
 
 
 def insert_item(
@@ -427,7 +432,8 @@ def update_state(
     Only ``pipeline.advance`` should call this.
     """
     ts = now_iso()
-    sets = ["state = %s", "updated_at = %s"]
+    # Any state move resolves a parked item: clear its defer_reason.
+    sets = ["state = %s", "updated_at = %s", "defer_reason = NULL"]
     params: list = [new_state, ts]
     if extracted_json is not None:
         sets.append("extracted_json = %s")
@@ -499,6 +505,63 @@ def record_score_failure(
         raise
     conn.commit()
     return row["score_attempts"], bool(row["score_failed"])
+
+
+def set_defer_reason(
+    conn: psycopg.Connection,
+    item_id: int,
+    reason: Optional[str],
+    *,
+    audit_reason: Optional[str] = None,
+    reset_attempts: bool = False,
+) -> bool:
+    """Park an item (``link_only`` / ``insufficient``) or un-park it (None).
+
+    Does NOT spend a score attempt and never touches state or score. With
+    ``reset_attempts`` also zeroes score_attempts/score_failed (one-off repair).
+    Writes an audit row only when the reason actually changes. Returns True when
+    something changed.
+    """
+    ts = now_iso()
+    try:
+        row = conn.execute(
+            "SELECT state, defer_reason, score_attempts, score_failed "
+            "FROM work_items WHERE id = %s", (item_id,),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return False
+        changed = (row["defer_reason"] != reason) or (
+            reset_attempts and (row["score_attempts"] or row["score_failed"])
+        )
+        if not changed:
+            conn.rollback()
+            return False
+        if reset_attempts:
+            conn.execute(
+                "UPDATE work_items SET defer_reason = %s, score_attempts = 0, "
+                "score_failed = FALSE, updated_at = %s WHERE id = %s",
+                (reason, ts, item_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE work_items SET defer_reason = %s, updated_at = %s WHERE id = %s",
+                (reason, ts, item_id),
+            )
+        conn.execute(
+            """
+            INSERT INTO state_transitions
+                (item_id, from_state, to_state, kind, actor, reason, created_at)
+            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s)
+            """,
+            (item_id, row["state"], row["state"],
+             audit_reason or f"score parked: {reason}", ts),
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return True
 
 
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:
