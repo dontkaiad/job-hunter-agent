@@ -534,7 +534,9 @@ def test_handle_callback_skip(conn, deps):
     assert status == "moved"
     assert store.get_item(conn, item_id).state == SKIPPED
     assert cb.answered == "Skipped"
-    assert cb.message.markup_cleared
+    # The card now keeps a keyboard: the optional skip-reason chips (see
+    # tests/test_skip_reasons.py); it is no longer cleared on Skip.
+    assert not cb.message.markup_cleared
 
 
 def test_handle_callback_backlog(conn, deps):

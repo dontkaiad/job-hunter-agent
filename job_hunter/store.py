@@ -688,6 +688,53 @@ def record_fetch(
     return row["fetch_attempts"]
 
 
+def get_skip_reasons(conn: psycopg.Connection, item_id: int) -> Optional[List[str]]:
+    """Reason codes recorded for a skipped item; None when never reviewed."""
+    from . import skip_reasons
+
+    row = conn.execute(
+        "SELECT reasons FROM skip_reasons WHERE item_id = %s", (item_id,)
+    ).fetchone()
+    return None if row is None else skip_reasons.decode(row["reasons"])
+
+
+def set_skip_reasons(
+    conn: psycopg.Connection, item_id: int, codes: List[str], source: str
+) -> None:
+    """Upsert the reason set (the original ``source`` is kept on update)."""
+    from . import skip_reasons
+
+    ts = now_iso()
+    conn.execute(
+        """
+        INSERT INTO skip_reasons (item_id, reasons, source, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (item_id) DO UPDATE
+           SET reasons = EXCLUDED.reasons, updated_at = EXCLUDED.updated_at
+        """,
+        (item_id, skip_reasons.encode(codes), source, ts, ts),
+    )
+    conn.commit()
+
+
+def next_unreviewed_skip(conn: psycopg.Connection) -> Optional[WorkItem]:
+    """Oldest skipped item with no reason row yet (the /reasons queue)."""
+    row = conn.execute(
+        "SELECT w.* FROM work_items w LEFT JOIN skip_reasons r ON r.item_id = w.id "
+        "WHERE w.state = 'skipped' AND r.item_id IS NULL ORDER BY w.id ASC LIMIT 1"
+    ).fetchone()
+    return WorkItem.from_row(row) if row else None
+
+
+def skip_reason_progress(conn: psycopg.Connection) -> Tuple[int, int]:
+    """(skipped items reviewed, skipped items total)."""
+    row = conn.execute(
+        "SELECT count(*) AS total, count(r.item_id) AS done FROM work_items w "
+        "LEFT JOIN skip_reasons r ON r.item_id = w.id WHERE w.state = 'skipped'"
+    ).fetchone()
+    return int(row["done"]), int(row["total"])
+
+
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:
     """Delete a work_item and its transition audit log.
 

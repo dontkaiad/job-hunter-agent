@@ -52,6 +52,17 @@ ALTER TABLE work_items ADD CONSTRAINT work_items_state_check CHECK (state IN (
     'screening','interview','offer','declined'
 ));
 
+-- Why the operator skipped a vacancy (chips, several allowed; see skip_reasons.py).
+-- reasons = comma-joined codes, '' = reviewed with no reason. source: live (right
+-- after Skip) | retro (the /reasons pass over old skips).
+CREATE TABLE IF NOT EXISTS skip_reasons (
+    item_id    INTEGER PRIMARY KEY REFERENCES work_items(id) ON DELETE CASCADE,
+    reasons    TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_work_items_state      ON work_items (state);
 CREATE INDEX IF NOT EXISTS idx_work_items_updated_at ON work_items (updated_at);
 
