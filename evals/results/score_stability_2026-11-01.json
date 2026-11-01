@@ -1,0 +1,14 @@
+{
+  "_note": "Baseline recorded 2026-11-01 on production vacancies (read-only). Aggregates only. 'default' = no temperature sent (API default 1.0); 't0' = temperature 0. Vacancy ids are internal work_item ids; 'stored' is the score in the DB at the time.",
+  "runs_per_cell": 5,
+  "vacancies": 3,
+  "api_calls": 60,
+  "rows": [
+    {"model": "claude-haiku-4-5", "id": 10671, "stored": 28, "default": {"scores": [18, 28, 28, 15, 28], "min": 15, "max": 28, "range": 13}, "t0": {"scores": [18, 18, 18, 18, 18], "min": 18, "max": 18, "range": 0}},
+    {"model": "claude-haiku-4-5", "id": 11097, "stored": 58, "default": {"scores": [68, 72, 72, 68, 72], "min": 68, "max": 72, "range": 4}, "t0": {"scores": [72, 72, 72, 72, 72], "min": 72, "max": 72, "range": 0}},
+    {"model": "claude-haiku-4-5", "id": 11197, "stored": 78, "default": {"scores": [62, 62, 62, 62, 62], "min": 62, "max": 62, "range": 0}, "t0": {"scores": [62, 62, 62, 62, 62], "min": 62, "max": 62, "range": 0}},
+    {"model": "claude-sonnet-4-6", "id": 10671, "stored": 28, "default": {"scores": [11, 8, 8, 8, 8], "min": 8, "max": 11, "range": 3}, "t0": {"scores": [8, 8, 8, 8, 8], "min": 8, "max": 8, "range": 0}},
+    {"model": "claude-sonnet-4-6", "id": 11097, "stored": 58, "default": {"scores": [62, 62, 62, 62, 62], "min": 62, "max": 62, "range": 0}, "t0": {"scores": [62, 62, 62, 62, 62], "min": 62, "max": 62, "range": 0}},
+    {"model": "claude-sonnet-4-6", "id": 11197, "stored": 78, "default": {"scores": [52, 52, 52, 52, 52], "min": 52, "max": 52, "range": 0}, "t0": {"scores": [52, 52, 52, 52, 52], "min": 52, "max": 52, "range": 0}}
+  ]
+}

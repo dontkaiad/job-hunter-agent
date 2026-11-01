@@ -70,6 +70,7 @@ token math, and the four cost-aware design levers are in [COST.md](COST.md).
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design, state machine, data model, security, observability, scope choices
 - [DECISIONS.md](DECISIONS.md) — ADR-style record of the key AI-integration decisions
 - [COST.md](COST.md) — real cost numbers and the cost-aware design
+- [docs/CASES/](docs/CASES/) — evals and a postmortem: score stability (temperature 0), parse robustness (forced tool use), the 2026-10 credit-outage postmortem, link-only fetch. Reproduce offline with `python -m evals offline`
 - `DESIGN.md` / `SCORING.md` — the authoritative low-level spec
 
 ## Quick start

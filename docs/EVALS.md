@@ -1,5 +1,8 @@
 # Evaluations
 
+> Reproducible evals, committed baselines and write-ups live in [`evals/`](../evals/) and
+> [`docs/CASES/`](CASES/README.md). This page is the general method plus the first case study.
+
 ## What an eval is
 
 Regular code gets tested with assertions: you know the correct output, you check

@@ -15,7 +15,7 @@ from job_hunter import llm, pipeline, run, scoring, store
 from job_hunter.pipeline import Deps
 from job_hunter.states import EXTRACTED
 
-FIX = json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "score_prose_refusals.json")))
+FIX = json.load(open(os.path.join(os.path.dirname(__file__), "..", "evals", "synthetic", "score_prose_refusals.json")))
 
 GOOD_POST = ("Remote Senior Python engineer building LLM RAG agents with Claude API and "
              "FastAPI. Salary 250000-350000 RUB. Contact @hr_acme")

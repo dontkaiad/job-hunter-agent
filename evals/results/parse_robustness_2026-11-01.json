@@ -1,0 +1,8 @@
+{
+  "_note": "12 vacancies deferred by the 2026-11-01 07:02 harvest (12 of 46 scoring calls failed, all 'parse'). Re-run the same day on production data. Aggregates only.",
+  "n": 12,
+  "original_harvest": {"scoring_calls": 46, "parse_failures": 12},
+  "text_path_rerun": {"model": "claude-haiku-4-5", "OK": 3, "prose-no-json": 9, "truncated": 0, "markdown-wrapper": 0, "invalid-escape": 0, "other": 0, "stop_reason_max_tokens": 0},
+  "text_path_failures_by_input_length_chars": {"83-281": 9, "ok_cases": {"6070": 1, "120": 1, "176": 1}},
+  "tool_path_with_link_only_gate": {"link_only_no_llm_call": 8, "insufficient_content": 3, "scored": 1, "parse_failures": 0}
+}

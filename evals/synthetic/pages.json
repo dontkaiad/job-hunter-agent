@@ -1,0 +1,13 @@
+{
+  "_note": "Synthetic pages and posts for the offline link-fetch eval. No real vacancy content.",
+  "teletype_post": "Remote AI Job\nhttps://teletype.in/@example/AbCdEf123",
+  "teletype_html": "<html><body>About Teletype Join <p>AI Engineer RELOCATION | EXAMPLE CO</p><p>We build LLM products and need an engineer to own prompts, RAG and evals. We build LLM products and need an engineer to own prompts, RAG and evals. We build LLM products and need an engineer to own prompts, RAG and evals. We build LLM products and need an engineer to own prompts, RAG and evals.</p><p>APPLY</p>@author August 3, 11:45 0 views 0 reactions 0 replies 0 reposts Repost Share</body></html>",
+  "remocate_post": "Analyst at EXAMPLE: https://www.remocate.app/jobs/analyst-example",
+  "remocate_html": "<html><body>remocateJobsCountriesCompaniesBlogPost a Job <h1>Analyst at EXAMPLE</h1><p>We build LLM products and need an engineer to own prompts, RAG and evals. We build LLM products and need an engineer to own prompts, RAG and evals. We build LLM products and need an engineer to own prompts, RAG and evals. We build LLM products and need an engineer to own prompts, RAG and evals.</p><p>→ remocateLinkedIn Popular Countries Canada Cyprus All countries → Legal Privacy</p></body></html>",
+  "denied_posts": [
+    "Vacancy\nhttps://career.habr.com/vacancies/1000000001",
+    "Vacancy\nhttps://habr.com/ru/companies/example/articles/1/",
+    "Vacancy\nhttps://getmatch.ru/vacancies/1",
+    "Vacancy\nhttps://www.linkedin.com/jobs/view/1"
+  ]
+}

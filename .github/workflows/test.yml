@@ -34,3 +34,5 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m pytest -p no:cacheprovider
+      - name: Offline evals (synthetic; no API, no network)
+        run: python -m evals offline

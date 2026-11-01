@@ -1,0 +1,16 @@
+{
+  "_note": "Dry-run of scripts/oneoff/fetch_link_only_stubs.py on production, 2026-11-01 after deploy of a020eb8. Nothing was written to the DB. Scored with Haiku, temperature 0, forced tool (no Sonnet corridor judge). Aggregates only.",
+  "candidates": 8,
+  "fetch_ok": 7,
+  "fetch_failed": 1,
+  "denylisted": 0,
+  "score_buckets": {"<25 (would be deleted)": 4, "25-59": 2, ">=60 (would surface)": 0, "insufficient_content (stays parked)": 1},
+  "by_host": {
+    "teletype.in": {"ok / <25": 3, "note": "3 work items resolve to the same page (2671 chars each)"},
+    "yoailabs.careers-page.com": {"ok / 25-59": 1},
+    "get.it": {"ok / 25-59": 1},
+    "opentrain.ai": {"ok / <25": 1, "note": "text hit the 6000-char cap"},
+    "seoulstart.com": {"ok / insufficient_content": 1},
+    "euremotejobs.com": {"failed": 1}
+  }
+}
