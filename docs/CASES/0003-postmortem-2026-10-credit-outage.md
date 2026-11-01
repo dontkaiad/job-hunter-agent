@@ -43,13 +43,19 @@ derived from it).
 - The deletion also removed the items' `state_transitions` rows, so the DB holds no
   trace of them; the logs were the only record.
 - **Recovery.** Two paths, both re-scoring through the normal pipeline (figures are
-  **per the phase-5 recovery report**; the right-hand column says what could be
-  re-checked against the DB on 2026-11-01):
+  **per the phase-5 recovery report**; what could be re-checked against the DB on
+  2026-11-01 is listed below the tables). The units differ between columns — URLs
+  versus vacancies — so the figures are split by unit:
 
-  | Source | URLs | already in DB | dead | < 25 again, deleted | returned | returned: rejected / surfaced / deferred |
-  |---|---|---|---|---|---|---|
-  | `t.me` (`restore_lost_tme.py`) | 421 | 0 | 22 | 355 | 80 | 63 / 6 / 11 |
-  | web (standard `add_by_url`) | 173 | 5 | 6 | 105 | 57 | 51 / 2 / 4 |
+  | Source | URLs | already in DB (URLs) | dead (URLs) | live URLs → vacancies |
+  |---|---|---|---|---|
+  | `t.me` (`restore_lost_tme.py`) | 421 | 0 | 22 | 421 − 22 = 399 → **435** (digest posts split into several vacancies) |
+  | web (standard `add_by_url`) | 173 | 5 | 6 | 173 − 5 − 6 = 162 → 162 (one vacancy per URL) |
+
+  | Source | Vacancies | < 25 again, deleted | returned | returned: rejected / surfaced / deferred |
+  |---|---|---|---|---|
+  | `t.me` | 435 | 355 | 80 | 63 / 6 / 11 |
+  | web | 162 | 105 | 57 | 51 / 2 / 4 |
 
   Total surfaced: **8**. LLM calls for the whole recovery: Haiku 795, Sonnet 14.
 
@@ -61,14 +67,15 @@ derived from it).
   `sent` / `drafted` / `declined`, 8 + 1 still `extracted`), so the report's
   rejected / deferred split cannot be reproduced from current states.
 
-  **Not checkable from the DB:** the dead and "< 25 again, deleted" counts (a deleted
-  row leaves nothing behind; 341 `t.me` and 113 web URLs have no row today) and the
-  call counts (no per-call record). One inconsistency in the `t.me` line: its
-  outcomes sum to 22 + 355 + 80 = 457, not 421. Most likely the 355 counts work items
-  while 421 counts URLs (a digest post yields several items — the same reason there
-  are 652 drop events for 594 URLs); this is a hypothesis, not verified. The web line
-  adds up (5 + 6 + 105 + 57 = 173) though the DB shows 60 restored rows against the
-  report's 57 + 5 already-present.
+  **Not checkable from the DB:** the dead URL counts and the "< 25 again, deleted"
+  counts (a deleted row leaves nothing behind; 341 `t.me` and 113 web URLs have no row
+  today, which includes the dead ones) and the call counts (no per-call record).
+  The `t.me` line only adds up once the units are separated, as above: 435 vacancies =
+  355 deleted + 80 returned, from 399 live URLs (421 − 22 dead); the vacancy count comes
+  from the phase-5 report, which states 435 vacancies from 421 URLs. The web line adds
+  up in both units (5 + 6 + 105 + 57 = 173); the DB shows 60 restored web rows against
+  the report's 57 returned, a difference of 3 that is not explained (the report's 5
+  "already in DB" may account for part of it).
 
 ## Timeline
 
