@@ -100,6 +100,21 @@ export const api = {
     });
   },
 
+  // Golden set (blind labelling, /label). The card never carries score/rationale/source.
+  goldenNext(wave = null) {
+    return request(`/api/golden/next${wave ? `?wave=${wave}` : ""}`);
+  },
+  goldenCard(sampleId) {
+    return request(`/api/golden/card/${sampleId}`);
+  },
+  goldenLabel(sampleId, body) {
+    return request(`/api/golden/${sampleId}/label`, {
+      method: "PUT",
+      headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+
   // Market Worth: GET /api/market-worth and POST /api/market-worth/refresh.
   // GET returns cached data (may include stale=true/degraded=true).
   // 404 means no cache exists yet (show "no data" state).

@@ -56,9 +56,11 @@ from pydantic import BaseModel
 from . import add_by_url as add_by_url_mod
 from . import fx as fx_mod
 from . import pipeline as pipeline_mod
+from . import golden as golden_mod
 from . import skip_reasons as skip_reasons_mod
 from . import store
 from . import tg_auth
+from . import vacancy_fetch
 from .config import Config, load_config
 from .pipeline import REASONING_KEY, Deps
 from .schema_extract import ExtractResult, from_dict
@@ -903,6 +905,108 @@ def get_fetcher():
     return add_by_url_mod.default_fetch
 
 
+# --- Golden set: blind labelling (private; labels live only in the DB) -------
+#
+# The operator labels a stratified sample of vacancies WITHOUT seeing the score, the
+# rationale, the state or the source. Cards are served by sample id; the payload is the
+# fixed whitelist golden.CARD_FIELDS (a test pins it). Gated by the same auth as every
+# other /api route.
+
+golden_router = APIRouter(prefix="/api/golden", tags=["golden"], dependencies=[Depends(_api_auth)])
+
+
+class LabelBody(BaseModel):
+    label: str
+    chips: List[str] = []
+
+
+def _golden_progress(conn: psycopg.Connection) -> dict:
+    rows = conn.execute(
+        "SELECT s.wave, count(*) AS total, count(l.sample_id) AS done FROM eval_sample s "
+        "LEFT JOIN eval_labels l ON l.sample_id = s.id GROUP BY s.wave ORDER BY s.wave"
+    ).fetchall()
+    waves = [{"wave": r["wave"], "total": int(r["total"]), "done": int(r["done"])} for r in rows]
+    cur = next((w["wave"] for w in waves if w["done"] < w["total"]), None)
+    return {"waves": waves, "current_wave": cur, "finished": bool(waves) and cur is None}
+
+
+def _golden_card(conn: psycopg.Connection, sample_id: int) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT s.id, s.wave, s.order_no, w.extracted_json, w.raw_text, w.fetched_text, "
+        "l.label, l.chips, (SELECT count(*) FROM eval_sample x WHERE x.wave = s.wave) AS total "
+        "FROM eval_sample s LEFT JOIN work_items w ON w.id = s.item_id "
+        "LEFT JOIN eval_labels l ON l.sample_id = s.id WHERE s.id = %s",
+        (sample_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        extracted = json.loads(row["extracted_json"] or "{}")
+    except Exception:
+        extracted = {}
+    raw = row["raw_text"] or ""
+    return golden_mod.card_payload(
+        sample_id=row["id"], position=row["order_no"], total=int(row["total"]), wave=row["wave"],
+        extracted=extracted if row["raw_text"] is not None else {"title": "(вакансия удалена)"},
+        text=row["fetched_text"] or raw,
+        link=vacancy_fetch.pick_url(raw, None),
+        label=row["label"], chips=skip_reasons_mod.decode(row["chips"] or ""),
+    )
+
+
+@golden_router.get("/progress")
+def golden_progress(conn: psycopg.Connection = Depends(get_conn)) -> dict:
+    return _golden_progress(conn)
+
+
+@golden_router.get("/next")
+def golden_next(wave: Optional[int] = None, conn: psycopg.Connection = Depends(get_conn)) -> dict:
+    """The next unlabelled card (lowest unfinished wave unless ``wave`` is given)."""
+    row = conn.execute(
+        "SELECT s.id FROM eval_sample s LEFT JOIN eval_labels l ON l.sample_id = s.id "
+        "WHERE l.sample_id IS NULL AND (%s::int IS NULL OR s.wave = %s::int) "
+        "ORDER BY s.wave, s.order_no LIMIT 1", (wave, wave),
+    ).fetchone()
+    progress = _golden_progress(conn)
+    if row is None:
+        return {"card": None, "progress": progress}
+    return {"card": _golden_card(conn, row["id"]), "progress": progress}
+
+
+@golden_router.get("/card/{sample_id}")
+def golden_card(sample_id: int, conn: psycopg.Connection = Depends(get_conn)) -> dict:
+    """One card by sample id (for «назад»), with the label already given, if any."""
+    card = _golden_card(conn, sample_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    return {"card": card, "progress": _golden_progress(conn)}
+
+
+@golden_router.put("/{sample_id}/label")
+def golden_label(
+    sample_id: int,
+    body: LabelBody,
+    conn: psycopg.Connection = Depends(get_conn),
+    tg_id: int = Depends(_api_auth),
+) -> dict:
+    """Save (or change) a label. Reason chips are kept only for «нет»."""
+    if body.label not in golden_mod.LABELS:
+        raise HTTPException(status_code=422, detail="label must be yes | no | unsure")
+    if conn.execute("SELECT 1 FROM eval_sample WHERE id = %s", (sample_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    chips = skip_reasons_mod.encode(body.chips) if body.label == "no" else ""
+    ts = store.now_iso()
+    conn.execute(
+        "INSERT INTO eval_labels (sample_id, label, chips, labeled_by, labeled_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (sample_id) DO UPDATE "
+        "SET label = EXCLUDED.label, chips = EXCLUDED.chips, labeled_by = EXCLUDED.labeled_by, "
+        "updated_at = EXCLUDED.updated_at",
+        (sample_id, body.label, chips, str(tg_id), ts, ts),
+    )
+    conn.commit()
+    return {"ok": True, "progress": _golden_progress(conn)}
+
+
 @writer_router.post("/items/add", response_model=AddResult)
 def add_item(
     payload: AddRequest,
@@ -1256,6 +1360,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)  # public login flow (NOT gated)
     app.include_router(router)  # read routes (issue #3), now gated
     app.include_router(writer_router)  # write/action routes (issue #4), now gated
+    app.include_router(golden_router)  # blind labelling for the scoring eval, gated
 
     # SPA static serving — registered LAST so /api + auth routes win the match.
     static_dir = _resolve_static_dir()

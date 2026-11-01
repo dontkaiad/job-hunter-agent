@@ -2306,3 +2306,15 @@ h1::before {
   border-color: var(--accent, #2563eb);
   color: #fff;
 }
+
+/* Blind labelling page (/label). */
+.label-page { max-width: 760px; }
+.label-card { margin-top: 12px; padding: 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 10px; }
+.label-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; opacity: 0.85; margin: 4px 0 8px; }
+.label-stack { margin-bottom: 8px; }
+.label-snippet { white-space: pre-wrap; line-height: 1.45; }
+.label-buttons { display: flex; gap: 10px; margin: 14px 0; flex-wrap: wrap; }
+.label-buttons .active { outline: 2px solid var(--accent, #2563eb); }
+.label-no { margin: 6px 0 10px; }
+.label-nav { margin-top: 10px; }
+.label-page kbd { opacity: 0.55; font-size: 0.75em; margin-left: 4px; }
