@@ -25,7 +25,7 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
-from evals.common import SYNTHETIC, host_of, load_json, report
+from evals.common import SYNTHETIC, host_of, load_json, report, save_result
 
 
 class _Resp:
@@ -127,8 +127,15 @@ def main(argv=None) -> int:
     sub.add_parser("offline")
     r = sub.add_parser("run")
     r.add_argument("--ids", type=int, nargs="*", default=None)
+    r.add_argument("--save", default=None, help="file name under evals/results/")
     a = ap.parse_args(argv)
-    report("link-only fetch", run_offline() if a.cmd == "offline" else run_live(a.ids))
+    if a.cmd == "offline":
+        report("link-only fetch", run_offline())
+        return 0
+    out = run_live(a.ids)
+    report("link-only fetch", out)
+    if a.save:
+        save_result(a.save, out)
     return 0
 
 

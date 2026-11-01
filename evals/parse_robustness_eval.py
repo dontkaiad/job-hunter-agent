@@ -22,7 +22,7 @@ import collections
 import json
 from typing import Any, Dict, List, Optional
 
-from evals.common import SYNTHETIC, load_json, report
+from evals.common import SYNTHETIC, load_json, report, save_result
 
 
 def classify_reply(text: str, stop_reason: Optional[str] = None) -> str:
@@ -145,8 +145,15 @@ def main(argv=None) -> int:
     sub.add_parser("offline")
     r = sub.add_parser("run")
     r.add_argument("--ids", type=int, nargs="+", required=True)
+    r.add_argument("--save", default=None, help="file name under evals/results/")
     a = ap.parse_args(argv)
-    report("parse robustness", run_offline() if a.cmd == "offline" else run_live(a.ids))
+    if a.cmd == "offline":
+        report("parse robustness", run_offline())
+        return 0
+    out = run_live(a.ids)
+    report("parse robustness", out)
+    if a.save:
+        save_result(a.save, out)
     return 0
 
 

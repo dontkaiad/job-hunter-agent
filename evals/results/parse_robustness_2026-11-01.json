@@ -1,8 +1,32 @@
 {
-  "_note": "12 vacancies deferred by the 2026-11-01 07:02 harvest (12 of 46 scoring calls failed, all 'parse'). Re-run the same day on production data. Aggregates only.",
+  "_note": "Output of the script, run on production (read-only DB, paid API) on 2026-11-01 at commit 49b4733; aggregates only. No hand-edited numbers. Text path = free-text JSON parsing (legacy); tool path = link-only gate then forced tool call. Original 2026-11-01 07:02 harvest: 12 of 46 scoring calls failed (alert).",
   "n": 12,
-  "original_harvest": {"scoring_calls": 46, "parse_failures": 12},
-  "text_path_rerun": {"model": "claude-haiku-4-5", "OK": 3, "prose-no-json": 9, "truncated": 0, "markdown-wrapper": 0, "invalid-escape": 0, "other": 0, "stop_reason_max_tokens": 0},
-  "text_path_failures_by_input_length_chars": {"83-281": 9, "ok_cases": {"6070": 1, "120": 1, "176": 1}},
-  "tool_path_with_link_only_gate": {"link_only_no_llm_call": 8, "insufficient_content": 3, "scored": 1, "parse_failures": 0}
+  "model": "claude-haiku-4-5",
+  "text_path": {
+    "OK": 6,
+    "prose-no-json": 6
+  },
+  "text_path_stop_reason_max_tokens": 0,
+  "text_path_input_chars": {
+    "OK": [
+      115,
+      120,
+      176,
+      273,
+      281,
+      6070
+    ],
+    "failed": [
+      83,
+      83,
+      83,
+      112,
+      129,
+      131
+    ]
+  },
+  "tool_path": {
+    "insufficient_content": 4,
+    "link_only (no LLM call)": 8
+  }
 }

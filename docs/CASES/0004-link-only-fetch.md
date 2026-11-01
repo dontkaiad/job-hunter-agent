@@ -25,7 +25,10 @@ server's region) are on a config denylist and are never requested.
   scorer on Haiku, `temperature=0`, forced tool. Dry-run: **nothing written to the
   DB**. Candidates: state `extracted`, not `score_failed`, parked or link-only by the
   40-character gate.
-- **Sample:** **n = 8** candidates, one run, 2026-11-01 after deploy.
+- **Sample:** **n = 8** candidates, 2026-11-01 after deploy. Run twice: the first as
+  the dry-run script (`scripts/oneoff/fetch_link_only_stubs.py`), the second as
+  `evals/link_fetch_eval.py run`, which produced the committed baseline. The two
+  agreed on every count and every host.
 - **Denylist** (`FETCH_DENYLIST`): `habr.com`, `career.habr.com`, `getmatch.ru`,
   `linkedin.com` (subdomains included). A denylisted stub makes **no request**, stays
   `link_only`, `fetch_status = denylisted`. None of the 8 candidates were on it, so
@@ -33,7 +36,7 @@ server's region) are on a config denylist and are never requested.
 
 ## Results
 
-Fetch: **7 of 8 returned usable text**, 1 failed (cause not diagnosed — e.g. a JS-only
+Fetch: **7 of 8 returned usable text** (`fetch_status`: ok 7, failed 1), 1 failed (cause not diagnosed — e.g. a JS-only
 or bot-protected page).
 
 | Host | Fetch | Score with the page text |
@@ -53,9 +56,11 @@ What this does and does not say:
   all stub-like posts in the DB, teletype.in and remocate.app are the two biggest hosts
   (67 of 112); remocate.app was not among this run's 8, so its path is covered by unit
   tests and a manual check of one page, not by this live result.
-- Three work items appear to be **the same teletype page** (identical 2671 chars and
-  identical score): one vacancy cross-posted in three channels, not deduplicated because
-  dedup keys on the post's permalink, not the vacancy link. A follow-up is planned.
+- Three work items are **the same teletype page**: the script now hashes fetched text,
+  and the 7 fetched pages are only **5 distinct pages**, with exactly one page seen more
+  than once (3 items, identical text and score). One vacancy cross-posted in three
+  channels, not deduplicated because dedup keys on the post's permalink, not the
+  vacancy link. A follow-up (dedup by the vacancy URL) is in progress.
 - 0 surfaced out of 7: for this batch, recovering the text mostly confirmed the
   stubs were not relevant. That is a fact about this batch, not a rate.
 
@@ -89,5 +94,5 @@ Live dry-run (network fetches + one Haiku call per fetched page, **≈ $0.05** f
 estimate from [COST.md](../../COST.md) rates; read-only DB, nothing written):
 
 ```bash
-python -m evals.link_fetch_eval run
+python -m evals.link_fetch_eval run --save my_run.json
 ```

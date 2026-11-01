@@ -32,20 +32,23 @@ def test_offline_evals_pass_without_network(monkeypatch):
     assert res["score_stability"]["baseline_file_present"] is True
 
 
-def test_committed_baselines_match_the_article_claims():
+def test_committed_baselines_are_consistent_with_the_articles():
+    """The baselines are script output; these checks pin the numbers the articles quote."""
     b = common.load_json(common.RESULTS / "score_stability_2026-11-01.json")
-    ranges_default = [r["default"]["range"] for r in b["rows"] if r["model"].startswith("claude-haiku")]
-    ranges_t0 = [r["t0"]["range"] for r in b["rows"]]
-    assert ranges_default == [13, 4, 0] and set(ranges_t0) == {0}
-    assert sum(len(r["default"]["scores"]) + len(r["t0"]["scores"]) for r in b["rows"]) == b["api_calls"]
+    rows = b["rows"]
+    haiku = [r for r in rows if r["model"].startswith("claude-haiku")]
+    sonnet = [r for r in rows if r["model"].startswith("claude-sonnet")]
+    assert len(haiku) == len(sonnet) == 3, "models must stay separate rows"
+    assert [r["default"]["range"] for r in haiku] == [4, 10, 14]
+    assert [r["default"]["range"] for r in sonnet] == [4, 0, 0]
+    assert all(r["t0"]["range"] == 0 for r in rows)
+    assert sum(len(r["default"]["scores"]) + len(r["t0"]["scores"]) for r in rows) == 60
     p = common.load_json(common.RESULTS / "parse_robustness_2026-11-01.json")
-    t = p["text_path_rerun"]
-    assert t["OK"] + t["prose-no-json"] == p["n"] == 12
-    tp = p["tool_path_with_link_only_gate"]
-    assert tp["link_only_no_llm_call"] + tp["insufficient_content"] + tp["scored"] == 12
+    assert p["n"] == 12 and sum(p["text_path"].values()) == 12
+    assert sum(p["tool_path"].values()) == 12 and p["text_path_stop_reason_max_tokens"] == 0
     f = common.load_json(common.RESULTS / "link_fetch_2026-11-01.json")
-    assert f["fetch_ok"] + f["fetch_failed"] + f["denylisted"] == f["candidates"] == 8
-    assert sum(f["score_buckets"].values()) == f["fetch_ok"]
+    assert sum(f["fetch_status"].values()) == f["candidates"] == 8
+    assert sum(f["score_buckets"].values()) == f["fetch_status"]["ok"] == 7
 
 
 def test_no_private_markers_in_public_eval_files():
