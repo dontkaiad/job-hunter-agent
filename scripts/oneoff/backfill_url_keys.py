@@ -63,9 +63,13 @@ def main(argv) -> int:
     print(f"still in 'extracted' (dropped as duplicates at the next harvest): {len(would_drop)} "
           f"ids={[i for i, _ in would_drop]}")
     if apply:
-        with conn.transaction():
+        try:
             for item_id, key in new_keys.items():
                 conn.execute("UPDATE work_items SET primary_url_key = %s WHERE id = %s", (key, item_id))
+        except Exception:
+            conn.rollback()  # all or nothing
+            raise
+        conn.commit()
         print(f"applied: {len(new_keys)} keys set")
     else:
         print("dry-run (nothing written; pass --apply)")
