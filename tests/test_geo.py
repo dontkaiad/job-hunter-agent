@@ -185,3 +185,23 @@ def test_remote_limited_to_a_place_that_includes_the_home_market_is_eligible():
     assert geo.decide(F(remote_scope="region", remote_locations=["Europe", "HL"]), HOME)[0] == geo.ELIGIBLE
     assert geo.decide(F(remote_scope="country", remote_locations=["Elsewhere"]), HOME)[0] == geo.INELIGIBLE
     assert geo.decide(f, geo.Eligibility())[0] == geo.INELIGIBLE                      # no home market configured
+
+
+# --- matching is by whole word, never by substring ---------------------------------
+
+def test_a_short_code_never_matches_inside_a_longer_name():
+    e = geo.Eligibility(home_markets=(geo.HomeMarket(names=("russia", "russian federation"), office_cities=("st petersburg",)),))
+    assert geo._match_market("US", e) is None and geo._match_market("USA", e) is None
+    assert geo._match_market("Russia", e) is not None and geo._match_market("Russian Federation", e) is not None
+    assert geo._match_market("Southern Russia", e) is not None                      # name as a whole word
+    assert geo._match_market("Prussia", e) is None and geo._match_market("", e) is None
+    assert geo.decide(F(remote_scope="country", remote_locations=["US", "USA"]), e)[0] == geo.INELIGIBLE
+
+
+def test_city_text_may_list_several_places():
+    e = geo.Eligibility(home_markets=(geo.HomeMarket(names=("home land",), office_cities=("home city",)),))
+    f = F(employer_country="home land", onsite="hybrid", role_city="Other City, Home City")
+    assert geo.decide(f, e)[0] == geo.ELIGIBLE
+    f2 = F(employer_country="home land", onsite="hybrid", role_city="Other City, Third City")
+    assert geo.decide(f2, e)[0] == geo.INELIGIBLE
+    assert geo._city_ok(F(role_city="Nearly Home Cityville"), e.home_markets[0]) is False

@@ -114,22 +114,31 @@ def parse_facts(data: Optional[Mapping[str, Any]]) -> GeoFacts:
 
 # --- the decision -----------------------------------------------------------------
 
+def _names_in(text: str, names: Tuple[str, ...]) -> bool:
+    """True when the text IS one of the names or contains one as a whole word/phrase.
+    (A name never matches inside a longer word: 'no' must not match 'norway'.) PURE."""
+    import re
+
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    return any(t == n or re.search(r"(?<!\w)" + re.escape(n) + r"(?!\w)", t) for n in names if n)
+
+
 def _match_market(country: Optional[str], elig: Eligibility) -> Optional[HomeMarket]:
-    c = (country or "").strip().lower()
-    if not c:
-        return None
     for m in elig.home_markets:
-        if any(c == n or n in c or c in n for n in m.names):
+        if _names_in(country or "", m.names):
             return m
     return None
 
 
 def _city_ok(facts: GeoFacts, market: HomeMarket) -> Optional[bool]:
-    """True/False when the role's city is known, None when it is not stated."""
+    """True/False when the role's city is known, None when it is not stated.
+    The city text may list several places; it is eligible when it names an eligible one."""
     city = (facts.role_city or facts.employer_city or "").strip().lower()
     if not city:
         return None
-    return any(c == city or c in city or city in c for c in market.office_cities)
+    return _names_in(city, market.office_cities)
 
 
 _GLOBAL_WORDS = ("worldwide", "world-wide", "global", "anywhere", "any country", "any location",
