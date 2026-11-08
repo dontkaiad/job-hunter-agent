@@ -65,6 +65,8 @@ class Profile:
     gender: str = "unspecified"
     salary_floor_eur: float = 1000.0
     draft_signature: DraftSignature = field(default_factory=DraftSignature)
+    # Candidate eligibility constraints (private; see job_hunter/geo.py). Empty by default.
+    eligibility: Any = None
     # The path the profile was loaded from (None when built directly).
     source_path: Optional[str] = None
 
@@ -83,6 +85,12 @@ def _as_list(value: Any) -> List[str]:
     # A single scalar -> one-element list.
     s = str(value).strip()
     return [s] if s else []
+
+
+def _parse_eligibility(raw: Any):
+    from .geo import parse_eligibility
+
+    return parse_eligibility(raw)
 
 
 def parse_profile(data: Mapping[str, Any], source_path: Optional[str] = None) -> Profile:
@@ -118,6 +126,7 @@ def parse_profile(data: Mapping[str, Any], source_path: Optional[str] = None) ->
         gender=gender,
         salary_floor_eur=floor,
         draft_signature=sig,
+        eligibility=_parse_eligibility(data.get("eligibility")),
         source_path=source_path,
     )
 

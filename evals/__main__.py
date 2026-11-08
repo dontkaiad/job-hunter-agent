@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sys
 
-from evals import cost_probe, golden_eval, link_fetch_eval, parse_robustness_eval, score_stability_eval
+from evals import cost_probe, geo_facts_eval, golden_eval, link_fetch_eval, parse_robustness_eval, score_stability_eval
 
 
 def run_all():
@@ -20,6 +20,7 @@ def run_all():
         "parse_robustness": parse_robustness_eval.run_offline(),
         "link_fetch": link_fetch_eval.run_offline(),
         "cost_probe": cost_probe.run_offline(),
+        "geo_facts": geo_facts_eval.run_offline(),
         "golden_set": {k: v for k, v in golden_eval.run_offline().items() if isinstance(v, bool)},
     }
 

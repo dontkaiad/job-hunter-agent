@@ -150,6 +150,22 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage (ts);
 
+-- Geo facts extracted for the labelled vacancies (private eval data; see job_hunter/geo.py).
+CREATE TABLE IF NOT EXISTS eval_geo_facts (
+    item_id    INTEGER PRIMARY KEY,
+    facts_json TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    cost_usd   DOUBLE PRECISION,
+    created_at TEXT NOT NULL
+);
+-- Every look at a held-out split is recorded: it may be looked at once, at the end.
+CREATE TABLE IF NOT EXISTS eval_looks (
+    id         SERIAL PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    split      TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_work_items_state      ON work_items (state);
 CREATE INDEX IF NOT EXISTS idx_work_items_updated_at ON work_items (updated_at);
 
