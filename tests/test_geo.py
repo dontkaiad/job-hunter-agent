@@ -165,3 +165,23 @@ def test_metrics_counts():
 def test_split_flag_matches_the_hash_rule():
     assert gfe.split_of({"held_out": True}) == "held-out" and gfe.split_of({"held_out": False}) == "dev"
     assert sum(golden.held_out(i) for i in range(1, 1001)) in range(250, 350)
+
+
+# --- consistency fixes found on the dev split ---------------------------------------
+
+def test_worldwide_with_restrictive_places_is_not_worldwide():
+    assert geo.effective_scope(F(remote_scope="worldwide", remote_locations=["UK", "Europe"])) == "region"
+    assert geo.effective_scope(F(remote_scope="worldwide", remote_locations=["USA"])) == "country"
+    assert geo.effective_scope(F(remote_scope="worldwide", remote_locations=["Worldwide", "весь мир"])) == "worldwide"
+    assert geo.effective_scope(F(remote_scope="worldwide")) == "worldwide"
+    assert geo.effective_scope(F(remote_scope="region")) == "region"
+    assert geo.decide(F(remote_scope="worldwide", remote_locations=["UK", "Europe"]), geo.Eligibility())[0] == geo.INELIGIBLE
+    assert geo.decide(F(remote_scope="worldwide", remote_locations=["Anywhere"]), geo.Eligibility())[0] == geo.ELIGIBLE
+
+
+def test_remote_limited_to_a_place_that_includes_the_home_market_is_eligible():
+    f = F(remote_scope="country", remote_locations=["Home Land"])                    # employer not identified
+    assert geo.decide(f, HOME) == (geo.ELIGIBLE, "remote limited to places that include a home market")
+    assert geo.decide(F(remote_scope="region", remote_locations=["Europe", "HL"]), HOME)[0] == geo.ELIGIBLE
+    assert geo.decide(F(remote_scope="country", remote_locations=["Elsewhere"]), HOME)[0] == geo.INELIGIBLE
+    assert geo.decide(f, geo.Eligibility())[0] == geo.INELIGIBLE                      # no home market configured

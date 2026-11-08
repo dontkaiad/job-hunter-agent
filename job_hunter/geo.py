@@ -132,23 +132,56 @@ def _city_ok(facts: GeoFacts, market: HomeMarket) -> Optional[bool]:
     return any(c == city or c in city or city in c for c in market.office_cities)
 
 
+_GLOBAL_WORDS = ("worldwide", "world-wide", "global", "anywhere", "any country", "any location",
+                 "весь мир", "по всему миру", "любая страна", "из любой")
+
+
+def _is_global_entry(entry: str) -> bool:
+    e = (entry or "").strip().lower()
+    return any(w in e for w in _GLOBAL_WORDS)
+
+
+def effective_scope(facts: GeoFacts) -> str:
+    """The remote scope the facts actually support. PURE.
+
+    'worldwide' means NO restriction: if the model also lists restrictive places
+    (UK, Europe, USA ...) the scope is a restricted one, 'country' for one named place,
+    'region' for several."""
+    if facts.remote_scope != "worldwide":
+        return facts.remote_scope
+    restrictive = [x for x in facts.remote_locations if not _is_global_entry(x)]
+    if not restrictive:
+        return "worldwide"
+    return "country" if len(restrictive) == 1 else "region"
+
+
+def _locations_include_home(facts: GeoFacts, elig: Eligibility) -> bool:
+    for loc in facts.remote_locations:
+        if _match_market(loc, elig) is not None:
+            return True
+    return False
+
+
 def decide(facts: GeoFacts, elig: Eligibility) -> Tuple[str, str]:
     """(verdict, reason) from the facts and the candidate's constraints. PURE.
 
     1. relocation or visa support explicitly offered              -> ELIGIBLE
-    2. remote worldwide                                           -> ELIGIBLE
+    2. remote worldwide (no restrictive place listed)             -> ELIGIBLE
     3. employer in a home market:
          remote / no on-site requirement                          -> ELIGIBLE
          office or hybrid in an eligible city                     -> ELIGIBLE
          office or hybrid elsewhere                               -> INELIGIBLE
          office or hybrid, city not stated                        -> UNKNOWN
-    4. remote tied to a country or a region (a region counts as a country) -> INELIGIBLE
+    4. remote tied to a country or a region (a region counts as a country):
+         the allowed places include a home market (residency is met) -> ELIGIBLE
+         otherwise                                                -> INELIGIBLE
     5. office / hybrid without relocation                         -> INELIGIBLE
     6. anything else (nothing usable stated)                      -> UNKNOWN (never a reject)
     """
     if facts.relocation_offered is True or facts.visa_sponsorship == "offered":
         return ELIGIBLE, "relocation or visa support offered"
-    if facts.remote_scope == "worldwide":
+    scope = effective_scope(facts)
+    if scope == "worldwide":
         return ELIGIBLE, "remote worldwide"
     market = _match_market(facts.employer_country, elig)
     if market is not None:
@@ -160,7 +193,9 @@ def decide(facts: GeoFacts, elig: Eligibility) -> Tuple[str, str]:
                 return INELIGIBLE, "home-market employer, office/hybrid in a non-eligible city"
             return UNKNOWN, "home-market employer, office/hybrid city not stated"
         return ELIGIBLE, "home-market employer, remote"
-    if facts.remote_scope in ("country", "region"):
+    if scope in ("country", "region"):
+        if _locations_include_home(facts, elig):
+            return ELIGIBLE, "remote limited to places that include a home market"
         return INELIGIBLE, "remote tied to a country or region"
     if facts.onsite in ("office", "hybrid"):
         return INELIGIBLE, "office/hybrid without relocation"
