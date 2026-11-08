@@ -12,6 +12,9 @@
              re-scored current score where eval_frame has one and the stored score
              otherwise (band_source records which). Needs only the database.
                python -m evals.golden_eval sample --exclude-urls FILE
+  wave2   -- NO API: replace the (still unlabelled) wave 2 with the re-planned one
+             (no hard stratum; 25-39 and 50-59 weighted; see golden.WAVE2_PLAN).
+               python -m evals.golden_eval wave2 --exclude-urls FILE [--apply]   (dry-run without --apply)
   estimate-labeled -- NO API: what re-scoring the sampled cards would cost, sync vs Batch.
   report  -- live: metrics from eval_labels (precision@60, recall, calibration by band,
              PR curve, by reason and source, held-out kept separate). Aggregates only.
@@ -170,6 +173,12 @@ def run_offline() -> Dict[str, Any]:
         "pr_curve_has_all_thresholds": len(pr) == 6,
         "blind_card_has_no_score_or_source": set(card) == set(golden.CARD_FIELDS)
                                              and "score" not in card and "Обоснование" not in json.dumps(card, ensure_ascii=False),
+        "wave2_matches_the_plan": (
+            lambda w2: len(w2) == 65 and sum(r["is_control"] for r in w2) == 5
+            and not any(r["stratum"] == "hard" for r in w2)
+            and collections.Counter(r["band"] for r in w2 if not r["is_control"]) == collections.Counter(golden.WAVE2_PLAN)
+            and not ({r["item_id"] for r in w2} & {r["item_id"] for r in sample if r["wave"] == 1})
+        )(golden.build_wave2(frame, {r["item_id"] for r in sample if r["wave"] == 1})),
         "frame_rules_ok": ([f["item_id"] for f in sel["frame"]] == [1] and sel["excluded"] == {
             "duplicate of an older row": 1, "not scored yet": 1, "restored after the outage": 1}),
     }
@@ -337,6 +346,48 @@ def run_sample(exclude_urls: Optional[str]) -> Dict[str, Any]:
     }
 
 
+def run_wave2(exclude_urls: Optional[str], apply: bool) -> Dict[str, Any]:
+    """Rebuild wave 2 from the current frame, leaving wave 1 (and its labels) untouched.
+    Refuses if any wave-2 card already has a label. Database only: no API."""
+    from job_hunter import store
+    from job_hunter.clock import now_iso
+
+    cfg, _ro = db_ctx()
+    conn, sel, frame = _frame_with_scores(cfg, exclude_urls)
+    rw = store.connect(cfg.database_url)
+    store.init_db(rw)
+    taken = {r["item_id"] for r in rw.execute("SELECT item_id FROM eval_sample WHERE wave = 1").fetchall()}
+    labelled = rw.execute(
+        "SELECT count(*) AS n FROM eval_labels l JOIN eval_sample s ON s.id = l.sample_id WHERE s.wave = 2"
+    ).fetchone()["n"]
+    if labelled:
+        raise SystemExit(f"refusing: {labelled} wave-2 cards already carry labels")
+    rows = golden.build_wave2(frame, taken)
+    plain = [r for r in rows if not r["is_control"]]
+    out = {
+        "applied": apply, "cards": len(rows), "controls": len(rows) - len(plain),
+        "by_band": dict(collections.Counter(r["band"] for r in plain)),
+        "by_band_source": dict(collections.Counter(f'{r["band"]}|{r["band_source"]}' for r in plain)),
+        "held_out": sum(r["held_out"] for r in plain),
+        "wave1_items_excluded": len(taken),
+        "band_left_in_frame_after_wave1": dict(collections.Counter(
+            r["band"] for r in frame if r["stratum"] == "core" and r["item_id"] not in taken)),
+    }
+    if apply:
+        old = rw.execute("SELECT count(*) AS n FROM eval_sample WHERE wave = 2").fetchone()["n"]
+        rw.execute("DELETE FROM eval_sample WHERE wave = 2")      # no labels reference them (checked)
+        ts = now_iso()
+        for r in rows:
+            rw.execute(
+                "INSERT INTO eval_sample (item_id, wave, order_no, stratum, band, band_source, is_control, "
+                "control_of_item, held_out, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (r["item_id"], 2, r["order_no"], r["stratum"], r["band"], r.get("band_source"),
+                 r["is_control"], r["control_of_item"], r["held_out"], ts))
+        rw.commit()
+        out["replaced_old_wave2_cards"] = old
+    return out
+
+
 def run_estimate_labeled(judge_share: float = 0.15) -> Dict[str, Any]:
     """What re-scoring the sampled cards on the CURRENT system would cost. NO API."""
     from job_hunter.profile import load_profile
@@ -375,6 +426,9 @@ def main(argv=None) -> int:
     add_budget_args(f)
     sm = sub.add_parser("sample")
     sm.add_argument("--exclude-urls", default=None)
+    w2 = sub.add_parser("wave2")
+    w2.add_argument("--exclude-urls", default=None)
+    w2.add_argument("--apply", action="store_true")
     sub.add_parser("estimate-labeled")
     a = ap.parse_args(argv)
     if a.cmd == "offline":
@@ -384,6 +438,8 @@ def main(argv=None) -> int:
                                               a.judge_share))
     elif a.cmd == "sample":
         report("golden set: sample (no API)", run_sample(a.exclude_urls))
+    elif a.cmd == "wave2":
+        report("golden set: wave 2 re-plan (no API)", run_wave2(a.exclude_urls, a.apply))
     elif a.cmd == "estimate-labeled":
         report("golden set: cost of re-scoring the labelled cards (no API)", run_estimate_labeled())
     return 0

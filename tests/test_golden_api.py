@@ -140,3 +140,13 @@ def test_deleted_item_does_not_break_the_queue(conn, client):
 def test_empty_set(client):
     r = client.get("/api/golden/next").json()
     assert r["card"] is None and r["progress"] == {"waves": [], "current_wave": None, "finished": False}
+
+
+def test_card_carries_the_whole_text_with_its_line_breaks(conn, client):
+    body = "Role summary\n\nWhat you will do:\n- build RAG\n- own evals\n\n" + ("Requirement line. " * 600)
+    iid = _item(conn, 7)
+    conn.execute("UPDATE work_items SET raw_text=%s WHERE id=%s", (body, iid)); conn.commit()
+    sid = _sample(conn, iid, 1, 1); conn.commit()
+    snippet = client.get(f"/api/golden/card/{sid}").json()["card"]["snippet"]
+    assert snippet.startswith("Role summary\n\nWhat you will do:\n- build RAG\n- own evals\n\n")
+    assert snippet.endswith("Requirement line.") and len(snippet) > 10_000 and "…" not in snippet

@@ -115,23 +115,51 @@ def build_sample(frame: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
         seq = [{"item_id": r["item_id"], "stratum": r["stratum"], "band": r["band"],
                 "band_source": r.get("band_source"),
                 "is_control": False, "control_of_item": None} for r in cards]
-        dev = [i for i, r in enumerate(seq) if r["stratum"] == "core" and not held_out(r["item_id"])
-               and i <= len(seq) - 1 - CONTROL_MIN_GAP]
-        dev.sort(key=lambda i: rank_key(seq[i]["item_id"]) ^ 0x5A5A)
-        for i in dev[:n_controls]:
-            seq.append({**seq[i], "is_control": True, "control_of_item": seq[i]["item_id"], "_after": i})
-        # place each control >= GAP cards after its original, spread over the tail
-        base = [r for r in seq if not r["is_control"]]
-        ctrl = sorted((r for r in seq if r["is_control"]), key=lambda r: r["_after"])
-        final = list(base)
-        for c in ctrl:
-            orig_pos = next(i for i, r in enumerate(final) if r["item_id"] == c["control_of_item"] and not r["is_control"])
-            lo = min(orig_pos + CONTROL_MIN_GAP, len(final))
-            pos = lo + (rank_key(c["item_id"]) % (len(final) - lo + 1))
-            final.insert(pos, {k: v for k, v in c.items() if k != "_after"})
+        final = _insert_controls(seq, n_controls)
         for no, r in enumerate(final, 1):
             out.append({"wave": wave, "order_no": no, "held_out": held_out(r["item_id"]), **r})
     return out
+
+
+def _insert_controls(seq: List[Dict[str, Any]], n_controls: int) -> List[Dict[str, Any]]:
+    """Add `n_controls` repeats of DEV (non-held-out) core cards, each placed at least
+    CONTROL_MIN_GAP cards after its original. Deterministic."""
+    dev = [i for i, r in enumerate(seq) if r["stratum"] == "core" and not held_out(r["item_id"])
+           and i <= len(seq) - 1 - CONTROL_MIN_GAP]
+    dev.sort(key=lambda i: rank_key(seq[i]["item_id"]) ^ 0x5A5A)
+    controls = [{**seq[i], "is_control": True, "control_of_item": seq[i]["item_id"], "_after": i}
+                for i in dev[:n_controls]]
+    final = list(seq)
+    for c in sorted(controls, key=lambda r: r["_after"]):
+        orig_pos = next(i for i, r in enumerate(final) if r["item_id"] == c["control_of_item"] and not r["is_control"])
+        lo = min(orig_pos + CONTROL_MIN_GAP, len(final))
+        pos = lo + (rank_key(c["item_id"]) % (len(final) - lo + 1))
+        final.insert(pos, {k: v for k, v in c.items() if k != "_after"})
+    return final
+
+
+# Wave 2 as re-planned after wave 1 (2026-11-09): no hard-reject stratum (0 of 5 were
+# relevant), weight on the bands that drive the uncertainty - 25-39 (1193 vacancies, decides
+# how many relevant ones are missed) and 50-59 (6 of 8 were relevant in wave 1; 30 of the
+# remaining 40 are taken), 60-69 to near census; 70-79 / 80+ already have wave-1 cards.
+WAVE2_PLAN: Dict[str, int] = {"<25": 4, "25-39": 14, "40-49": 6, "50-59": 30, "60-69": 6}
+
+
+def build_wave2(frame: Sequence[Dict[str, Any]], taken: Iterable[int],
+                plan: Dict[str, int] = WAVE2_PLAN, n_controls: int = WAVE2_CONTROLS) -> List[Dict[str, Any]]:
+    """Rows for the re-planned wave 2: core vacancies NOT already in wave 1 (`taken`),
+    first n per band in hash order, shuffled by hash, plus controls. No hard stratum.
+    Deterministic; a band with fewer vacancies than planned is taken whole."""
+    skip = set(taken)
+    core = [r for r in frame if r["stratum"] == "core" and r["item_id"] not in skip]
+    cards: List[Dict[str, Any]] = []
+    for b in BAND_NAMES:
+        cards += sorted((r for r in core if r["band"] == b), key=lambda r: rank_key(r["item_id"]))[: plan.get(b, 0)]
+    cards.sort(key=lambda r: rank_key(r["item_id"]))
+    seq = [{"item_id": r["item_id"], "stratum": "core", "band": r["band"], "band_source": r.get("band_source"),
+            "is_control": False, "control_of_item": None} for r in cards]
+    final = _insert_controls(seq, n_controls)
+    return [{"wave": 2, "order_no": no, "held_out": held_out(r["item_id"]), **r} for no, r in enumerate(final, 1)]
 
 
 # --- labels -----------------------------------------------------------------
@@ -265,6 +293,26 @@ CARD_FIELDS = ("sample_id", "position", "total", "wave", "title", "company", "se
                "location", "remote", "relocation", "salary", "snippet", "link", "label", "chips")
 
 
+# A card shows the WHOLE vacancy text (it used to be cut at 600 characters and its line breaks
+# flattened, which made long postings unreadable). Only a runaway size is capped, with a note.
+MAX_CARD_TEXT = 60_000
+
+
+def readable_text(text: Optional[str]) -> str:
+    """The vacancy text with its paragraphs and lists kept, whitespace tidied. PURE.
+
+    CRLF -> LF, trailing blanks stripped, 3+ blank lines -> one blank line; never cut,
+    except beyond MAX_CARD_TEXT (then a visible marker says so)."""
+    import re
+
+    t = (text or "").replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
+    t = "\n".join(line.rstrip() for line in t.split("\n"))
+    t = re.sub(r"\n{3,}", "\n\n", t).strip()
+    if len(t) > MAX_CARD_TEXT:
+        t = t[:MAX_CARD_TEXT].rstrip() + f"\n\n[… текст обрезан после {MAX_CARD_TEXT} знаков]"
+    return t
+
+
 def card_payload(*, sample_id: int, position: int, total: int, wave: int, extracted: Dict[str, Any],
                  text: str, link: Optional[str], label: Optional[str] = None,
                  chips: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -273,12 +321,12 @@ def card_payload(*, sample_id: int, position: int, total: int, wave: int, extrac
     lo, hi, cur = ex.get("salary_min"), ex.get("salary_max"), ex.get("currency")
     if lo or hi:
         sal = f"{lo or ''}–{hi or ''} {cur or ''}".strip(" –")
-    snippet = " ".join((text or "").split())
+    snippet = readable_text(text)
     return {
         "sample_id": sample_id, "position": position, "total": total, "wave": wave,
         "title": ex.get("title"), "company": ex.get("company"), "seniority": ex.get("seniority"),
         "stack": ex.get("stack") or [], "location": ex.get("location"), "remote": ex.get("remote"),
         "relocation": ex.get("relocation"), "salary": sal,
-        "snippet": snippet[:600] + ("…" if len(snippet) > 600 else ""),
+        "snippet": snippet,
         "link": link, "label": label, "chips": chips or [],
     }

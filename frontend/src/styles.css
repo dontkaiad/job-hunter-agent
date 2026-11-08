@@ -2312,7 +2312,9 @@ h1::before {
 .label-card { margin-top: 12px; padding: 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 10px; }
 .label-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; opacity: 0.85; margin: 4px 0 8px; }
 .label-stack { margin-bottom: 8px; }
-.label-snippet { white-space: pre-wrap; line-height: 1.45; }
+.label-snippet { white-space: pre-wrap; line-height: 1.5; overflow-wrap: anywhere; }
+/* long postings: keep the answer buttons in view while the text scrolls */
+.label-buttons { position: sticky; bottom: 0; padding: 10px 0; background: var(--bg, #fff); z-index: 2; }
 .label-buttons { display: flex; gap: 10px; margin: 14px 0; flex-wrap: wrap; }
 .label-buttons .active { outline: 2px solid var(--accent, #2563eb); }
 .label-no { margin: 6px 0 10px; }

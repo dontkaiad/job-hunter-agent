@@ -142,7 +142,8 @@ def test_card_is_blind():
     blob = json.dumps(c, ensure_ascii=False)
     for leak in ("91", "secret verdict", "some_channel", "relevance", "Обоснование", "item_id"):
         assert leak not in blob
-    assert c["salary"] == "3000–4000 EUR" and c["snippet"].endswith("…") and len(c["snippet"]) <= 601
+    assert c["salary"] == "3000–4000 EUR"
+    assert c["snippet"] == ("word " * 400).strip()                    # the whole text, not a 600-char cut
 
 
 # --- frame rules (the same function the live run uses) ----------------------
@@ -160,3 +161,76 @@ def test_band_source_travels_with_every_card_and_control():
     s = g.build_sample(fr)
     assert all(r["band_source"] == by[r["item_id"]] for r in s)
     assert any(r["is_control"] for r in s)           # controls keep their original's source
+
+
+# --- the card shows the whole, readable text -----------------------------------
+
+def test_card_text_is_never_cut_and_keeps_its_structure():
+    text = "About the role\r\n\r\n\r\n\r\n- Python  \n- RAG\u00a0pipelines\n\nRequirements:\n" + ("line of requirements. " * 2000)
+    out = g.readable_text(text)
+    assert out.startswith("About the role\n\n- Python\n- RAG pipelines\n\nRequirements:")
+    assert "\r" not in out and "\n\n\n" not in out and "  \n" not in out
+    assert out.endswith("line of requirements.") and len(out) > 40_000       # nothing lost
+    card = g.card_payload(sample_id=1, position=1, total=1, wave=1, extracted={}, text=text, link=None)
+    assert card["snippet"] == out
+
+
+def test_only_a_runaway_text_is_cut_and_says_so():
+    out = g.readable_text("x" * (g.MAX_CARD_TEXT + 5000))
+    assert out.endswith("знаков]") and len(out) < g.MAX_CARD_TEXT + 200
+    assert g.readable_text(None) == "" and g.readable_text("  \n\n ") == ""
+
+
+# --- wave 2 as re-planned after wave 1 -------------------------------------------
+
+def _frame2():
+    fr, i = [], 1
+    sizes = {"<25": 98, "25-39": 1193, "40-49": 131, "50-59": 48, "60-69": 12, "70-79": 123, "80+": 19}
+    for b, n in sizes.items():
+        for _ in range(n):
+            fr.append({"item_id": i, "band": b, "stratum": "core", "band_source": "stored"}); i += 1
+    for _ in range(136):
+        fr.append({"item_id": i, "band": "<25", "stratum": "hard", "band_source": "current"}); i += 1
+    return fr, sizes
+
+
+def test_wave2_plan_matches_what_was_agreed():
+    assert g.WAVE2_PLAN == {"<25": 4, "25-39": 14, "40-49": 6, "50-59": 30, "60-69": 6}
+    assert sum(g.WAVE2_PLAN.values()) == 60 and g.WAVE2_CONTROLS == 5
+
+
+def test_wave2_composition_exclusions_and_order():
+    fr, sizes = _frame2()
+    wave1 = g.build_sample(fr)
+    taken = {r["item_id"] for r in wave1 if r["wave"] == 1}
+    w2 = g.build_wave2(fr, taken)
+    plain = [r for r in w2 if not r["is_control"]]
+    assert len(w2) == 65 and len(plain) == 60 and sum(r["is_control"] for r in w2) == 5
+    assert all(r["wave"] == 2 and r["stratum"] == "core" for r in w2)              # no hard stratum
+    assert dict(__import__("collections").Counter(r["band"] for r in plain)) == g.WAVE2_PLAN
+    assert not ({r["item_id"] for r in w2} & taken)                                # nothing seen in wave 1
+    assert sorted(r["order_no"] for r in w2) == list(range(1, 66))
+    for c in (r for r in w2 if r["is_control"]):
+        first = next(r for r in w2 if r["item_id"] == c["control_of_item"] and not r["is_control"])
+        assert c["order_no"] - first["order_no"] >= g.CONTROL_MIN_GAP and not c["held_out"]
+    assert w2 == g.build_wave2(list(reversed(fr)), taken)                          # deterministic
+    assert all(r["band_source"] == "stored" for r in plain)                        # source travels
+
+
+def test_wave2_takes_a_small_band_whole_and_never_more_than_exists():
+    fr, _ = _frame2()
+    sizes_small = {"<25": 2, "25-39": 40, "40-49": 40, "50-59": 33, "60-69": 3}
+    fr2 = [r for r in fr if r["stratum"] == "core"]
+    keep = []
+    for b, n in sizes_small.items():
+        keep += [r for r in fr2 if r["band"] == b][:n]
+    w2 = g.build_wave2(keep, taken=set())
+    c = __import__("collections").Counter(r["band"] for r in w2 if not r["is_control"])
+    assert c["<25"] == 2 and c["60-69"] == 3 and c["50-59"] == 30
+
+
+# --- the offline eval covers the new plan -------------------------------------------
+
+def test_offline_eval_checks_wave2():
+    res = ge.run_offline()
+    assert res["wave2_matches_the_plan"] is True
