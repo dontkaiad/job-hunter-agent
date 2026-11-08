@@ -117,6 +117,21 @@ CREATE TABLE IF NOT EXISTS eval_labels (
     updated_at TEXT NOT NULL
 );
 
+-- Per-call token usage from the API `usage` block (cost measured, not modelled).
+-- mode = 'sync' (Messages API) | 'batch' (Message Batches, billed at 50%).
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id                 SERIAL PRIMARY KEY,
+    ts                 TEXT NOT NULL,
+    step               TEXT NOT NULL,
+    model              TEXT NOT NULL,
+    mode               TEXT NOT NULL DEFAULT 'sync',
+    input_tokens       INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cache_read_tokens  INTEGER NOT NULL,
+    output_tokens      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage (ts);
+
 CREATE INDEX IF NOT EXISTS idx_work_items_state      ON work_items (state);
 CREATE INDEX IF NOT EXISTS idx_work_items_updated_at ON work_items (updated_at);
 

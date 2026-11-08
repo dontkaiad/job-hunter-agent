@@ -189,3 +189,43 @@ def test_anthropic_complete_plain_system_when_not_cached():
     # Back-compat: a plain string system field when caching is off.
     assert kwargs["system"] == "SHORT SYS"
 
+
+# --- token-usage logging -----------------------------------------------------
+
+def _resp(i=100, w=0, r=0, o=50):
+    return SimpleNamespace(
+        usage=SimpleNamespace(
+            input_tokens=i, cache_creation_input_tokens=w,
+            cache_read_input_tokens=r, output_tokens=o,
+        ),
+        content=[SimpleNamespace(type="text", text="ok")],
+        stop_reason="end_turn",
+    )
+
+
+def _client_with(resp, sink):
+    c = llm.AnthropicClient.__new__(llm.AnthropicClient)
+    c._client = MagicMock()
+    c._client.messages.create.return_value = resp
+    c.model = llm.CHEAP_MODEL
+    c.usage_sink = sink
+    return c
+
+
+def test_usage_record_is_logged_with_step_label():
+    got = []
+    c = _client_with(_resp(10, 20, 30, 40), got.append)
+    with llm.usage_step("score"):
+        c.complete("sys", "user", model="claude-sonnet-4-6")
+    assert got == [{
+        "step": "score", "model": "claude-sonnet-4-6", "mode": "sync",
+        "input_tokens": 10, "cache_write_tokens": 20,
+        "cache_read_tokens": 30, "output_tokens": 40,
+    }]
+
+
+def test_usage_sink_failure_never_breaks_the_call():
+    def boom(_):
+        raise RuntimeError("db down")
+    c = _client_with(_resp(), boom)
+    assert c.complete("sys", "user") == "ok"

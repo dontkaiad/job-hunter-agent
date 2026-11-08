@@ -1351,7 +1351,10 @@ def build_deps(cfg: Config) -> Deps:
 
         # The client default model is the cheap one; the judge model is passed
         # per-call by the pipeline via Deps.judge_model.
-        llm_client = AnthropicClient(cfg.anthropic_api_key, cfg.cheap_model)
+        sink = store.make_usage_sink(cfg.database_url) if cfg.database_url else None
+        llm_client = AnthropicClient(
+            cfg.anthropic_api_key, cfg.cheap_model, usage_sink=sink
+        )
     fx = fx_mod.FxRates(provider=cfg.fx_provider, cache_ttl=cfg.fx_cache_ttl)
     # Load the candidate profile (local real profile if present, else the
     # generic committed example). It drives the rubric/draft prompts, the draft

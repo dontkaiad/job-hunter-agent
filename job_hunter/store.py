@@ -250,6 +250,32 @@ def _split_statements(sql: str) -> List[str]:
     return out
 
 
+def record_llm_usage(conn, rec: dict) -> None:
+    """Persist one API call's token usage (see llm.usage_record). Own commit."""
+    from .clock import now_iso
+
+    conn.execute(
+        "INSERT INTO llm_usage (ts, step, model, mode, input_tokens, cache_write_tokens,"
+        " cache_read_tokens, output_tokens) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (now_iso(), rec["step"], rec["model"], rec.get("mode", "sync"),
+         rec["input_tokens"], rec["cache_write_tokens"], rec["cache_read_tokens"],
+         rec["output_tokens"]),
+    )
+    conn.commit()
+
+
+def make_usage_sink(dsn: str):
+    """Sink for AnthropicClient: one short-lived connection per call (calls are
+    seconds apart and may come from several threads, so no shared connection)."""
+    def sink(rec: dict) -> None:
+        conn = connect(dsn)
+        try:
+            record_llm_usage(conn, rec)
+        finally:
+            conn.close()
+    return sink
+
+
 def init_db(conn: psycopg.Connection, schema_path: str = _SCHEMA_PATH) -> None:
     """Create tables/indexes from migrations/schema_pg.sql (idempotent)."""
     with open(schema_path, "r", encoding="utf-8") as f:

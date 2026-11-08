@@ -17,9 +17,12 @@ passed (back-compat). Tests assert the requested model id per call.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import functools
 import json
 import re
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 from .profile import Profile, example_profile
 from .schema_extract import ExtractResult, from_dict
@@ -139,6 +142,51 @@ def build_system_param(system: str, cache: bool):
     ]
 
 
+# --- Token-usage logging ------------------------------------------------------
+#
+# Every real API response carries a ``usage`` block. We record input / cache-write
+# / cache-read / output tokens per call, labelled with the pipeline step, so cost
+# is measured from billing-grade numbers instead of modelled. The step label is a
+# ContextVar set by the llm_* wrappers (no signature change for fake clients).
+_USAGE_STEP: contextvars.ContextVar[str] = contextvars.ContextVar("llm_usage_step", default="other")
+
+
+@contextlib.contextmanager
+def usage_step(name: str):
+    tok = _USAGE_STEP.set(name)
+    try:
+        yield
+    finally:
+        _USAGE_STEP.reset(tok)
+
+
+def usage_record(resp: Any, model: str, mode: str = "sync") -> Optional[Dict[str, Any]]:
+    """Plain dict of the response's token usage, or None. PURE."""
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return None
+    return {
+        "step": _USAGE_STEP.get(),
+        "model": model,
+        "mode": mode,
+        "input_tokens": int(getattr(u, "input_tokens", 0) or 0),
+        "cache_write_tokens": int(getattr(u, "cache_creation_input_tokens", 0) or 0),
+        "cache_read_tokens": int(getattr(u, "cache_read_input_tokens", 0) or 0),
+        "output_tokens": int(getattr(u, "output_tokens", 0) or 0),
+    }
+
+
+def _labelled(step: str):
+    """Decorator: run an llm_* wrapper with its usage step label set."""
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*a, **kw):
+            with usage_step(step):
+                return fn(*a, **kw)
+        return wrapper
+    return deco
+
+
 class LLMClient(Protocol):
     """Minimal protocol our code depends on (subset of Anthropic SDK).
 
@@ -165,12 +213,36 @@ class LLMClient(Protocol):
 class AnthropicClient:
     """Thin wrapper over the Anthropic Messages API with per-call model routing."""
 
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_MODEL,
+        usage_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> None:
         # Imported lazily so tests / pure paths don't require the package config.
         import anthropic
 
         self._client = anthropic.Anthropic(api_key=api_key)
         self.model = model
+        # Called with usage_record(...) after every response. Must never raise
+        # into the pipeline: a logging failure is not a scoring failure.
+        self.usage_sink = usage_sink
+
+    def _record_usage(self, resp: Any, model: str) -> None:
+        rec = usage_record(resp, model)
+        if rec is None:
+            return
+        print(
+            "[usage] step={step} model={model} in={input_tokens} "
+            "cache_w={cache_write_tokens} cache_r={cache_read_tokens} "
+            "out={output_tokens}".format(**rec),
+            flush=True,
+        )
+        if self.usage_sink is not None:
+            try:
+                self.usage_sink(rec)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[usage] sink failed: {type(exc).__name__}", flush=True)
 
     def complete(
         self,
@@ -196,6 +268,7 @@ class AnthropicClient:
             messages=[{"role": "user", "content": user}],
             **kwargs,
         )
+        self._record_usage(resp, model or self.model)
         parts: List[str] = []
         for block in resp.content:
             text = getattr(block, "text", None)
@@ -233,6 +306,7 @@ class AnthropicClient:
             tools=[tool],
             tool_choice={"type": "tool", "name": tool["name"]},
         )
+        self._record_usage(resp, model or self.model)
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use" and block.name == tool["name"]:
                 if getattr(resp, "stop_reason", None) == "max_tokens":
@@ -1005,6 +1079,7 @@ def build_draft_prompt(
 # --- Impure orchestration wrappers (call the client) ------------------------
 
 
+@_labelled("extract")
 def llm_extract(
     client: LLMClient,
     raw_text: str,
@@ -1023,6 +1098,7 @@ def llm_extract(
     return parse_extract_response(text, source_channel, source_link)
 
 
+@_labelled("score")
 def llm_score(
     client: LLMClient,
     extracted: ExtractResult,
@@ -1066,6 +1142,7 @@ def llm_score(
     return parse_score_response(text)
 
 
+@_labelled("research")
 def llm_research(
     client: LLMClient,
     extracted: ExtractResult,
@@ -1092,6 +1169,7 @@ def llm_research(
     return parse_research_response(text)
 
 
+@_labelled("draft")
 def llm_draft(
     client: LLMClient,
     extracted: ExtractResult,
