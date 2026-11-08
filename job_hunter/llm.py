@@ -114,12 +114,29 @@ def estimate_tokens(text: str) -> int:
     return round(ascii_chars / 4 + non_ascii / 1.7)
 
 
-def should_cache_system(system: str, model: Optional[str]) -> bool:
-    """True when the CONSTANT system prefix is long enough to cache on ``model``.
+# Tool definitions render BEFORE ``system`` and are part of the cached prefix.
+# Calibrated with count_tokens (2026-11-08): SCORE_TOOL is 677 JSON chars -> 715
+# tokens (x1.06). The text estimate above is within -3%..+6% of count_tokens for
+# the system prompts (score 2858 est / 3028 real, extract 1197/1246, research
+# 380/386, draft 1907/1848); the big miss was the tool schema, which it ignored.
+_TOOL_TOKENS_PER_JSON_CHAR = 1.06
+
+
+def estimate_tool_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
+    """Offline token estimate of tool definitions. PURE."""
+    if not tools:
+        return 0
+    return round(len(json.dumps(tools, ensure_ascii=False)) * _TOOL_TOKENS_PER_JSON_CHAR)
+
+
+def should_cache_system(
+    system: str, model: Optional[str], tools: Optional[List[Dict[str, Any]]] = None
+) -> bool:
+    """True when the CONSTANT prefix (tools + system) can be cached on ``model``.
 
     PURE. Compares the offline token estimate against the per-model minimum.
     """
-    return estimate_tokens(system) >= cache_min_tokens_for_model(model)
+    return estimate_tokens(system) + estimate_tool_tokens(tools) >= cache_min_tokens_for_model(model)
 
 
 def build_system_param(system: str, cache: bool):
@@ -1126,7 +1143,7 @@ def llm_score(
             SCORE_TOOL,
             max_tokens=SCORE_MAX_TOKENS,
             model=model,
-            cache_system=should_cache_system(system, model),
+            cache_system=should_cache_system(system, model, [SCORE_TOOL]),
             temperature=SCORE_TEMPERATURE,
         )
         return parse_score_tool_input(data)

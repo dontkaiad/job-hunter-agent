@@ -229,3 +229,16 @@ def test_usage_sink_failure_never_breaks_the_call():
         raise RuntimeError("db down")
     c = _client_with(_resp(), boom)
     assert c.complete("sys", "user") == "ok"
+
+
+def test_tool_schema_counts_toward_the_cacheable_prefix():
+    """Tools render before system and count toward the minimum."""
+    assert llm.estimate_tool_tokens(None) == 0
+    assert 600 <= llm.estimate_tool_tokens([llm.SCORE_TOOL]) <= 800   # count_tokens: 715
+    haiku = llm.CHEAP_MODEL
+    tool_t = llm.estimate_tool_tokens([llm.SCORE_TOOL])
+    # ASCII text sized to land between (floor - tool) and floor: caches only WITH tools.
+    system = "a" * 4 * (4096 - tool_t + 50)
+    assert llm.estimate_tokens(system) < 4096
+    assert llm.should_cache_system(system, haiku) is False
+    assert llm.should_cache_system(system, haiku, [llm.SCORE_TOOL]) is True
