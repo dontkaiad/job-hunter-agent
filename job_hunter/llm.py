@@ -71,7 +71,7 @@ DRAFT_MAX_TOKENS = 500
 # Anthropic prompt caching only ENGAGES when the cached prefix is at least the
 # model's minimum cacheable length. That minimum differs by model family:
 #   - Sonnet (claude-sonnet-4-*): ~1024 tokens
-#   - Haiku  (claude-haiku-4-*):  ~2048 tokens
+#   - Haiku  (claude-haiku-4-5):  4096 tokens
 # Below the minimum, ``cache_control`` is silently ignored by the API, so adding
 # it there only adds request noise. We therefore measure each CONSTANT system
 # prompt and add ``cache_control`` ONLY when it exceeds its model's minimum.
@@ -81,14 +81,17 @@ DRAFT_MAX_TOKENS = 500
 # conservative blended estimate so a borderline-but-qualifying prefix is not
 # wrongly skipped.
 _SONNET_CACHE_MIN_TOKENS = 1024
-_HAIKU_CACHE_MIN_TOKENS = 2048
+# Haiku 4.5's documented minimum cacheable prefix is 4096 tokens (not 2048, which
+# is Haiku 3.5 / Opus 4.7). Measured 2026-11: the Haiku score prefix (tools +
+# system) is 3,752 tokens, so it is BELOW the floor and never caches.
+_HAIKU_CACHE_MIN_TOKENS = 4096
 
 
 def cache_min_tokens_for_model(model: Optional[str]) -> int:
     """Minimum cacheable prefix length (in tokens) for ``model``. PURE.
 
-    Haiku requires ~2048 tokens; Sonnet (and anything else, conservatively the
-    smaller floor) requires ~1024.
+    Haiku 4.5 requires 4096 tokens; Sonnet (and anything else, conservatively
+    the smaller floor) requires 1024.
     """
     m = (model or "").lower()
     if "haiku" in m:

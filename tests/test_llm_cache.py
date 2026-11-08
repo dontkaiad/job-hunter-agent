@@ -21,7 +21,7 @@ from job_hunter.schema_extract import ExtractResult
 # --- Pure policy: measured length vs per-model minimum -----------------------
 
 def test_cache_min_tokens_by_model():
-    assert llm.cache_min_tokens_for_model("claude-haiku-4-5") == 2048
+    assert llm.cache_min_tokens_for_model("claude-haiku-4-5") == 4096
     assert llm.cache_min_tokens_for_model("claude-sonnet-4-6") == 1024
     # Unknown / None -> conservative smaller floor.
     assert llm.cache_min_tokens_for_model(None) == 1024
@@ -34,12 +34,12 @@ def test_score_system_qualifies_for_cache_on_sonnet():
 
 
 def test_draft_and_extract_skip_cache_on_haiku_too_short():
-    """DRAFT/EXTRACT are between 1024 and 2048 tokens, so they do NOT clear
-    Haiku's ~2048 minimum and must be skipped (cache_control would not engage)."""
+    """DRAFT/EXTRACT are well under Haiku 4.5's 4096-token minimum, so they
+    do NOT clear it and must be skipped (cache_control would not engage)."""
     draft_tokens = llm.estimate_tokens(llm.DRAFT_SYSTEM)
     extract_tokens = llm.estimate_tokens(llm.EXTRACT_SYSTEM)
-    assert draft_tokens < 2048
-    assert extract_tokens < 2048
+    assert draft_tokens < 4096
+    assert extract_tokens < 4096
     assert llm.should_cache_system(llm.DRAFT_SYSTEM, llm.CHEAP_MODEL) is False
     assert llm.should_cache_system(llm.EXTRACT_SYSTEM, llm.CHEAP_MODEL) is False
     assert llm.should_cache_system(llm.RESEARCH_SYSTEM, llm.CHEAP_MODEL) is False
@@ -188,3 +188,4 @@ def test_anthropic_complete_plain_system_when_not_cached():
     kwargs = client._client.messages.create.call_args.kwargs
     # Back-compat: a plain string system field when caching is off.
     assert kwargs["system"] == "SHORT SYS"
+
