@@ -129,6 +129,7 @@ def store_messages(conn: psycopg.Connection, messages: List[IngestMessage]) -> L
                 source_channel=piece.source_channel,
                 source_link=piece.source_link,
                 source_message_id=piece.source_message_id,
+                posted_at=piece.posted_at,
             )
             if item_id is not None:
                 new_ids.append(item_id)

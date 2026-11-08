@@ -52,6 +52,7 @@ class WorkItem:
     extract_mode: Optional[str] = None
     extract_attempts: int = 0
     extract_failed: bool = False
+    posted_at: Optional[str] = None
     fetched_text: Optional[str] = None
     fetch_status: Optional[str] = None
     fetch_attempts: int = 0
@@ -78,6 +79,7 @@ class WorkItem:
             extract_mode=row.get("extract_mode"),
             extract_attempts=row.get("extract_attempts") or 0,
             extract_failed=bool(row.get("extract_failed")),
+            posted_at=row.get("posted_at"),
             fetched_text=row.get("fetched_text"),
             fetch_status=row.get("fetch_status"),
             fetch_attempts=row.get("fetch_attempts") or 0,
@@ -371,6 +373,7 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
         ("extract_mode", "extract_mode TEXT"),
         ("extract_attempts", "extract_attempts INTEGER NOT NULL DEFAULT 0"),
         ("extract_failed", "extract_failed BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("posted_at", "posted_at TEXT"),
         ("fetched_text", "fetched_text TEXT"),
         ("fetch_status", "fetch_status TEXT"),
         ("fetch_attempts", "fetch_attempts INTEGER NOT NULL DEFAULT 0"),
@@ -398,6 +401,21 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
             conn.commit()
 
 
+def _iso_utc(value: Optional[Any]) -> Optional[str]:
+    """datetime (aware or naive-UTC) or ISO string -> UTC ISO text; None/garbage -> None. PURE."""
+    from datetime import datetime, timezone
+
+    if value is None or value == "":
+        return None
+    try:
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
 def insert_item(
     conn: psycopg.Connection,
     *,
@@ -406,8 +424,12 @@ def insert_item(
     source_link: Optional[str] = None,
     source_message_id: Optional[str] = None,
     state: str = DISCOVERED,
+    posted_at: Optional[Any] = None,
 ) -> Optional[int]:
     """Insert a new work item in ``discovered`` and log the initial event.
+
+    ``posted_at`` (datetime or ISO string) is when the original post was published, as the
+    source reports it; stored as UTC ISO text, NULL when unknown.
 
     Returns the new row id, or None if the row was a duplicate (dedup on
     (source_channel, source_message_id) when message id is present).
@@ -422,11 +444,12 @@ def insert_item(
             """
             INSERT INTO work_items
                 (state, source_channel, source_link, source_message_id,
-                 raw_text, extracted_json, relevance_score, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, NULL, NULL, %s, %s)
+                 raw_text, extracted_json, relevance_score, created_at, updated_at, posted_at)
+            VALUES (%s, %s, %s, %s, %s, NULL, NULL, %s, %s, %s)
             RETURNING id
             """,
-            (state, source_channel, source_link, source_message_id, raw_text, ts, ts),
+            (state, source_channel, source_link, source_message_id, raw_text, ts, ts,
+             _iso_utc(posted_at)),
         ).fetchone()
     except psycopg.errors.UniqueViolation:
         # Duplicate (source_channel, source_message_id). Postgres aborts the

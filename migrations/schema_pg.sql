@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS work_items (
     extract_mode      TEXT,
     extract_attempts  INTEGER          NOT NULL DEFAULT 0,
     extract_failed    BOOLEAN          NOT NULL DEFAULT FALSE,
+    -- When the ORIGINAL post was published (UTC ISO, from the source: Telegram message
+    -- date, RSS pubDate, HN comment time). NULL = the source gave none / older rows.
+    -- Not back-filled; used to measure and later gate freshness.
+    posted_at         TEXT,
     -- Real page text fetched for a link-only stub (vacancy_fetch.py), its status
     -- (ok|denylisted|no_url|failed) and the number of failed fetch tries.
     fetched_text      TEXT,
