@@ -21,6 +21,8 @@ UNKNOWN = "UNKNOWN"
 REMOTE_SCOPES = ("worldwide", "region", "country", "unspecified")
 ONSITE = ("office", "hybrid", "none", "unspecified")
 VISA = ("offered", "not_offered")
+# When relocation / visa support is offered but conditional: the facts say how.
+RELOCATION_LIMITS = ("citizens_or_permit_only", "within_employer_country_only")
 
 
 # --- the candidate's constraints (private data, loaded from the profile) -------
@@ -76,6 +78,10 @@ class GeoFacts:
     role_city: Optional[str] = None
     employer_country: Optional[str] = None
     employer_city: Optional[str] = None
+    # Set only when relocation/visa support is offered AND restricted: to citizens of a bloc
+    # or to people who already hold a work permit / residency (citizens_or_permit_only), or to
+    # moves inside the employer's own country (within_employer_country_only).
+    relocation_restriction: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -83,6 +89,7 @@ class GeoFacts:
             "remote_scope": self.remote_scope, "remote_locations": list(self.remote_locations),
             "onsite": self.onsite, "role_city": self.role_city,
             "employer_country": self.employer_country, "employer_city": self.employer_city,
+            "relocation_restriction": self.relocation_restriction,
         }
 
 
@@ -109,6 +116,8 @@ def parse_facts(data: Optional[Mapping[str, Any]]) -> GeoFacts:
         role_city=_opt_str(d.get("role_city")),
         employer_country=_opt_str(d.get("employer_country")),
         employer_city=_opt_str(d.get("employer_city")),
+        relocation_restriction=(_opt_str(d.get("relocation_restriction"))
+                                if _opt_str(d.get("relocation_restriction")) in RELOCATION_LIMITS else None),
     )
 
 
@@ -156,12 +165,14 @@ def effective_scope(facts: GeoFacts) -> str:
     'worldwide' means NO restriction: if the model also lists restrictive places
     (UK, Europe, USA ...) the scope is a restricted one, 'country' for one named place,
     'region' for several."""
-    if facts.remote_scope != "worldwide":
-        return facts.remote_scope
     restrictive = [x for x in facts.remote_locations if not _is_global_entry(x)]
-    if not restrictive:
-        return "worldwide"
-    return "country" if len(restrictive) == 1 else "region"
+    if facts.remote_scope == "worldwide":
+        if not restrictive:
+            return "worldwide"
+        return "country" if len(restrictive) == 1 else "region"
+    if facts.remote_scope == "country" and len(restrictive) >= 2:
+        return "region"          # a list of countries limits remote work like a region does
+    return facts.remote_scope
 
 
 def _locations_include_home(facts: GeoFacts, elig: Eligibility) -> bool:
@@ -171,23 +182,33 @@ def _locations_include_home(facts: GeoFacts, elig: Eligibility) -> bool:
     return False
 
 
+def relocation_counts(facts: GeoFacts) -> bool:
+    """Relocation / visa support counts as offered on ANY explicit mention, except when it is
+    restricted to citizens of a bloc / people who already hold a work permit or residency, or to
+    moves inside the employer's own country. PURE."""
+    offered = facts.relocation_offered is True or facts.visa_sponsorship == "offered"
+    return offered and facts.relocation_restriction is None
+
+
 def decide(facts: GeoFacts, elig: Eligibility) -> Tuple[str, str]:
     """(verdict, reason) from the facts and the candidate's constraints. PURE.
 
-    1. relocation or visa support explicitly offered              -> ELIGIBLE
+    1. relocation or visa support explicitly offered (and not restricted to citizens / permit
+       holders / moves inside the employer's country)             -> ELIGIBLE
     2. remote worldwide (no restrictive place listed)             -> ELIGIBLE
     3. employer in a home market:
          remote / no on-site requirement                          -> ELIGIBLE
          office or hybrid in an eligible city                     -> ELIGIBLE
          office or hybrid elsewhere                               -> INELIGIBLE
          office or hybrid, city not stated                        -> UNKNOWN
-    4. remote tied to a country or a region (a region counts as a country):
+    4. remote limited by place:
          the allowed places include a home market (residency is met) -> ELIGIBLE
-         otherwise                                                -> INELIGIBLE
+         a region (Europe, EMEA ...) or a list of countries           -> UNKNOWN ('гео?', not cut)
+         a single country outside the home markets                   -> INELIGIBLE
     5. office / hybrid without relocation                         -> INELIGIBLE
     6. anything else (nothing usable stated)                      -> UNKNOWN (never a reject)
     """
-    if facts.relocation_offered is True or facts.visa_sponsorship == "offered":
+    if relocation_counts(facts):
         return ELIGIBLE, "relocation or visa support offered"
     scope = effective_scope(facts)
     if scope == "worldwide":
@@ -205,7 +226,9 @@ def decide(facts: GeoFacts, elig: Eligibility) -> Tuple[str, str]:
     if scope in ("country", "region"):
         if _locations_include_home(facts, elig):
             return ELIGIBLE, "remote limited to places that include a home market"
-        return INELIGIBLE, "remote tied to a country or region"
+        if scope == "region":
+            return UNKNOWN, "remote limited to a region or several countries"
+        return INELIGIBLE, "remote tied to a single country outside the home markets"
     if facts.onsite in ("office", "hybrid"):
         return INELIGIBLE, "office/hybrid without relocation"
     return UNKNOWN, "no usable location facts"
@@ -228,6 +251,10 @@ GEO_SYSTEM = (
     "it requires residency / work authorisation in a country; 'unspecified' when not stated "
     "(also for on-site jobs).\n"
     "- remote_locations: the countries / regions named as allowed, as written.\n"
+    "- relocation_restriction: only when relocation / visa support IS offered but conditional: "
+    "'citizens_or_permit_only' when it is limited to citizens of a bloc (e.g. EU citizens) or to "
+    "people who already have a work permit / residency; 'within_employer_country_only' when it "
+    "covers moves inside the employer's own country only; otherwise null.\n"
     "- onsite: 'office' or 'hybrid' when the text requires presence in an office, 'none' "
     "when the job is fully remote, 'unspecified' when not stated.\n"
     "- role_city: the city of the office when the role is office/hybrid and it is stated.\n"
@@ -251,9 +278,10 @@ GEO_TOOL: Dict[str, Any] = {
             "role_city": {"type": ["string", "null"]},
             "employer_country": {"type": ["string", "null"]},
             "employer_city": {"type": ["string", "null"]},
+            "relocation_restriction": {"type": ["string", "null"], "enum": ["citizens_or_permit_only", "within_employer_country_only", None]},
         },
         "required": ["relocation_offered", "visa_sponsorship", "remote_scope", "remote_locations",
-                     "onsite", "role_city", "employer_country", "employer_city"],
+                     "onsite", "role_city", "employer_country", "employer_city", "relocation_restriction"],
     },
 }
 

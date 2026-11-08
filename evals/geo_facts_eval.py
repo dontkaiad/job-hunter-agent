@@ -62,6 +62,19 @@ def metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+# Her own labelling error, acknowledged: home-market employers' office/hybrid roles outside the
+# eligible city that she nevertheless marked 'подошла бы'. Metrics are reported both ways.
+LABEL_ERROR_REASON = "home-market employer, office/hybrid in a non-eligible city"
+
+
+def metrics_variants(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The metrics as labelled, and without the acknowledged labelling errors. PURE."""
+    errors = [r for r in rows if r["label"] == "yes" and r["reason"] == LABEL_ERROR_REASON]
+    kept = [r for r in rows if r not in errors]
+    return {"as_labelled": metrics(rows), "without_acknowledged_label_errors": metrics(kept),
+            "acknowledged_label_errors_excluded": len(errors)}
+
+
 def one_look(conn, split: str, allow_repeat: bool = False) -> None:
     """Record a look at a held-out split; refuse a second one."""
     from job_hunter.clock import now_iso
@@ -87,7 +100,10 @@ def run_offline() -> Dict[str, Any]:
         "home office elsewhere": (F(employer_country="home land", onsite="office", role_city="Other City"), geo.INELIGIBLE),
         "home office city unknown": (F(employer_country="home land", onsite="office"), geo.UNKNOWN),
         "country remote": (F(remote_scope="country", remote_locations=["x"]), geo.INELIGIBLE),
-        "region remote counts as country": (F(remote_scope="region", remote_locations=["EMEA"]), geo.INELIGIBLE),
+        "region remote is not cut (гео?)": (F(remote_scope="region", remote_locations=["EMEA"]), geo.UNKNOWN),
+        "a list of countries is a region": (F(remote_scope="country", remote_locations=["A", "B"]), geo.UNKNOWN),
+        "relocation limited to citizens/permit": (F(relocation_offered=True, relocation_restriction="citizens_or_permit_only", onsite="office"), geo.INELIGIBLE),
+        "relocation inside the employer's country": (F(relocation_offered=True, relocation_restriction="within_employer_country_only", onsite="hybrid"), geo.INELIGIBLE),
         "office without relocation": (F(onsite="office"), geo.INELIGIBLE),
         "hybrid without relocation": (F(onsite="hybrid", relocation_offered=False), geo.INELIGIBLE),
         "nothing stated": (F(), geo.UNKNOWN),
@@ -174,7 +190,7 @@ def run_report(split: str, final: bool, allow_repeat: bool) -> Dict[str, Any]:
         rows.append({"label": r["label"], "chips": r["chips"], "verdict": verdict, "reason": reason})
     out = {"split": split, "vacancies_in_split": len(items), "without_facts": missing,
            "home_markets_configured": len(elig.home_markets)}
-    out.update(metrics(rows))
+    out.update(metrics_variants(rows))
     return out
 
 

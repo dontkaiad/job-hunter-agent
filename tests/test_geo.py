@@ -19,7 +19,7 @@ HOME = geo.Eligibility(home_markets=(geo.HomeMarket(names=("home land", "hl"), o
     (F(visa_sponsorship="offered", remote_scope="country"), geo.ELIGIBLE),         # visa support offered
     (F(remote_scope="worldwide"), geo.ELIGIBLE),                                   # remote worldwide
     (F(remote_scope="country", remote_locations=["X"]), geo.INELIGIBLE),           # remote (country)
-    (F(remote_scope="region", remote_locations=["EMEA"]), geo.INELIGIBLE),         # a region counts as a country
+    (F(remote_scope="region", remote_locations=["EMEA"]), geo.UNKNOWN),            # a region: not cut, 'гео?' 
     (F(onsite="office"), geo.INELIGIBLE),                                          # office without relocation
     (F(onsite="hybrid", relocation_offered=False), geo.INELIGIBLE),                # hybrid without relocation
     (F(), geo.UNKNOWN),                                                            # nothing stated: never a reject
@@ -46,7 +46,7 @@ def test_home_market_exception(facts, verdict):
 
 
 def test_reasons_are_reported():
-    assert geo.decide(F(remote_scope="region"), geo.Eligibility())[1] == "remote tied to a country or region"
+    assert geo.decide(F(remote_scope="region"), geo.Eligibility())[1] == "remote limited to a region or several countries"
     assert geo.decide(F(), geo.Eligibility()) == (geo.UNKNOWN, "no usable location facts")
 
 
@@ -175,7 +175,8 @@ def test_worldwide_with_restrictive_places_is_not_worldwide():
     assert geo.effective_scope(F(remote_scope="worldwide", remote_locations=["Worldwide", "весь мир"])) == "worldwide"
     assert geo.effective_scope(F(remote_scope="worldwide")) == "worldwide"
     assert geo.effective_scope(F(remote_scope="region")) == "region"
-    assert geo.decide(F(remote_scope="worldwide", remote_locations=["UK", "Europe"]), geo.Eligibility())[0] == geo.INELIGIBLE
+    assert geo.decide(F(remote_scope="worldwide", remote_locations=["UK", "Europe"]), geo.Eligibility())[0] == geo.UNKNOWN
+    assert geo.decide(F(remote_scope="worldwide", remote_locations=["USA"]), geo.Eligibility())[0] == geo.INELIGIBLE
     assert geo.decide(F(remote_scope="worldwide", remote_locations=["Anywhere"]), geo.Eligibility())[0] == geo.ELIGIBLE
 
 
@@ -184,7 +185,7 @@ def test_remote_limited_to_a_place_that_includes_the_home_market_is_eligible():
     assert geo.decide(f, HOME) == (geo.ELIGIBLE, "remote limited to places that include a home market")
     assert geo.decide(F(remote_scope="region", remote_locations=["Europe", "HL"]), HOME)[0] == geo.ELIGIBLE
     assert geo.decide(F(remote_scope="country", remote_locations=["Elsewhere"]), HOME)[0] == geo.INELIGIBLE
-    assert geo.decide(f, geo.Eligibility())[0] == geo.INELIGIBLE                      # no home market configured
+    assert geo.decide(f, geo.Eligibility())[0] == geo.INELIGIBLE                      # one country, no home market
 
 
 # --- matching is by whole word, never by substring ---------------------------------
@@ -195,7 +196,7 @@ def test_a_short_code_never_matches_inside_a_longer_name():
     assert geo._match_market("Russia", e) is not None and geo._match_market("Russian Federation", e) is not None
     assert geo._match_market("Southern Russia", e) is not None                      # name as a whole word
     assert geo._match_market("Prussia", e) is None and geo._match_market("", e) is None
-    assert geo.decide(F(remote_scope="country", remote_locations=["US", "USA"]), e)[0] == geo.INELIGIBLE
+    assert geo.decide(F(remote_scope="country", remote_locations=["US"]), e)[0] == geo.INELIGIBLE
 
 
 def test_city_text_may_list_several_places():
@@ -205,3 +206,44 @@ def test_city_text_may_list_several_places():
     f2 = F(employer_country="home land", onsite="hybrid", role_city="Other City, Third City")
     assert geo.decide(f2, e)[0] == geo.INELIGIBLE
     assert geo._city_ok(F(role_city="Nearly Home Cityville"), e.home_markets[0]) is False
+
+
+# --- rule changes agreed before the held-out look ----------------------------------
+
+@pytest.mark.parametrize("restriction", ["citizens_or_permit_only", "within_employer_country_only"])
+def test_restricted_relocation_does_not_count_as_offered(restriction):
+    f = F(relocation_offered=True, relocation_restriction=restriction, onsite="office")
+    assert geo.relocation_counts(f) is False
+    assert geo.decide(f, geo.Eligibility()) == (geo.INELIGIBLE, "office/hybrid without relocation")
+    g = F(visa_sponsorship="offered", relocation_restriction=restriction, remote_scope="country", remote_locations=["X"])
+    assert geo.decide(g, geo.Eligibility())[0] == geo.INELIGIBLE
+
+
+def test_any_other_explicit_relocation_mention_counts():
+    assert geo.relocation_counts(F(relocation_offered=True)) is True
+    assert geo.relocation_counts(F(visa_sponsorship="offered")) is True
+    assert geo.relocation_counts(F(relocation_offered=False)) is False and geo.relocation_counts(F()) is False
+
+
+def test_a_list_of_countries_is_treated_like_a_region_and_not_cut():
+    f = F(remote_scope="country", remote_locations=["Poland", "Spain", "Portugal"])
+    assert geo.effective_scope(f) == "region" and geo.decide(f, geo.Eligibility())[0] == geo.UNKNOWN
+    assert geo.decide(F(remote_scope="country", remote_locations=["Poland"]), geo.Eligibility())[0] == geo.INELIGIBLE
+    assert geo.decide(F(remote_scope="country", remote_locations=["Poland", "Home Land"]), HOME)[0] == geo.ELIGIBLE
+
+
+def test_relocation_restriction_is_parsed_strictly():
+    assert geo.parse_facts({"relocation_restriction": "citizens_or_permit_only"}).relocation_restriction == "citizens_or_permit_only"
+    assert geo.parse_facts({"relocation_restriction": "whatever"}).relocation_restriction is None
+    assert "relocation_restriction" in geo.GEO_TOOL["input_schema"]["required"]
+
+
+def test_metrics_variants_drop_only_the_acknowledged_label_errors():
+    from evals import geo_facts_eval as gfe
+    rows = [{"label": "yes", "chips": "", "verdict": geo.INELIGIBLE, "reason": gfe.LABEL_ERROR_REASON},
+            {"label": "yes", "chips": "", "verdict": geo.INELIGIBLE, "reason": "remote tied to a single country outside the home markets"},
+            {"label": "no", "chips": "geo", "verdict": geo.INELIGIBLE, "reason": gfe.LABEL_ERROR_REASON}]
+    v = gfe.metrics_variants(rows)
+    assert v["acknowledged_label_errors_excluded"] == 1
+    assert v["as_labelled"]["yes"]["wrongly_cut"] == 2 and v["without_acknowledged_label_errors"]["yes"]["wrongly_cut"] == 1
+    assert v["without_acknowledged_label_errors"]["geo_chip"]["n"] == 1             # a 'no' card with that reason stays
