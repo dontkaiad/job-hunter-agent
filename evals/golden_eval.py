@@ -15,7 +15,10 @@
   wave2   -- NO API: replace the (still unlabelled) wave 2 with the re-planned one
              (no hard stratum; 25-39 and 50-59 weighted; see golden.WAVE2_PLAN).
                python -m evals.golden_eval wave2 --exclude-urls FILE [--apply]   (dry-run without --apply)
-  estimate-labeled -- NO API: what re-scoring the sampled cards would cost, sync vs Batch.
+  estimate-labeled -- NO API: what re-scoring the sampled cards would cost (skipping those
+             already scored on the current system), sync vs Batch.
+  rescore-labeled  -- live (SPENDS): score the sampled vacancies lacking a current-system
+             score into eval_frame; --max-usd required, estimate first, --confirm to spend.
   report  -- live: metrics from eval_labels (precision@60, recall, calibration by band,
              PR curve, by reason and source, held-out kept separate). Aggregates only.
 
@@ -398,17 +401,29 @@ def run_wave2(exclude_urls: Optional[str], apply: bool) -> Dict[str, Any]:
     return out
 
 
+def _labelled_todo(conn):
+    """Unique sampled vacancies that still need a CURRENT-system score: those with no
+    'scored' row in eval_frame (the first re-scored ~27% already have one)."""
+    rows = conn.execute(
+        "SELECT DISTINCT ON (s.item_id) s.item_id, s.stratum, w.raw_text, w.fetched_text, w.extracted_json "
+        "FROM eval_sample s JOIN work_items w ON w.id = s.item_id "
+        "LEFT JOIN eval_frame f ON f.item_id = s.item_id AND f.status = 'scored' "
+        "WHERE f.item_id IS NULL ORDER BY s.item_id").fetchall()
+    total = conn.execute("SELECT count(DISTINCT item_id) AS n FROM eval_sample").fetchone()["n"]
+    return rows, int(total)
+
+
 def run_estimate_labeled(judge_share: float = 0.15) -> Dict[str, Any]:
-    """What re-scoring the sampled cards on the CURRENT system would cost. NO API."""
+    """What re-scoring the sampled cards on the CURRENT system would cost. NO API.
+    Vacancies already scored on the current system (eval_frame) are not counted."""
     from job_hunter.profile import load_profile
     from job_hunter.schema_extract import from_dict
 
     cfg, conn = db_ctx()
     profile = load_profile()
-    rows = conn.execute(
-        "SELECT DISTINCT s.item_id, w.raw_text, w.fetched_text, w.extracted_json FROM eval_sample s "
-        "JOIN work_items w ON w.id = s.item_id").fetchall()
-    out: Dict[str, Any] = {"vacancies": len(rows), "judge_share_assumed": judge_share}
+    rows, total = _labelled_todo(conn)
+    out: Dict[str, Any] = {"sampled_vacancies": total, "already_scored_on_current_system": total - len(rows),
+                           "to_score": len(rows), "judge_share_assumed": judge_share}
     for mode, batch in (("sync", False), ("batch_50pct", True)):
         usd = 0.0
         for r in rows:
@@ -417,11 +432,59 @@ def run_estimate_labeled(judge_share: float = 0.15) -> Dict[str, Any]:
             usd += judge_share * est_score_call_usd(cfg.judge_model, profile, ex, r["raw_text"],
                                                     r["fetched_text"], batch=batch)
         out[f"estimate_usd_{mode}"] = round(usd, 2)
-    out["notes"] = ("Upper-bound style: no prompt-cache credit (Haiku's tools+system prefix is below the "
-                    "4,096-token floor; Sonnet's would cache), offline token estimate x1.085 calibrated on "
-                    "366 measured calls (p10-p90 1.02-1.15). Batch = 50% off input and output. "
-                    "The Batch runner itself is not built yet.")
+    out["notes"] = ("Upper-bound style: no prompt-cache credit, offline token estimate x1.085 calibrated on "
+                    "366 measured calls. Run it with: golden_eval rescore-labeled --max-usd N [--confirm] "
+                    "(sync; the Batch runner is not built).")
     return out
+
+
+def run_rescore_labeled(max_usd: float, confirm: bool, judge_share: float = 0.15) -> Dict[str, Any]:
+    """Score the labelled vacancies that lack a current-system score (production route:
+    Haiku, judge in the corridor), store them in eval_frame, never touching work_items."""
+    from evals.common import live_ctx
+    from job_hunter import llm, store
+    from job_hunter.clock import now_iso
+    from job_hunter.schema_extract import from_dict
+
+    cfg, profile, ro = live_ctx()
+    rows, total = _labelled_todo(ro)
+    est = 0.0
+    for r in rows:
+        ex = from_dict(json.loads(r["extracted_json"]))
+        est += est_score_call_usd(cfg.cheap_model, profile, ex, r["raw_text"], r["fetched_text"])
+        est += judge_share * est_score_call_usd(cfg.judge_model, profile, ex, r["raw_text"], r["fetched_text"])
+    gate("golden rescore-labeled", est, max_usd, confirm,
+         f"{len(rows)} of {total} sampled vacancies need a current-system score.")
+    client = make_client(cfg, "golden_rescore_labeled")
+    rw = store.connect(cfg.database_url)
+    store.init_db(rw)
+    done, outcome = 0, collections.Counter()
+    for r in rows:
+        client.meter.thread_cost_reset()
+        status, score, judge = "scored", None, False
+        try:
+            score, judge = score_current(client, from_dict(json.loads(r["extracted_json"])),
+                                         r["raw_text"], r["fetched_text"], cfg, profile)
+        except BudgetExceeded:
+            outcome["stopped (budget)"] += 1
+            break
+        except llm.InsufficientContent:
+            status = "insufficient"
+        except Exception as exc:  # noqa: BLE001
+            outcome[f"error {type(exc).__name__}"] += 1
+            continue
+        rw.execute(
+            "INSERT INTO eval_frame (item_id, stratum, status, current_score, band, judge_used, cost_usd, scored_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (item_id) DO UPDATE SET status = EXCLUDED.status, "
+            "current_score = EXCLUDED.current_score, band = EXCLUDED.band, judge_used = EXCLUDED.judge_used, "
+            "cost_usd = EXCLUDED.cost_usd, scored_at = EXCLUDED.scored_at WHERE eval_frame.status <> 'scored'",
+            (r["item_id"], r["stratum"], status, score, golden.band_of(score) if score is not None else None,
+             judge, client.meter.thread_cost(), now_iso()))
+        rw.commit()
+        outcome[status] += 1
+        done += 1
+    print_usage_summary(client.meter)
+    return {"to_score": len(rows), "done": done, "outcomes": dict(outcome), "cost": client.meter.report()}
 
 
 def main(argv=None) -> int:
@@ -440,6 +503,9 @@ def main(argv=None) -> int:
     w2.add_argument("--exclude-urls", default=None)
     w2.add_argument("--apply", action="store_true")
     sub.add_parser("estimate-labeled")
+    rl = sub.add_parser("rescore-labeled")
+    rl.add_argument("--judge-share", type=float, default=0.15)
+    add_budget_args(rl)
     a = ap.parse_args(argv)
     if a.cmd == "offline":
         report("golden set (offline)", run_offline())
@@ -450,6 +516,8 @@ def main(argv=None) -> int:
         report("golden set: sample (no API)", run_sample(a.exclude_urls))
     elif a.cmd == "wave2":
         report("golden set: wave 2 re-plan (no API)", run_wave2(a.exclude_urls, a.apply))
+    elif a.cmd == "rescore-labeled":
+        report("golden set: re-score the labelled vacancies", run_rescore_labeled(a.max_usd, a.confirm, a.judge_share))
     elif a.cmd == "estimate-labeled":
         report("golden set: cost of re-scoring the labelled cards (no API)", run_estimate_labeled())
     return 0
