@@ -936,6 +936,31 @@ def purge_expired_heuristic(conn: psycopg.Connection, days: int) -> int:
     return len(ids)
 
 
+def replace_extraction(
+    conn: psycopg.Connection, item_id: int, extracted_json: str, mode: str, reason: str
+) -> None:
+    """Swap an unscored vacancy's extraction for a better one (one-off repair).
+
+    Touches ONLY extracted_json and extract_mode; state, score and updated_at (the
+    harvest queue order) stay as they are. Writes an audit row (channel 'script')."""
+    ts = now_iso()
+    try:
+        row = conn.execute(
+            "UPDATE work_items SET extracted_json = %s, extract_mode = %s "
+            "WHERE id = %s RETURNING state", (extracted_json, mode, item_id)).fetchone()
+        if row is None:
+            conn.rollback()
+            return
+        conn.execute(
+            "INSERT INTO state_transitions (item_id, from_state, to_state, kind, actor, reason, created_at, channel) "
+            "VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s, 'script')",
+            (item_id, row["state"], row["state"], reason, ts))
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+
+
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:
     """Delete a work_item and its transition audit log.
 
