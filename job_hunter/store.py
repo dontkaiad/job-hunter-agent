@@ -49,6 +49,9 @@ class WorkItem:
     score_failed: bool = False
     defer_reason: Optional[str] = None
     defer_input_hash: Optional[str] = None
+    extract_mode: Optional[str] = None
+    extract_attempts: int = 0
+    extract_failed: bool = False
     fetched_text: Optional[str] = None
     fetch_status: Optional[str] = None
     fetch_attempts: int = 0
@@ -72,6 +75,9 @@ class WorkItem:
             score_failed=bool(row.get("score_failed")),
             defer_reason=row.get("defer_reason"),
             defer_input_hash=row.get("defer_input_hash"),
+            extract_mode=row.get("extract_mode"),
+            extract_attempts=row.get("extract_attempts") or 0,
+            extract_failed=bool(row.get("extract_failed")),
             fetched_text=row.get("fetched_text"),
             fetch_status=row.get("fetch_status"),
             fetch_attempts=row.get("fetch_attempts") or 0,
@@ -351,6 +357,9 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
     for col, ddl in (
         ("defer_reason", "defer_reason TEXT"),
         ("defer_input_hash", "defer_input_hash TEXT"),
+        ("extract_mode", "extract_mode TEXT"),
+        ("extract_attempts", "extract_attempts INTEGER NOT NULL DEFAULT 0"),
+        ("extract_failed", "extract_failed BOOLEAN NOT NULL DEFAULT FALSE"),
         ("fetched_text", "fetched_text TEXT"),
         ("fetch_status", "fetch_status TEXT"),
         ("fetch_attempts", "fetch_attempts INTEGER NOT NULL DEFAULT 0"),
@@ -480,7 +489,8 @@ def list_by_state(
 ) -> List[WorkItem]:
     """Items in ``state``, oldest-updated first. ``include_score_failed=False``
     hides items that exhausted their scoring attempts (harvest must not retry them)."""
-    where = "state = %s" if include_score_failed else "state = %s AND NOT score_failed"
+    where = ("state = %s" if include_score_failed
+             else "state = %s AND NOT score_failed AND NOT extract_failed")
     rows = conn.execute(
         f"SELECT * FROM work_items WHERE {where} ORDER BY updated_at ASC LIMIT %s",
         (state, limit),
@@ -502,6 +512,7 @@ def update_state(
     commit: bool = True,
     channel: Optional[str] = None,
     actor_id: Optional[str] = None,
+    extract_mode: Optional[str] = None,
 ) -> None:
     """Atomically update work_items.state (+ optional fields) and append a
     state_transitions row in the SAME transaction.
@@ -522,6 +533,9 @@ def update_state(
     if relevance_score is not None:
         sets.append("relevance_score = %s")
         params.append(relevance_score)
+    if extract_mode is not None:
+        sets.append("extract_mode = %s")
+        params.append(extract_mode)
     params.append(item_id)
 
     try:
@@ -589,6 +603,53 @@ def record_score_failure(
         raise
     conn.commit()
     return row["score_attempts"], bool(row["score_failed"])
+
+
+def record_extract_failure(
+    conn: psycopg.Connection,
+    item_id: int,
+    *,
+    max_attempts: int,
+    reason: str,
+    count_attempt: bool = True,
+) -> Tuple[int, bool]:
+    """Record a failed EXTRACT attempt without touching the item's state ('discovered').
+
+    Mirrors record_score_failure: bumps extract_attempts (not for an account-wide
+    credits/auth outage) and sets extract_failed once ``max_attempts`` is reached: the
+    item is then kept for manual review and is neither scored nor deleted.
+    Returns (attempts, extract_failed).
+    """
+    ts = now_iso()
+    inc = 1 if count_attempt else 0
+    try:
+        row = conn.execute(
+            """
+            UPDATE work_items
+               SET extract_attempts = extract_attempts + %s,
+                   extract_failed = (extract_attempts + %s) >= %s,
+                   updated_at = %s
+             WHERE id = %s
+         RETURNING state, extract_attempts, extract_failed
+            """,
+            (inc, inc, max_attempts, ts, item_id),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return 0, False
+        conn.execute(
+            """
+            INSERT INTO state_transitions
+                (item_id, from_state, to_state, kind, actor, reason, created_at, channel)
+            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s, 'system')
+            """,
+            (item_id, row["state"], row["state"], reason, ts),
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return row["extract_attempts"], bool(row["extract_failed"])
 
 
 def set_defer_reason(

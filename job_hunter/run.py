@@ -90,33 +90,72 @@ def parked_info_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
     if not (
         stats.link_only or stats.insufficient or stats.insufficient_parked or stats.fetched
         or stats.fetch_failed or stats.denylisted or stats.duplicates
+        or stats.extract_deferred or stats.extract_failed_final
     ):
         return None
     return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + insufficient_line(stats) + "\n" + fetch_line(stats) + (
+        ("\n" + extract_line(stats)) if (stats.extract_deferred or stats.extract_failed_final) else ""
+    ) + (
         f"\nduplicates dropped (same vacancy URL): {stats.duplicates}" if stats.duplicates else ""
     )
 
 
-def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
-    """Ops alert body when scoring failed badly this run, else None. PURE.
+def extract_line(stats: "pipeline.ScoreRunStats") -> str:
+    """`extract: deferred N (credits X / transient Y / parse Z), failed(3x) W` -- PURE.
 
-    Fires on a credits/auth error or when more than 20% of scoring attempts
-    failed. Counts and error buckets only -- never keys or exception bodies.
+    An API/infra failure in extract DEFERS the vacancy (it is never extracted by
+    heuristics); this is the only place those deferrals are visible."""
+    d = stats.extract_deferred
+    total = sum(d.values())
+    line = (
+        f"extract: deferred {total} (credits {d.get(pipeline.FAIL_FATAL, 0)} / "
+        f"transient {d.get(pipeline.FAIL_TRANSIENT, 0)} / parse {d.get(pipeline.FAIL_PARSE, 0)}), "
+        f"failed(3x) {stats.extract_failed_final}"
+    )
+    if stats.extract_skipped_halted:
+        line += f", not tried (credits/auth halt) {stats.extract_skipped_halted}"
+    return line
+
+
+def _extract_red(stats: "pipeline.ScoreRunStats") -> bool:
+    total = sum(stats.extract_deferred.values())
+    if stats.extract_deferred.get(pipeline.FAIL_FATAL, 0) > 0:
+        return True
+    return bool(stats.extract_attempted and total / stats.extract_attempted > SCORE_FAIL_ALERT_RATIO)
+
+
+def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
+    """Ops alert body when scoring OR extraction failed badly this run, else None. PURE.
+
+    Fires on a credits/auth error or when more than 20% of scoring (or extract)
+    attempts failed. Counts and error buckets only -- never keys or exception bodies.
     """
-    if stats.attempted <= 0 and not stats.failed:
-        return None
-    # link_only / insufficient are parked, not failures: they never count toward
-    # `failed`, so only real API / parse failures can turn this alert red.
-    fatal = stats.kinds.get(pipeline.FAIL_FATAL, 0) > 0
-    ratio = stats.failed / stats.attempted if stats.attempted else 1.0
-    if not fatal and ratio <= SCORE_FAIL_ALERT_RATIO:
+    extract_red = _extract_red(stats)
+    score_red = False
+    ratio = 0.0
+    if stats.attempted > 0 or stats.failed:
+        # link_only / insufficient are parked, not failures: they never count toward
+        # `failed`, so only real API / parse failures can turn this alert red.
+        fatal = stats.kinds.get(pipeline.FAIL_FATAL, 0) > 0
+        ratio = stats.failed / stats.attempted if stats.attempted else 1.0
+        score_red = fatal or ratio > SCORE_FAIL_ALERT_RATIO
+    if not (score_red or extract_red):
         return None
     kinds = ", ".join(f"{k} x{n}" for k, n in sorted(stats.kinds.items())) or "-"
-    lines = [
-        f"\U0001f534 jobhunter scoring: {stats.failed}/{stats.attempted} LLM calls failed "
-        f"({ratio:.0%})",
-        f"error type: {kinds}",
-        f"deferred (kept for retry): {stats.deferred}, marked score_failed: {stats.marked_failed}",
+    if score_red:
+        lines = [
+            f"\U0001f534 jobhunter scoring: {stats.failed}/{stats.attempted} LLM calls failed "
+            f"({ratio:.0%})",
+            f"error type: {kinds}",
+            f"deferred (kept for retry): {stats.deferred}, marked score_failed: {stats.marked_failed}",
+        ]
+    else:
+        lines = [
+            f"\U0001f534 jobhunter extract: {sum(stats.extract_deferred.values())}/"
+            f"{stats.extract_attempted} LLM calls failed"
+        ]
+    lines += [
+        extract_line(stats),
         parked_line(stats),
         insufficient_line(stats),
         fetch_line(stats),

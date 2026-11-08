@@ -405,7 +405,10 @@ def test_llm_extract_used_when_enabled(conn, fake_llm, fake_fx):
     assert extract_calls[0]["model"] == deps.cheap_model
 
 
-def test_llm_extract_falls_back_on_error(conn, fake_fx):
+def test_llm_extract_error_defers_instead_of_falling_back(conn, fake_fx):
+    """Was test_llm_extract_falls_back_on_error: a failing extract used to drop to the
+    heuristic extractor silently (2026-11-02..05: 125 vacancies scored from poor fields,
+    ~210 deleted). It now DEFERS the vacancy; see tests/test_extract_defer.py."""
     class BoomLLM:
         def complete(self, *a, **k):
             raise RuntimeError("api down")
@@ -413,8 +416,9 @@ def test_llm_extract_falls_back_on_error(conn, fake_fx):
     deps = Deps(llm_client=BoomLLM(), fx=fake_fx, use_llm_extract=True)
     item_id = _insert(conn, "Remote Python LLM engineer role, apply via @hr contact")
     res = pipeline.advance_by_id(conn, item_id, deps=deps)
-    assert res.to_state == EXTRACTED
-    assert "fallback" in res.reason
+    assert res.status == "noop" and "extract deferred" in res.reason
+    it = store.get_item(conn, item_id)
+    assert it.state == "discovered" and it.extracted_json is None
 
 
 # --- LLM scoring failure must DEFER the vacancy, never drop it ---------------

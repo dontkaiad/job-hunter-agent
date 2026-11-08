@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS work_items (
     -- sha1 of the scorer's input (raw_text + fetched_text) when the model last judged the
     -- vacancy `insufficient`: it is NOT sent to the model again until this changes.
     defer_input_hash  TEXT,
+    -- How the extraction was made (llm | heuristic:prefilter | heuristic:duplicate |
+    -- heuristic:topic | heuristic:fallback = legacy, API failure before 2026-11-08) and
+    -- the extract retry bookkeeping: an API/infra failure DEFERS extraction (item stays
+    -- 'discovered'), after 3 failed tries extract_failed=TRUE: kept, never scored/deleted.
+    extract_mode      TEXT,
+    extract_attempts  INTEGER          NOT NULL DEFAULT 0,
+    extract_failed    BOOLEAN          NOT NULL DEFAULT FALSE,
     -- Real page text fetched for a link-only stub (vacancy_fetch.py), its status
     -- (ok|denylisted|no_url|failed) and the number of failed fetch tries.
     fetched_text      TEXT,

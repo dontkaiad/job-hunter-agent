@@ -99,6 +99,11 @@ class ScoreRunStats:
     duplicates: int = 0      # same vacancy URL as an older row: dropped like a source_link dup
     insufficient: int = 0    # LLM said the posting has no content to judge
     insufficient_parked: int = 0  # already judged `insufficient`, input unchanged: NOT re-sent
+    # extract (T1) failures: an API/infra error DEFERS the extraction, never heuristics
+    extract_attempted: int = 0
+    extract_deferred: Dict[str, int] = field(default_factory=dict)   # by error kind
+    extract_failed_final: int = 0     # hit the 3-try cap: kept for manual review
+    extract_skipped_halted: int = 0   # not tried: credits/auth outage earlier in the run
 
 
 @dataclass
@@ -135,6 +140,7 @@ class Deps:
     min_persist_score: int = 0
     # Failed scoring attempts before an item is marked score_failed (kept, not deleted).
     score_max_attempts: int = 3
+    extract_max_attempts: int = 3
     # Posts with fewer substantive chars than this are link-only stubs (no LLM).
     link_only_min_chars: int = scoring.DEFAULT_LINK_ONLY_MIN_CHARS
     # Shadow sample of below-the-cut deletions (eval_shadow). Off unless configured.
@@ -218,8 +224,39 @@ def _salary_floor_rub(deps: Deps) -> Optional[float]:
 # --- Per-transition handlers ------------------------------------------------
 
 
+def _defer_extract(
+    conn: psycopg.Connection, item: WorkItem, deps: Deps, exc: BaseException
+) -> AdvanceResult:
+    """Extraction failed: the item stays 'discovered' and is retried next harvest.
+
+    credits/auth stop extract AND scoring for the rest of the run and burn no attempt;
+    anything else counts one of ``extract_max_attempts`` (then extract_failed: kept for
+    manual review, never scored, never deleted)."""
+    stats = deps.score_stats
+    kind = classify_llm_error(exc)
+    fatal = kind == FAIL_FATAL
+    stats.extract_deferred[kind] = stats.extract_deferred.get(kind, 0) + 1
+    if fatal and stats.halt_on_fatal:
+        stats.halted = True
+    attempts, failed = store.record_extract_failure(
+        conn, item.id, max_attempts=deps.extract_max_attempts,
+        reason=f"extract deferred ({kind}): {type(exc).__name__}", count_attempt=not fatal,
+    )
+    if failed:
+        stats.extract_failed_final += 1
+    print(
+        f"[extract] id={item.id} deferred ({kind}) attempts={attempts}"
+        f"{' -> extract_failed' if failed else ''}: {type(exc).__name__}",
+        flush=True,
+    )
+    return AdvanceResult(
+        "noop", item.id, item.state, reason=f"extract deferred ({kind})",
+        extra={"extract_failed": failed, "attempts": attempts},
+    )
+
+
 def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
-    """T1: discovered -> extracted (LLM smart extract, heuristic fallback).
+    """T1: discovered -> extracted (LLM smart extract; heuristics ONLY by design).
 
     Cost-aware routing: a cheap deterministic pre-filter runs over raw_text
     FIRST, before any LLM call. High-volume noisy sources (HN Who's Hiring
@@ -270,7 +307,15 @@ def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Advance
         and pf.keep and dup_id is None and not topic_drop
     )
 
+    mode = "heuristic:no-llm"
     if use_llm:
+        if item.extract_failed:
+            return AdvanceResult("noop", item.id, item.state, reason="extract_failed: manual review")
+        if deps.score_stats.halted:
+            # Credits/auth outage earlier in this run: every call would fail too.
+            deps.score_stats.extract_skipped_halted += 1
+            return AdvanceResult("noop", item.id, item.state, reason="extract halted (credits/auth)")
+        deps.score_stats.extract_attempted += 1
         try:
             extracted = llm_extract(
                 deps.llm_client, raw, source_channel, item.source_link,
@@ -284,18 +329,20 @@ def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Advance
             extracted = reconcile_extract(
                 extracted, raw, source_channel, item.source_link
             )
-            used = "llm+reconcile"
-        except Exception:
-            extracted = heuristic_extract(raw, source_channel, item.source_link)
-            used = "heuristic(fallback)"
+            used, mode = "llm+reconcile", "llm"
+        except Exception as exc:  # noqa: BLE001
+            # NEVER fall back to heuristics on a failure: an API/infra error (or an
+            # unparseable reply) must not silently lower the quality of the input that
+            # scoring - and the below-the-cut deletion - then relies on. Defer instead.
+            return _defer_extract(conn, item, deps, exc)
     else:
         extracted = heuristic_extract(raw, source_channel, item.source_link)
         if not pf.keep:
-            used = f"heuristic(prefilter:{pf.reason})"
+            used, mode = f"heuristic(prefilter:{pf.reason})", "heuristic:prefilter"
         elif dup_id is not None:
-            used = f"heuristic(duplicate of #{dup_id})"
+            used, mode = f"heuristic(duplicate of #{dup_id})", "heuristic:duplicate"
         elif topic_drop:
-            used = f"heuristic(topic-filtered:{topic_pf.reason})"
+            used, mode = f"heuristic(topic-filtered:{topic_pf.reason})", "heuristic:topic"
 
     extracted.source_channel = source_channel
     if item.source_link:
@@ -305,6 +352,7 @@ def _do_extract(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Advance
         conn, item.id, EXTRACTED,
         from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,
         reason=f"extract ({used})", extracted_json=serialize(extracted),
+        extract_mode=mode,
     )
     return AdvanceResult("moved", item.id, item.state, EXTRACTED, "T1", f"extract:{used}")
 
