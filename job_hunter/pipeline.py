@@ -104,6 +104,8 @@ class ScoreRunStats:
     extract_deferred: Dict[str, int] = field(default_factory=dict)   # by error kind
     extract_failed_final: int = 0     # hit the 3-try cap: kept for manual review
     extract_skipped_halted: int = 0   # not tried: credits/auth outage earlier in the run
+    heuristic_kept: int = 0           # cut by the score but extracted heuristically: kept, not deleted
+    heuristic_purged: int = 0         # such vacancies expired after heuristic_keep_days
 
 
 @dataclass
@@ -147,6 +149,7 @@ class Deps:
     shadow_rate_percent: int = 0
     shadow_max_rows: int = 200
     shadow_ttl_days: int = 90
+    heuristic_keep_days: int = 30
     # Fetch the real page behind link-only/insufficient posts before scoring.
     # Off by default (no network in tests); live runs enable it via build_deps.
     fetch_enabled: bool = False
@@ -671,17 +674,20 @@ def _is_prefilter_drop(item: WorkItem) -> bool:
     return str(note).startswith("prefilter:")
 
 
-def _maybe_shadow_copy(conn: psycopg.Connection, item: WorkItem, deps: Deps, score) -> None:
-    """Best-effort: keep a copy of a deterministic share of model-scored deletions.
-    A failure here must never block the deletion itself."""
+def _maybe_shadow_copy(conn: psycopg.Connection, item: WorkItem, deps: Deps, score,
+                       kind: str = "score", rate_percent: Optional[int] = None) -> None:
+    """Best-effort: keep a copy of a deterministic share of model-scored deletions (kind
+    'score') or of every topic-gated cut (kind 'topic', 100%, own row cap).
+    A failure here must never block what the caller does next."""
     if not deps.shadow_rate_percent or _is_prefilter_drop(item):
         return
     try:
         if store.shadow_copy(
-            conn, item, score, rate_percent=deps.shadow_rate_percent,
-            max_rows=deps.shadow_max_rows, ttl_days=deps.shadow_ttl_days,
+            conn, item, score,
+            rate_percent=deps.shadow_rate_percent if rate_percent is None else rate_percent,
+            max_rows=deps.shadow_max_rows, ttl_days=deps.shadow_ttl_days, kind=kind,
         ):
-            print(f"[shadow] id={item.id} score={score} copied to eval_shadow", flush=True)
+            print(f"[shadow] id={item.id} score={score} copied to eval_shadow ({kind})", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"[shadow] id={item.id} copy failed (deletion continues): {exc!r}", flush=True)
 
@@ -705,6 +711,23 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
     min_persist = deps.min_persist_score if deps is not None else 0
     # Only drop on a score the model actually produced (never on a NULL score).
     if min_persist > 0 and extracted.relevance_score is not None and score < min_persist:
+        if item.extract_mode in store.PROTECTED_EXTRACT_MODES:
+            # The score was computed from heuristic fields the model never saw (topic
+            # gate / legacy fallback): do NOT delete. Keep it as rejected for
+            # heuristic_keep_days and copy it to the shadow set to measure the gate.
+            _maybe_shadow_copy(conn, item, deps, score, kind="topic", rate_percent=100)
+            deps.score_stats.heuristic_kept += 1
+            store.update_state(
+                conn, item.id, REJECTED,
+                from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,
+                reason=(f"score {scoring.clamp_score(score)} < {min_persist}: kept "
+                        f"{deps.heuristic_keep_days}d (extract_mode={item.extract_mode})"),
+            )
+            print(f"[harvest] kept id={item.id} score={score} (heuristic extract, not deleted)", flush=True)
+            return AdvanceResult(
+                "moved", item.id, item.state, REJECTED, "T3", "below cut, kept (heuristic extract)",
+                extra={"score": scoring.clamp_score(score)},
+            )
         _maybe_shadow_copy(conn, item, deps, score)
         store.delete_item(conn, item.id)
         print(

@@ -188,6 +188,10 @@ class Config:
     shadow_max_rows: int = 200
     shadow_ttl_days: int = 90
 
+    # --- Heuristic-extract vacancies cut by the score are KEPT this many days (rejected),
+    # not deleted: the score came from fields the model never saw. 0 would purge at once.
+    heuristic_keep_days: int = 30
+
     # --- Fetch the real text behind link-only stubs (vacancy_fetch.py) ---
     # Hosts NEVER fetched automatically (subdomains included): their ToS forbid
     # storing the content (fetched_text stores it) -> manual add-by-URL only; or
@@ -290,6 +294,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         ),
         shadow_max_rows=_int_or_none(get("SHADOW_MAX_ROWS")) or 200,
         shadow_ttl_days=_int_or_none(get("SHADOW_TTL_DAYS")) or 90,
+        heuristic_keep_days=_int_or_none(get("HEURISTIC_KEEP_DAYS")) or 30,
         fetch_enabled=(get("FETCH_ENABLED") or "true").lower() in ("1", "true", "yes"),
         fetch_denylist=(
             _split_csv(get("FETCH_DENYLIST"))

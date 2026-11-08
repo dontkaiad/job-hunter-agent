@@ -350,6 +350,17 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
         ).fetchall()
     }
     conn.commit()
+    have_sh = {
+        r["column_name"]
+        for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'eval_shadow'"
+        ).fetchall()
+    }
+    conn.commit()
+    if have_sh and "kind" not in have_sh:
+        conn.execute("ALTER TABLE eval_shadow ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'score'")
+        conn.commit()
     for col in ("channel", "actor_id"):
         if col not in have_tr:
             conn.execute(f"ALTER TABLE state_transitions ADD COLUMN IF NOT EXISTS {col} TEXT")
@@ -868,6 +879,7 @@ def shadow_copy(
     rate_percent: int,
     max_rows: int,
     ttl_days: int,
+    kind: str = "score",
 ) -> bool:
     """Copy a vacancy about to be deleted for scoring below the cut into eval_shadow.
 
@@ -883,7 +895,7 @@ def shadow_copy(
     try:
         cutoff = (datetime.fromisoformat(ts) - timedelta(days=ttl_days)).isoformat()
         conn.execute("DELETE FROM eval_shadow WHERE created_at < %s", (cutoff,))
-        held = conn.execute("SELECT count(*) AS n FROM eval_shadow").fetchone()["n"]
+        held = conn.execute("SELECT count(*) AS n FROM eval_shadow WHERE kind = %s", (kind,)).fetchone()["n"]
         if held >= max_rows:
             conn.commit()
             return False
@@ -891,18 +903,37 @@ def shadow_copy(
             """
             INSERT INTO eval_shadow
                 (orig_item_id, source_channel, source_link, raw_text, fetched_text,
-                 extracted_json, score, primary_url_key, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 extracted_json, score, primary_url_key, created_at, kind)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (orig_item_id) DO NOTHING
             """,
             (item.id, item.source_channel, item.source_link, item.raw_text,
-             item.fetched_text, item.extracted_json, float(score), item.primary_url_key, ts),
+             item.fetched_text, item.extracted_json, float(score), item.primary_url_key, ts, kind),
         )
         conn.commit()
         return cur.rowcount == 1
     except Exception:
         conn.rollback()
         raise
+
+
+# extract modes that must never lead to a deletion by score: the score was computed from
+# heuristic fields the model never saw (topic gate) or from a legacy API-failure fallback.
+PROTECTED_EXTRACT_MODES = ("heuristic:topic", "heuristic:fallback")
+
+
+def purge_expired_heuristic(conn: psycopg.Connection, days: int) -> int:
+    """Delete REJECTED topic-gate vacancies older than ``days`` (their only reason to
+    exist is to be kept for a while instead of deleted). Nothing else is touched."""
+    from datetime import datetime, timedelta
+
+    cutoff = (datetime.fromisoformat(now_iso()) - timedelta(days=days)).isoformat()
+    ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM work_items WHERE state = 'rejected' AND extract_mode = 'heuristic:topic' "
+        "AND updated_at < %s", (cutoff,)).fetchall()]
+    for item_id in ids:
+        delete_item(conn, item_id)
+    return len(ids)
 
 
 def delete_item(conn: psycopg.Connection, item_id: int) -> None:

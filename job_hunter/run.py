@@ -71,6 +71,11 @@ def parked_line(stats: "pipeline.ScoreRunStats") -> str:
     return f"deferred: link_only {stats.link_only}, insufficient {stats.insufficient}"
 
 
+def heuristic_line(stats: "pipeline.ScoreRunStats") -> str:
+    """Heuristic-extract vacancies cut by the score: kept (not deleted) / expired. PURE."""
+    return f"heuristic extract: kept {stats.heuristic_kept}, expired {stats.heuristic_purged}"
+
+
 def insufficient_line(stats: "pipeline.ScoreRunStats") -> str:
     """Vacancies the model already called `insufficient` and that were NOT re-sent. PURE."""
     return f"insufficient parked {stats.insufficient_parked} (no re-score)"
@@ -91,10 +96,13 @@ def parked_info_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
         stats.link_only or stats.insufficient or stats.insufficient_parked or stats.fetched
         or stats.fetch_failed or stats.denylisted or stats.duplicates
         or stats.extract_deferred or stats.extract_failed_final
+        or stats.heuristic_kept or stats.heuristic_purged
     ):
         return None
     return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + insufficient_line(stats) + "\n" + fetch_line(stats) + (
         ("\n" + extract_line(stats)) if (stats.extract_deferred or stats.extract_failed_final) else ""
+    ) + (
+        ("\n" + heuristic_line(stats)) if (stats.heuristic_kept or stats.heuristic_purged) else ""
     ) + (
         f"\nduplicates dropped (same vacancy URL): {stats.duplicates}" if stats.duplicates else ""
     )
@@ -231,6 +239,13 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
     # credits/auth error (every further call would fail too).
     run_stats = pipeline.ScoreRunStats(halt_on_fatal=True)
     _set_score_stats(deps, run_stats)
+    try:   # expire kept heuristic-extract rejects (topic gate) after heuristic_keep_days
+        run_stats.heuristic_purged = store.purge_expired_heuristic(
+            conn, getattr(deps, "heuristic_keep_days", 30))
+        if run_stats.heuristic_purged:
+            print(f"[harvest] expired {run_stats.heuristic_purged} kept heuristic-extract rejects", flush=True)
+    except Exception as exc:  # noqa: BLE001 - housekeeping must never stop a harvest
+        print(f"[harvest] heuristic purge failed (ignored): {exc!r}", flush=True)
     newly_surfaced: List[int] = []
     try:
         for item_id in sorted(to_process):

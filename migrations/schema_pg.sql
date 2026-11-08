@@ -87,7 +87,10 @@ CREATE TABLE IF NOT EXISTS eval_shadow (
     extracted_json  TEXT,
     score           DOUBLE PRECISION NOT NULL,
     primary_url_key TEXT,
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    -- 'score' = deleted for a model score under the cut; 'topic' = cut by the heuristic
+    -- topic gate (measures the gate's recall). The row cap applies per kind.
+    kind            TEXT NOT NULL DEFAULT 'score'
 );
 
 -- Golden set for the scoring eval (see job_hunter/golden.py, docs/CASES). Private: the

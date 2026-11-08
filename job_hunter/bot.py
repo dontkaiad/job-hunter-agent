@@ -1373,6 +1373,7 @@ def build_deps(cfg: Config) -> Deps:
         shadow_rate_percent=cfg.shadow_rate_percent,
         shadow_max_rows=cfg.shadow_max_rows,
         shadow_ttl_days=cfg.shadow_ttl_days,
+        heuristic_keep_days=cfg.heuristic_keep_days,
         fetch_enabled=cfg.fetch_enabled,
         fetch_denylist=tuple(cfg.fetch_denylist),
         fetch_max_attempts=cfg.fetch_max_attempts,
