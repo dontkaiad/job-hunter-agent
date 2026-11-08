@@ -6,8 +6,9 @@ taken from the `usage` block of the responses (including prompt-cache writes/rea
 COST.md quotes these numbers.
 
   offline -- the price arithmetic on fixed usage dicts (no API, no network).
-  run     -- live: python -m evals.cost_probe run [--n 5] [--ids ...]
-             Read-only DB; ~3 API calls per vacancy; costs a few cents.
+  run     -- live: python -m evals.cost_probe run [--n 5] [--ids ...] --max-usd 0.3
+             Prints an estimate and stops; --confirm spends (hard stop at --max-usd).
+             Read-only DB; 3 API calls per vacancy.
              Default sample: the most recent ordinary posts (500-3000 chars).
 """
 from __future__ import annotations
@@ -16,7 +17,10 @@ import argparse
 import json
 from typing import Any, Dict, List, Optional
 
-from evals.common import UsageMeter, price_for, report, save_result, usage_cost
+from evals.common import (
+    add_budget_args, est_call_usd, est_score_call_usd, est_tokens, gate, make_client, price_for,
+    print_usage_summary, report, save_result, usage_cost,
+)
 
 
 def run_offline() -> Dict[str, Any]:
@@ -33,12 +37,13 @@ def run_offline() -> Dict[str, Any]:
     }
 
 
-def run_live(n: int, ids: Optional[List[int]], save: Optional[str]) -> Dict[str, Any]:
-    from evals.common import fetch_items, live_env
+def run_live(n: int, ids: Optional[List[int]], save: Optional[str], max_usd: float,
+             confirm: bool) -> Dict[str, Any]:
+    from evals.common import fetch_items, live_ctx
     from job_hunter import llm
     from job_hunter.schema_extract import from_dict
 
-    cfg, profile, client, conn = live_env()
+    cfg, profile, conn = live_ctx()
     if ids:
         rows = fetch_items(conn, ids)
     else:
@@ -46,6 +51,15 @@ def run_live(n: int, ids: Optional[List[int]], save: Optional[str]) -> Dict[str,
             "SELECT id, relevance_score, raw_text, extracted_json, source_link, source_channel "
             "FROM work_items WHERE state <> 'extracted' AND length(raw_text) BETWEEN 500 AND 3000 "
             "ORDER BY id DESC LIMIT %s", (n,)).fetchall()
+    est = 0.0
+    for r in rows:
+        ex = from_dict(json.loads(r["extracted_json"]))
+        est += est_call_usd(cfg.cheap_model, llm.EXTRACT_SYSTEM,
+                            llm.build_extract_prompt(r["raw_text"], r.get("source_channel") or "x", r.get("source_link")), 203)
+        est += est_score_call_usd(cfg.cheap_model, profile, ex, r["raw_text"])
+        est += est_score_call_usd(cfg.judge_model, profile, ex, r["raw_text"])
+    gate("cost_probe", est, max_usd, confirm, f"{len(rows)} vacancies x 3 calls.")
+    client = make_client(cfg, "cost_probe")
     steps: Dict[str, List[Dict[str, Any]]] = {"extract": [], "score_haiku": [], "score_sonnet": []}
     for r in rows:
         ex = from_dict(json.loads(r["extracted_json"]))
@@ -75,6 +89,7 @@ def run_live(n: int, ids: Optional[List[int]], save: Optional[str]) -> Dict[str,
             "mean_output_tokens": round(sum(c["output_tokens"] for c in calls) / len(calls)),
             "per_call_usd": [round(c["usd"], 5) for c in calls],
         }
+    print_usage_summary(client.meter)
     out = {"vacancies": len(rows), "steps": summary, "cost": client.meter.report()}
     if save:
         save_result(save, out)
@@ -89,8 +104,9 @@ def main(argv=None) -> int:
     r.add_argument("--n", type=int, default=5)
     r.add_argument("--ids", type=int, nargs="*", default=None)
     r.add_argument("--save", default=None)
+    add_budget_args(r)
     a = ap.parse_args(argv)
-    report("cost probe", run_offline() if a.cmd == "offline" else run_live(a.n, a.ids, a.save))
+    report("cost probe", run_offline() if a.cmd == "offline" else run_live(a.n, a.ids, a.save, a.max_usd, a.confirm))
     return 0
 
 

@@ -106,5 +106,5 @@ Live replay on specific vacancies (read-only DB, paid API, **≈ $0.05** for 12:
 ~16 Haiku calls at [COST.md](../../COST.md) rates — an estimate, not metered):
 
 ```bash
-python -m evals.parse_robustness_eval run --save my_run.json --ids 11009 11063 11085 11154 11211 11345 11349 11351 11353 11466 11484 11488
+python -m evals.parse_robustness_eval run --max-usd 0.3 --save my_run.json --ids 11009 11063 11085 11154 11211 11345 11349 11351 11353 11466 11484 11488
 ```

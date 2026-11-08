@@ -150,3 +150,13 @@ def test_card_is_blind():
 def test_offline_eval_passes():
     res = ge.run_offline()
     assert all(v for v in res.values() if isinstance(v, bool)), res
+
+
+def test_band_source_travels_with_every_card_and_control():
+    fr = _frame(BIG)
+    for i, r in enumerate(fr):
+        r["band_source"] = "current" if i % 4 == 0 else "stored"
+    by = {r["item_id"]: r["band_source"] for r in fr}
+    s = g.build_sample(fr)
+    assert all(r["band_source"] == by[r["item_id"]] for r in s)
+    assert any(r["is_control"] for r in s)           # controls keep their original's source

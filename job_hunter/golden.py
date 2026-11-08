@@ -113,6 +113,7 @@ def build_sample(frame: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for wave, n_controls in ((1, WAVE1_CONTROLS), (2, WAVE2_CONTROLS)):
         cards = sorted((r for r in picked if r["wave"] == wave), key=lambda r: rank_key(r["item_id"]))
         seq = [{"item_id": r["item_id"], "stratum": r["stratum"], "band": r["band"],
+                "band_source": r.get("band_source"),
                 "is_control": False, "control_of_item": None} for r in cards]
         dev = [i for i, r in enumerate(seq) if r["stratum"] == "core" and not held_out(r["item_id"])
                and i <= len(seq) - 1 - CONTROL_MIN_GAP]

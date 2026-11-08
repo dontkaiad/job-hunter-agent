@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS eval_sample (
     order_no        INTEGER NOT NULL,
     stratum         TEXT NOT NULL,
     band            TEXT NOT NULL,
+    band_source     TEXT,                     -- current (re-scored) | stored (older system's score)
     is_control      BOOLEAN NOT NULL,
     control_of_item INTEGER,
     held_out        BOOLEAN NOT NULL,

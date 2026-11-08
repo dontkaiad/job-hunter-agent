@@ -25,7 +25,10 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
-from evals.common import SYNTHETIC, host_of, load_json, report, save_result
+from evals.common import (
+    SYNTHETIC, add_budget_args, est_score_call_usd, gate, host_of, load_json, make_client,
+    print_usage_summary, report, save_result,
+)
 
 
 class _Resp:
@@ -74,12 +77,12 @@ def run_offline() -> Dict[str, Any]:
     return out
 
 
-def run_live(ids: Optional[List[int]]) -> Dict[str, Any]:
-    from evals.common import live_env
+def run_live(ids: Optional[List[int]], max_usd: float, confirm: bool) -> Dict[str, Any]:
+    from evals.common import live_ctx
     from job_hunter import llm, scoring, store, vacancy_fetch as vf
     from job_hunter.schema_extract import from_dict
 
-    cfg, profile, client, conn = live_env()
+    cfg, profile, conn = live_ctx()
     rows = conn.execute(
         "SELECT id, raw_text, extracted_json, source_link, defer_reason, state, score_failed "
         "FROM work_items WHERE state = 'extracted' AND NOT score_failed"
@@ -87,6 +90,12 @@ def run_live(ids: Optional[List[int]]) -> Dict[str, Any]:
     rows = [r for r in rows if (ids and r["id"] in ids) or (not ids and (
         r["defer_reason"] in ("link_only", "insufficient")
         or scoring.is_link_only(r["raw_text"], cfg.link_only_min_chars)))]
+    # fetching is free; the model call is made per page that comes back (<= 6000 chars)
+    est = sum(est_score_call_usd(cfg.cheap_model, profile, from_dict(json.loads(r["extracted_json"])),
+                                 r["raw_text"] or "", "x" * 6000) for r in rows)
+    gate("link_fetch", est, max_usd, confirm,
+         f"{len(rows)} candidates; upper bound assumes every page returns 6000 chars.")
+    client = make_client(cfg, "link_fetch")
     by_host: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     buckets: collections.Counter = collections.Counter()
     status_counts: collections.Counter = collections.Counter()
@@ -111,6 +120,7 @@ def run_live(ids: Optional[List[int]]) -> Dict[str, Any]:
             label = f"ok / {b}"
             time.sleep(1.0)
         by_host[res.host or host_of(r["source_link"])][label] += 1
+    print_usage_summary(client.meter)
     return {
         "candidates": len(rows),
         "fetch_status": dict(status_counts),
@@ -129,11 +139,12 @@ def main(argv=None) -> int:
     r = sub.add_parser("run")
     r.add_argument("--ids", type=int, nargs="*", default=None)
     r.add_argument("--save", default=None, help="file name under evals/results/")
+    add_budget_args(r)
     a = ap.parse_args(argv)
     if a.cmd == "offline":
         report("link-only fetch", run_offline())
         return 0
-    out = run_live(a.ids)
+    out = run_live(a.ids, a.max_usd, a.confirm)
     report("link-only fetch", out)
     if a.save:
         save_result(a.save, out)

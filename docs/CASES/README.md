@@ -29,5 +29,9 @@ python -m evals offline          # all offline checks; no API, no network, no DB
 ```
 
 Live runs call the paid API and the production DB (read-only) and are **never run
-in CI**. Their commands and approximate cost are in each case. Live runs print and
+in CI**. Every one of them needs `--max-usd N` (it refuses to start without it),
+prints a cost estimate from the real input sizes and stops, spends only with
+`--confirm`, stops at the limit, and ends with the measured tokens
+(input / cache write / cache read / output) and dollars; usage is also logged to
+`llm_usage` as `eval:<name>`. Their commands and approximate cost are in each case. Live runs print and
 save aggregates only; vacancy text and model replies are never written to the repo.

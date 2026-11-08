@@ -127,5 +127,5 @@ Live baseline (read-only DB, paid API, **≈ $0.3**: 30 Haiku + 30 Sonnet score 
 at the [COST.md](../../COST.md) per-call rates — an estimate, not metered):
 
 ```bash
-python -m evals.score_stability_eval run --ids 10671 11097 11197 --runs 5 --save my_run.json
+python -m evals.score_stability_eval run --ids 10671 11097 11197 --runs 5 --max-usd 1.0 --save my_run.json   # prints the estimate; add --confirm to spend
 ```

@@ -22,7 +22,10 @@ import collections
 import json
 from typing import Any, Dict, List, Optional
 
-from evals.common import SYNTHETIC, load_json, report, save_result
+from evals.common import (
+    SYNTHETIC, add_budget_args, est_call_usd, est_score_call_usd, est_tokens, gate, load_json,
+    make_client, print_usage_summary, report, save_result,
+)
 
 
 def classify_reply(text: str, stop_reason: Optional[str] = None) -> str:
@@ -94,12 +97,22 @@ def run_offline() -> Dict[str, Any]:
     }
 
 
-def run_live(ids: List[int]) -> Dict[str, Any]:
-    from evals.common import fetch_items, live_env
+def run_live(ids: List[int], max_usd: float, confirm: bool) -> Dict[str, Any]:
+    from evals.common import fetch_items, live_ctx
     from job_hunter import llm, scoring
     from job_hunter.schema_extract import from_dict
 
-    cfg, profile, client, conn = live_env()
+    cfg, profile, conn = live_ctx()
+    pre = fetch_items(conn, ids)
+    text_system = llm.build_score_system(profile)
+    est = 0.0
+    for r in pre:
+        ex = from_dict(json.loads(r["extracted_json"]))
+        est += est_call_usd(cfg.cheap_model, text_system, llm.build_score_prompt(ex, r["raw_text"] or ""), 420)
+        if not scoring.is_link_only(r["raw_text"], cfg.link_only_min_chars):
+            est += est_score_call_usd(cfg.cheap_model, profile, ex, r["raw_text"] or "")
+    gate("parse_robustness", est, max_usd, confirm, f"{len(pre)} vacancies, up to 2 Haiku calls each.")
+    client = make_client(cfg, "parse_robustness")
     text_types: collections.Counter = collections.Counter()
     tool_outcomes: collections.Counter = collections.Counter()
     in_chars: Dict[str, List[int]] = {"OK": [], "failed": []}
@@ -129,6 +142,7 @@ def run_live(ids: List[int]) -> Dict[str, Any]:
             tool_outcomes["insufficient_content"] += 1
         except Exception as exc:  # noqa: BLE001
             tool_outcomes[f"FAILED {type(exc).__name__}"] += 1
+    print_usage_summary(client.meter)
     return {
         "n": len(rows),
         "model": cfg.cheap_model,
@@ -147,11 +161,12 @@ def main(argv=None) -> int:
     r = sub.add_parser("run")
     r.add_argument("--ids", type=int, nargs="+", required=True)
     r.add_argument("--save", default=None, help="file name under evals/results/")
+    add_budget_args(r)
     a = ap.parse_args(argv)
     if a.cmd == "offline":
         report("parse robustness", run_offline())
         return 0
-    out = run_live(a.ids)
+    out = run_live(a.ids, a.max_usd, a.confirm)
     report("parse robustness", out)
     if a.save:
         save_result(a.save, out)

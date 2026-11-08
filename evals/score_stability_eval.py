@@ -7,9 +7,10 @@ both scoring models, and report min / max / range per cell. No DB writes.
 
   offline -- harness check on a scripted fake client (no API, no network): spread
              maths + a regression guard that production scoring pins temperature=0.
-  run     -- live: python -m evals.score_stability_eval run --ids 10671 11097 11197
-             Reads the vacancies from the DB (read-only), calls the API
-             (~60 calls for 3 vacancies x 5 runs x 2 models x 2 conditions, ~$0.3).
+  run     -- live: python -m evals.score_stability_eval run --ids 10671 11097 11197 --max-usd 1.0
+             Prints a cost estimate and stops; add --confirm to spend (hard stop at
+             --max-usd). Reads the vacancies from the DB (read-only), calls the API
+             (60 calls for 3 vacancies x 5 runs x 2 models x 2 conditions).
              Prints aggregates only; --save NAME writes them to evals/results/.
 
 Measures REPEATABILITY, not correctness: a stable wrong score is still wrong.
@@ -20,7 +21,10 @@ import argparse
 import json
 from typing import Any, Dict, List, Optional
 
-from evals.common import load_json, RESULTS, report, save_result, spread
+from evals.common import (
+    RESULTS, add_budget_args, est_score_call_usd, gate, load_json, make_client, print_usage_summary,
+    report, save_result, spread,
+)
 
 
 def measure(score_once, conditions, models, items, runs: int) -> List[Dict[str, Any]]:
@@ -73,13 +77,19 @@ def run_offline() -> Dict[str, Any]:
     }
 
 
-def run_live(ids: List[int], runs: int, save: Optional[str]) -> Dict[str, Any]:
-    from evals.common import fetch_items, live_env
+def run_live(ids: List[int], runs: int, save: Optional[str], max_usd: float, confirm: bool) -> Dict[str, Any]:
+    from evals.common import fetch_items, live_ctx
     from job_hunter import llm
     from job_hunter.schema_extract import from_dict
 
-    cfg, profile, client, conn = live_env()
+    cfg, profile, conn = live_ctx()
     items = fetch_items(conn, ids)
+    models = [cfg.cheap_model, cfg.judge_model]
+    est = sum(est_score_call_usd(m, profile, from_dict(json.loads(it["extracted_json"])), it["raw_text"])
+              * runs * 2 for it in items for m in models)       # 2 conditions per cell
+    gate("score_stability", est, max_usd, confirm,
+         f"{len(items)} vacancies x {runs} runs x 2 models x 2 conditions = {len(items) * runs * 4} calls.")
+    client = make_client(cfg, "score_stability")
 
     def score_once(model, item, temp):
         _set_temp(client, temp)
@@ -90,6 +100,7 @@ def run_live(ids: List[int], runs: int, save: Optional[str]) -> Dict[str, Any]:
                    [cfg.cheap_model, cfg.judge_model], items, runs)
     out = {"runs_per_cell": runs, "vacancies": len(items), "rows": rows,
            "cost": client.meter.report()}
+    print_usage_summary(client.meter)
     if save:
         save_result(save, out)
     return out
@@ -118,11 +129,12 @@ def main(argv=None) -> int:
     r.add_argument("--ids", type=int, nargs="+", required=True)
     r.add_argument("--runs", type=int, default=5)
     r.add_argument("--save", default=None, help="file name under evals/results/")
+    add_budget_args(r)
     a = ap.parse_args(argv)
     if a.cmd == "offline":
         report("score stability (offline)", run_offline())
         return 0
-    report("score stability (live)", run_live(a.ids, a.runs, a.save))
+    report("score stability (live)", run_live(a.ids, a.runs, a.save, a.max_usd, a.confirm))
     return 0
 
 

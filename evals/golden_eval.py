@@ -3,12 +3,16 @@
   offline -- synthetic population: allocation, deterministic sample/waves/controls, the
              held-out split, label classes, the estimators (recover a known truth), and
              the blind-card whitelist. No API, no DB, no network (runs in CI).
-  frame   -- live: score the sampling frame on the current system (Haiku first pass,
-             Sonnet judge in the 50-70 corridor, temperature 0, forced tool), without
-             touching work_items; results go to eval_frame, resumable, measured cost per
-             item from API usage.
-               python -m evals.golden_eval frame --exclude-urls FILE [--workers 4] [--limit N]
-  sample  -- live: build the two labelling waves from eval_frame into eval_sample.
+  frame   -- live (SPENDS): score the sampling frame on the current system (Haiku first
+             pass, Sonnet judge in the 50-70 corridor, temperature 0, forced tool), without
+             touching work_items; results go to eval_frame, resumable, measured cost.
+               python -m evals.golden_eval frame --exclude-urls FILE --max-usd N [--confirm]
+             Prints the estimate and stops unless --confirm; hard stop at --max-usd.
+  sample  -- NO API: build the two labelling waves from the frame using, per vacancy, the
+             re-scored current score where eval_frame has one and the stored score
+             otherwise (band_source records which). Needs only the database.
+               python -m evals.golden_eval sample --exclude-urls FILE
+  estimate-labeled -- NO API: what re-scoring the sampled cards would cost, sync vs Batch.
   report  -- live: metrics from eval_labels (precision@60, recall, calibration by band,
              PR curve, by reason and source, held-out kept separate). Aggregates only.
 
@@ -25,7 +29,10 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
-from evals.common import report, save_result
+from evals.common import (
+    BudgetExceeded, add_budget_args, db_ctx, est_score_call_usd, gate, make_client, print_usage_summary,
+    report, save_result,
+)
 from job_hunter import golden
 
 RESTORED_FROM = "2026-10-29"   # add_by_url re-ingests of the 2026-10 outage start here
@@ -185,15 +192,15 @@ def score_current(client, ex, raw: str, fetched: Optional[str], cfg, profile):
     return h, False
 
 
-def run_frame(exclude_urls: Optional[str], workers: int, limit: Optional[int]) -> Dict[str, Any]:
-    from evals.common import UsageMeter, live_env, usage_cost
+def run_frame(exclude_urls: Optional[str], workers: int, limit: Optional[int], max_usd: float,
+              confirm: bool, judge_share: float = 0.15) -> Dict[str, Any]:
+    from evals.common import live_ctx
     from job_hunter import llm
     from job_hunter.clock import now_iso
     from job_hunter.schema_extract import from_dict
-    import psycopg
     from job_hunter import store
 
-    cfg, profile, _client, ro = live_env()
+    cfg, profile, ro = live_ctx()
     restored = set(u.strip() for u in open(exclude_urls) if u.strip()) if exclude_urls else set()
     rows = [dict(r) for r in ro.execute(
         "SELECT id, state, source_channel, source_link, raw_text, fetched_text, primary_url_key, created_at, "
@@ -208,35 +215,44 @@ def run_frame(exclude_urls: Optional[str], workers: int, limit: Optional[int]) -
     todo = [f for f in sel["frame"] if f["item_id"] not in done]
     if limit:
         todo = todo[:limit]
+    # estimate from the REAL prompt sizes: every item once on Haiku, `judge_share` of them
+    # again on Sonnet (measured: 64 of 456 = 14% in the first 27%)
+    est = 0.0
+    for f in todo:
+        r = by_id[f["item_id"]]
+        ex = from_dict(json.loads(r["extracted_json"]))
+        est += est_score_call_usd(cfg.cheap_model, profile, ex, r["raw_text"], r.get("fetched_text"))
+        est += judge_share * est_score_call_usd(cfg.judge_model, profile, ex, r["raw_text"], r.get("fetched_text"))
     print(f"frame {len(sel['frame'])} (excluded {sel['excluded']}); already scored {len(done)}; to score {len(todo)}",
           flush=True)
-
-    local = threading.local()
+    gate("golden frame", est, max_usd, confirm, f"{len(todo)} vacancies, judge share assumed {judge_share:.0%}.")
+    client = make_client(cfg, "golden_frame")
 
     def work(f):
-        if not hasattr(local, "client"):          # one client + meter per worker thread
-            local.client = llm.AnthropicClient(cfg.anthropic_api_key, cfg.cheap_model)
-            local.meter = UsageMeter().attach(local.client)
+        client.meter.thread_cost_reset()
         r = by_id[f["item_id"]]
-        before = len(local.meter.calls)
         status, score, judge = "scored", None, False
         try:
-            score, judge = score_current(local.client, from_dict(json.loads(r["extracted_json"])),
+            score, judge = score_current(client, from_dict(json.loads(r["extracted_json"])),
                                          r["raw_text"], r.get("fetched_text"), cfg, profile)
+        except BudgetExceeded:
+            return f, "stopped", None, False, client.meter.thread_cost()
         except llm.InsufficientContent:
             status = "insufficient"
         except Exception as exc:  # noqa: BLE001
             status = f"error:{type(exc).__name__}"
-        cost = sum(usage_cost(m, u) or 0 for m, u in local.meter.calls[before:])
-        return f, status, score, judge, cost
+        return f, status, score, judge, client.meter.thread_cost()
 
-    total_cost, n = 0.0, 0
+    total_cost, n, stopped = 0.0, 0, False
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for fut in as_completed([pool.submit(work, f) for f in todo]):
             f, status, score, judge, cost = fut.result()
+            total_cost += cost
+            if status == "stopped":
+                stopped = True
+                continue
             if status.startswith("error"):
                 print(f"item {f['item_id']}: {status} (will be retried on the next run)", flush=True)
-                total_cost += cost
                 continue
             rw.execute(
                 "INSERT INTO eval_frame (item_id, stratum, status, current_score, band, judge_used, cost_usd, scored_at) "
@@ -244,45 +260,107 @@ def run_frame(exclude_urls: Optional[str], workers: int, limit: Optional[int]) -
                 (f["item_id"], f["stratum"], status, score, golden.band_of(score) if score is not None else None,
                  judge, cost, now_iso()))
             rw.commit()
-            total_cost += cost
             n += 1
             if n % 50 == 0:
-                print(f"  scored {n}/{len(todo)}  measured cost so far ${total_cost:.2f}", flush=True)
-    summary = rw.execute(
-        "SELECT status, stratum, band, count(*) AS n, sum(cost_usd) AS usd FROM eval_frame GROUP BY 1,2,3 ORDER BY 2,3").fetchall()
+                print(f"  scored {n}/{len(todo)}  measured ${client.meter.spent_usd():.2f} of ${max_usd:.2f}", flush=True)
+    print_usage_summary(client.meter)
     out = {"frame_size": len(sel["frame"]), "excluded": sel["excluded"], "scored_this_run": n,
-           "measured_cost_usd_this_run": round(total_cost, 4),
-           "measured_cost_usd_total": round(float(rw.execute("SELECT coalesce(sum(cost_usd),0) AS s FROM eval_frame").fetchone()["s"]), 4),
-           "by_status_stratum_band": [dict(r) for r in summary]}
-    for r in out["by_status_stratum_band"]:
-        r["usd"] = round(float(r["usd"] or 0), 4)
+           "stopped_at_budget": stopped, "left_to_score": len(todo) - n,
+           "cost": client.meter.report()}
     return out
 
 
-def run_sample() -> Dict[str, Any]:
-    from evals.common import live_env
+def _frame_with_scores(cfg, exclude_urls: Optional[str]):
+    """Frame rows {item_id, stratum, band, band_source}: the re-scored CURRENT score where
+    eval_frame has one, the older STORED score otherwise. No API."""
+    import psycopg
+
+    conn = psycopg.connect(cfg.database_url, options="-c default_transaction_read_only=on",
+                           row_factory=psycopg.rows.dict_row)
+    restored = set(u.strip() for u in open(exclude_urls) if u.strip()) if exclude_urls else set()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT id, state, source_channel, source_link, raw_text, fetched_text, primary_url_key, created_at, "
+        "relevance_score FROM work_items").fetchall()]
+    hard = {r["item_id"] for r in conn.execute(
+        "SELECT item_id FROM state_transitions WHERE to_state='rejected' AND reason LIKE 'hard reject%%'").fetchall()}
+    cur = {r["item_id"]: r for r in conn.execute(
+        "SELECT item_id, status, current_score FROM eval_frame").fetchall()}
+    sel = select_frame(rows, hard, restored, cfg.link_only_min_chars)
+    by_id = {r["id"]: r for r in rows}
+    out = []
+    for f in sel["frame"]:
+        c = cur.get(f["item_id"])
+        if c and c["status"] == "scored":
+            band, src = golden.band_of(c["current_score"]), "current"
+        else:
+            band, src = golden.band_of(by_id[f["item_id"]]["relevance_score"]), "stored"
+        out.append({**f, "band": band, "band_source": src})
+    return conn, sel, out
+
+
+def run_sample(exclude_urls: Optional[str]) -> Dict[str, Any]:
+    """Build the waves WITHOUT any API call: the frame is banded by the re-scored current
+    score where one exists (the first ~27%, mostly the OLDEST items) and by the stored
+    score elsewhere. The band edges mean the same thing in both, but the two scores come
+    from different system versions: that mix is a known bias, recorded per card."""
     from job_hunter import store
     from job_hunter.clock import now_iso
 
-    cfg, _p, _c, _ro = live_env()
+    cfg, _ro = db_ctx()
+    conn, sel, frame = _frame_with_scores(cfg, exclude_urls)
     rw = store.connect(cfg.database_url)
     store.init_db(rw)
+    rw.execute("ALTER TABLE eval_sample ADD COLUMN IF NOT EXISTS band_source TEXT")
+    rw.commit()
     if rw.execute("SELECT count(*) AS n FROM eval_sample").fetchone()["n"]:
         raise SystemExit("eval_sample already exists; refusing to overwrite a golden set")
-    fr = rw.execute("SELECT item_id, stratum, band FROM eval_frame WHERE status = 'scored'").fetchall()
-    sample = golden.build_sample([dict(r) for r in fr])
+    sample = golden.build_sample(frame)
     ts = now_iso()
     for r in sample:
         rw.execute(
-            "INSERT INTO eval_sample (item_id, wave, order_no, stratum, band, is_control, control_of_item, held_out, created_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (r["item_id"], r["wave"], r["order_no"], r["stratum"], r["band"], r["is_control"],
-             r["control_of_item"], r["held_out"], ts))
+            "INSERT INTO eval_sample (item_id, wave, order_no, stratum, band, band_source, is_control, "
+            "control_of_item, held_out, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (r["item_id"], r["wave"], r["order_no"], r["stratum"], r["band"], r.get("band_source"),
+             r["is_control"], r["control_of_item"], r["held_out"], ts))
     rw.commit()
-    return {"cards": len(sample), "by_wave": dict(collections.Counter(r["wave"] for r in sample)),
-            "by_band_core": dict(collections.Counter(r["band"] for r in sample if r["stratum"] == "core" and not r["is_control"])),
-            "frame_band_sizes": dict(collections.Counter(r["band"] for r in fr if r["stratum"] == "core")),
-            "held_out": sum(r["held_out"] for r in sample if not r["is_control"])}
+    core = [r for r in frame if r["stratum"] == "core"]
+    plain = [r for r in sample if not r["is_control"] and r["stratum"] == "core"]
+    return {
+        "cards": len(sample), "by_wave": dict(collections.Counter(r["wave"] for r in sample)),
+        "frame_excluded": sel["excluded"], "frame_core": len(core),
+        "frame_band_sizes": dict(collections.Counter(r["band"] for r in core)),
+        "frame_band_source": dict(collections.Counter(r["band_source"] for r in core)),
+        "sample_core_by_band": dict(collections.Counter(r["band"] for r in plain)),
+        "sample_core_by_band_source": dict(collections.Counter((r["band"], r["band_source"]) for r in plain)),
+        "held_out": sum(r["held_out"] for r in sample if not r["is_control"]),
+        "note": "bands mix re-scored current scores (oldest ~27%) with stored scores from older system versions",
+    }
+
+
+def run_estimate_labeled(judge_share: float = 0.15) -> Dict[str, Any]:
+    """What re-scoring the sampled cards on the CURRENT system would cost. NO API."""
+    from job_hunter.profile import load_profile
+    from job_hunter.schema_extract import from_dict
+
+    cfg, conn = db_ctx()
+    profile = load_profile()
+    rows = conn.execute(
+        "SELECT DISTINCT s.item_id, w.raw_text, w.fetched_text, w.extracted_json FROM eval_sample s "
+        "JOIN work_items w ON w.id = s.item_id").fetchall()
+    out: Dict[str, Any] = {"vacancies": len(rows), "judge_share_assumed": judge_share}
+    for mode, batch in (("sync", False), ("batch_50pct", True)):
+        usd = 0.0
+        for r in rows:
+            ex = from_dict(json.loads(r["extracted_json"]))
+            usd += est_score_call_usd(cfg.cheap_model, profile, ex, r["raw_text"], r["fetched_text"], batch=batch)
+            usd += judge_share * est_score_call_usd(cfg.judge_model, profile, ex, r["raw_text"],
+                                                    r["fetched_text"], batch=batch)
+        out[f"estimate_usd_{mode}"] = round(usd, 2)
+    out["notes"] = ("Upper-bound style: no prompt-cache credit (Haiku's tools+system prefix is below the "
+                    "4,096-token floor; Sonnet's would cache), offline token estimate x1.085 calibrated on "
+                    "366 measured calls (p10-p90 1.02-1.15). Batch = 50% off input and output. "
+                    "The Batch runner itself is not built yet.")
+    return out
 
 
 def main(argv=None) -> int:
@@ -293,14 +371,21 @@ def main(argv=None) -> int:
     f.add_argument("--exclude-urls", default=None)
     f.add_argument("--workers", type=int, default=4)
     f.add_argument("--limit", type=int, default=None)
-    sub.add_parser("sample")
+    f.add_argument("--judge-share", type=float, default=0.15)
+    add_budget_args(f)
+    sm = sub.add_parser("sample")
+    sm.add_argument("--exclude-urls", default=None)
+    sub.add_parser("estimate-labeled")
     a = ap.parse_args(argv)
     if a.cmd == "offline":
         report("golden set (offline)", run_offline())
     elif a.cmd == "frame":
-        report("golden set: frame", run_frame(a.exclude_urls, a.workers, a.limit))
+        report("golden set: frame", run_frame(a.exclude_urls, a.workers, a.limit, a.max_usd, a.confirm,
+                                              a.judge_share))
     elif a.cmd == "sample":
-        report("golden set: sample", run_sample())
+        report("golden set: sample (no API)", run_sample(a.exclude_urls))
+    elif a.cmd == "estimate-labeled":
+        report("golden set: cost of re-scoring the labelled cards (no API)", run_estimate_labeled())
     return 0
 
 

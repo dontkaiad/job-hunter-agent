@@ -94,5 +94,5 @@ Live dry-run (network fetches + one Haiku call per fetched page, **≈ $0.05** f
 estimate from [COST.md](../../COST.md) rates; read-only DB, nothing written):
 
 ```bash
-python -m evals.link_fetch_eval run --save my_run.json
+python -m evals.link_fetch_eval run --max-usd 0.3 --save my_run.json
 ```
