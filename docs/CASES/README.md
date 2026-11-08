@@ -11,6 +11,7 @@ reproduce**.
 | [0002](0002-parse-robustness-text-vs-tool.md) | Parse robustness: text JSON vs forced tool use | eval | `evals/parse_robustness_eval.py` |
 | [0003](0003-postmortem-2026-10-credit-outage.md) | Postmortem: credit outage → deleted vacancies | postmortem | regression tests |
 | [0004](0004-link-only-fetch.md) | Link-only stubs: fetching the linked page | eval | `evals/link_fetch_eval.py` |
+| [0005](0005-heuristic-vs-model-extract.md) | Heuristic vs model extract on the shadow sample (n = 21) | eval + fix | `scripts/oneoff/reextract_fallback.py` |
 
 For the general method (what an eval is, how to choose a metric) see
 [../EVALS.md](../EVALS.md).

@@ -51,6 +51,19 @@ def test_committed_baselines_are_consistent_with_the_articles():
     assert sum(f["score_buckets"].values()) == f["fetch_status"]["ok"] == 7
 
 
+def test_extract_shadow_check_baseline_matches_case_0005():
+    d = common.load_json(common.RESULTS / "extract_shadow_check_2026-11-08.json")
+    assert d["shadow_rows"] == d["scored"] == 21 and len(d["new_scores_sorted"]) == 21
+    under = d["new_under_25 (deletion confirmed)"]
+    mid = d["new_25_to_59 (would have been kept as rejected)"]
+    top = d["new_60_plus (would have surfaced)"]
+    assert (under, mid, top) == (19, 2, 0) and under + mid + top == 21
+    assert sum(1 for s in d["new_scores_sorted"] if s < 25) == under
+    assert round(sum(d["new_scores_sorted"]) / 21, 1) == d["new_mean"] == 13.3 and d["old_mean"] == 12.9
+    t = d["cost"]["tokens_total"]
+    assert (t["input"], t["output"], d["cost"]["calls"]) == (135605, 10524, 42) and d["cost"]["total_usd"] == 0.1882
+
+
 def test_no_private_markers_in_public_eval_files():
     """Public repo: no keys, e-mails, Telegram ids/handles of people, profile text."""
     from _personal_needles import personal_needles

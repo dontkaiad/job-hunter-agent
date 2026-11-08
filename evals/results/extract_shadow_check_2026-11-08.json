@@ -1,0 +1,23 @@
+{
+  "_note": "Printed output of `scripts/oneoff/reextract_fallback.py shadow-check --max-usd 0.26 --confirm`, run on production 2026-11-08 at commit 78a69fa (read-only: nothing was written to work_items). 21 below-the-cut vacancies of the 2026-11-02..05 cohort, still held in eval_shadow, re-extracted with the model and scored on the current system (Haiku, temperature 0, forced tool; the Sonnet judge never triggered). Aggregates only, copied verbatim.",
+  "shadow_rows": 21,
+  "outcomes": {"scored": 21},
+  "scored": 21,
+  "old_mean": 12.9,
+  "new_mean": 13.3,
+  "new_under_25 (deletion confirmed)": 19,
+  "new_25_to_59 (would have been kept as rejected)": 2,
+  "new_60_plus (would have surfaced)": 0,
+  "new_scores_sorted": [8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 12, 15, 18, 18, 18, 18, 18, 18, 28, 28],
+  "cost": {
+    "measured": true,
+    "limit_usd": 0.26,
+    "tokens_total": {"input": 135605, "cache_write": 0, "cache_read": 0, "output": 10524},
+    "prices_verified": "2026-11-01",
+    "total_usd": 0.1882,
+    "calls": 42,
+    "unpriced_calls": 0,
+    "by_model": {"claude-haiku-4-5": {"calls": 42, "input_tokens": 135605, "output_tokens": 10524,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "usd": 0.1882}}
+  }
+}
