@@ -331,7 +331,7 @@ def run_sample(exclude_urls: Optional[str]) -> Dict[str, Any]:
         "frame_band_sizes": dict(collections.Counter(r["band"] for r in core)),
         "frame_band_source": dict(collections.Counter(r["band_source"] for r in core)),
         "sample_core_by_band": dict(collections.Counter(r["band"] for r in plain)),
-        "sample_core_by_band_source": dict(collections.Counter((r["band"], r["band_source"]) for r in plain)),
+        "sample_core_by_band_source": dict(collections.Counter(f'{r["band"]}|{r["band_source"]}' for r in plain)),
         "held_out": sum(r["held_out"] for r in sample if not r["is_control"]),
         "note": "bands mix re-scored current scores (oldest ~27%) with stored scores from older system versions",
     }
