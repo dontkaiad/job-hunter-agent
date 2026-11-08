@@ -146,18 +146,29 @@ WAVE2_PLAN: Dict[str, int] = {"<25": 4, "25-39": 14, "40-49": 6, "50-59": 30, "6
 
 
 def build_wave2(frame: Sequence[Dict[str, Any]], taken: Iterable[int],
-                plan: Dict[str, int] = WAVE2_PLAN, n_controls: int = WAVE2_CONTROLS) -> List[Dict[str, Any]]:
+                plan: Dict[str, int] = WAVE2_PLAN, n_controls: int = WAVE2_CONTROLS,
+                kept: Sequence[Dict[str, Any]] = ()) -> List[Dict[str, Any]]:
     """Rows for the re-planned wave 2: core vacancies NOT already in wave 1 (`taken`),
     first n per band in hash order, shuffled by hash, plus controls. No hard stratum.
-    Deterministic; a band with fewer vacancies than planned is taken whole."""
-    skip = set(taken)
+    Deterministic; a band with fewer vacancies than planned is taken whole.
+
+    `kept` are wave-2 cards that were ALREADY labelled before the re-plan (rows with
+    item_id / band / band_source). They stay first, count toward their band's quota, and
+    their items are never picked again; the returned list includes them (as order 1..k)."""
+    kept = list(kept)
+    skip = set(taken) | {r["item_id"] for r in kept}
+    left = dict(plan)
+    for r in kept:
+        left[r["band"]] = max(0, left.get(r["band"], 0) - 1)
     core = [r for r in frame if r["stratum"] == "core" and r["item_id"] not in skip]
     cards: List[Dict[str, Any]] = []
     for b in BAND_NAMES:
-        cards += sorted((r for r in core if r["band"] == b), key=lambda r: rank_key(r["item_id"]))[: plan.get(b, 0)]
+        cards += sorted((r for r in core if r["band"] == b), key=lambda r: rank_key(r["item_id"]))[: left.get(b, 0)]
     cards.sort(key=lambda r: rank_key(r["item_id"]))
     seq = [{"item_id": r["item_id"], "stratum": "core", "band": r["band"], "band_source": r.get("band_source"),
-            "is_control": False, "control_of_item": None} for r in cards]
+            "is_control": False, "control_of_item": None} for r in kept]
+    seq += [{"item_id": r["item_id"], "stratum": "core", "band": r["band"], "band_source": r.get("band_source"),
+             "is_control": False, "control_of_item": None} for r in cards]
     final = _insert_controls(seq, n_controls)
     return [{"wave": 2, "order_no": no, "held_out": held_out(r["item_id"]), **r} for no, r in enumerate(final, 1)]
 

@@ -347,8 +347,9 @@ def run_sample(exclude_urls: Optional[str]) -> Dict[str, Any]:
 
 
 def run_wave2(exclude_urls: Optional[str], apply: bool) -> Dict[str, Any]:
-    """Rebuild wave 2 from the current frame, leaving wave 1 (and its labels) untouched.
-    Refuses if any wave-2 card already has a label. Database only: no API."""
+    """Rebuild wave 2 from the current frame, leaving wave 1 and any wave-2 card that is
+    ALREADY labelled untouched (those stay, in place, and count toward the plan). Database
+    only: no API."""
     from job_hunter import store
     from job_hunter.clock import now_iso
 
@@ -357,15 +358,17 @@ def run_wave2(exclude_urls: Optional[str], apply: bool) -> Dict[str, Any]:
     rw = store.connect(cfg.database_url)
     store.init_db(rw)
     taken = {r["item_id"] for r in rw.execute("SELECT item_id FROM eval_sample WHERE wave = 1").fetchall()}
-    labelled = rw.execute(
-        "SELECT count(*) AS n FROM eval_labels l JOIN eval_sample s ON s.id = l.sample_id WHERE s.wave = 2"
-    ).fetchone()["n"]
-    if labelled:
-        raise SystemExit(f"refusing: {labelled} wave-2 cards already carry labels")
-    rows = golden.build_wave2(frame, taken)
+    kept = [dict(r) for r in rw.execute(
+        "SELECT s.id, s.order_no, s.item_id, s.band, s.band_source, s.stratum, s.is_control FROM eval_sample s "
+        "JOIN eval_labels l ON l.sample_id = s.id WHERE s.wave = 2 ORDER BY s.order_no").fetchall()]
+    if any(k["stratum"] != "core" or k["is_control"] for k in kept):
+        raise SystemExit("refusing: a labelled wave-2 card is a control/hard card; handle it by hand")
+    rows = golden.build_wave2(frame, taken, kept=kept)
+    new_rows = [r for r in rows if r["item_id"] not in {k["item_id"] for k in kept} or r["is_control"]]
     plain = [r for r in rows if not r["is_control"]]
     out = {
         "applied": apply, "cards": len(rows), "controls": len(rows) - len(plain),
+        "kept_already_labelled": len(kept), "new_cards": len(new_rows),
         "by_band": dict(collections.Counter(r["band"] for r in plain)),
         "by_band_source": dict(collections.Counter(f'{r["band"]}|{r["band_source"]}' for r in plain)),
         "held_out": sum(r["held_out"] for r in plain),
@@ -374,17 +377,24 @@ def run_wave2(exclude_urls: Optional[str], apply: bool) -> Dict[str, Any]:
             r["band"] for r in frame if r["stratum"] == "core" and r["item_id"] not in taken)),
     }
     if apply:
+        keep_ids = [k["id"] for k in kept]
         old = rw.execute("SELECT count(*) AS n FROM eval_sample WHERE wave = 2").fetchone()["n"]
-        rw.execute("DELETE FROM eval_sample WHERE wave = 2")      # no labels reference them (checked)
+        rw.execute("DELETE FROM eval_sample WHERE wave = 2 AND NOT (id = ANY(%s))", (keep_ids,))
+        # the labelled cards keep their row (and label) but may move to their new position
+        for k in kept:
+            pos = next(r["order_no"] for r in rows if r["item_id"] == k["item_id"] and not r["is_control"])
+            rw.execute("UPDATE eval_sample SET order_no = %s WHERE id = %s", (-pos, k["id"]))   # park clear of UNIQUE
         ts = now_iso()
-        for r in rows:
+        for r in new_rows:
             rw.execute(
                 "INSERT INTO eval_sample (item_id, wave, order_no, stratum, band, band_source, is_control, "
                 "control_of_item, held_out, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (r["item_id"], 2, r["order_no"], r["stratum"], r["band"], r.get("band_source"),
                  r["is_control"], r["control_of_item"], r["held_out"], ts))
+        for k in kept:
+            rw.execute("UPDATE eval_sample SET order_no = -order_no WHERE id = %s", (k["id"],))
         rw.commit()
-        out["replaced_old_wave2_cards"] = old
+        out["replaced_unlabelled_old_wave2_cards"] = old - len(kept)
     return out
 
 

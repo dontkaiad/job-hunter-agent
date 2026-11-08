@@ -234,3 +234,18 @@ def test_wave2_takes_a_small_band_whole_and_never_more_than_exists():
 def test_offline_eval_checks_wave2():
     res = ge.run_offline()
     assert res["wave2_matches_the_plan"] is True
+
+
+def test_wave2_keeps_cards_that_were_already_labelled_and_counts_them():
+    fr, _ = _frame2()
+    wave1 = g.build_sample(fr)
+    taken = {r["item_id"] for r in wave1 if r["wave"] == 1}
+    pool = [r for r in fr if r["band"] == "25-39" and r["item_id"] not in taken]
+    kept = [{"item_id": pool[0]["item_id"], "band": "25-39", "band_source": "stored"}]
+    w2 = g.build_wave2(fr, taken, kept=kept)
+    plain = [r for r in w2 if not r["is_control"]]
+    assert len(w2) == 65 and len(plain) == 60                                   # same size as without a kept card
+    assert dict(__import__("collections").Counter(r["band"] for r in plain)) == g.WAVE2_PLAN
+    assert plain[0]["item_id"] == kept[0]["item_id"] and plain[0]["order_no"] == 1   # stays first
+    assert sum(1 for r in w2 if r["item_id"] == kept[0]["item_id"] and not r["is_control"]) == 1   # never picked twice
+    assert sorted(r["order_no"] for r in w2) == list(range(1, 66))
