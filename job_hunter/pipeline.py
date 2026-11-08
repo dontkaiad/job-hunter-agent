@@ -98,6 +98,7 @@ class ScoreRunStats:
     denylisted: int = 0      # stub on a denylisted host: never fetched
     duplicates: int = 0      # same vacancy URL as an older row: dropped like a source_link dup
     insufficient: int = 0    # LLM said the posting has no content to judge
+    insufficient_parked: int = 0  # already judged `insufficient`, input unchanged: NOT re-sent
 
 
 @dataclass
@@ -357,8 +358,20 @@ def _maybe_fetch(
     return None, res.status, None
 
 
+def _park_resume(item: WorkItem, deps: Deps) -> AdvanceResult:
+    """An `insufficient` vacancy whose input did not change since the model judged it:
+    no model call, no DB write, no attempt."""
+    deps.score_stats.insufficient_parked += 1
+    print(f"[score] id={item.id} insufficient, input unchanged -> not re-scored", flush=True)
+    return AdvanceResult(
+        "noop", item.id, item.state, reason="score parked (insufficient, input unchanged)",
+        extra={"defer_reason": "insufficient", "rescored": False},
+    )
+
+
 def _park_item(
-    conn: psycopg.Connection, item: WorkItem, deps: Deps, reason: str, detail: str = ""
+    conn: psycopg.Connection, item: WorkItem, deps: Deps, reason: str, detail: str = "",
+    input_hash: Optional[str] = None,
 ) -> AdvanceResult:
     """Park an item that cannot be scored for lack of content. NOT a failure:
     no attempt spent, no score written, no deletion; it stays in EXTRACTED."""
@@ -370,6 +383,7 @@ def _park_item(
     store.set_defer_reason(
         conn, item.id, reason,
         audit_reason=f"score parked ({reason})" + (f": {detail}" if detail else ""),
+        input_hash=input_hash,
     )
     print(f"[score] id={item.id} parked ({reason})", flush=True)
     return AdvanceResult(
@@ -470,6 +484,12 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
             store.set_url_keys(conn, item.id, final=fkey)
             dup_id = store.find_duplicate_by_url_keys(conn, [fkey], item.id)
             dup_by = "vacancy URL"
+    if pf.keep and dup_id is None and item.defer_reason == "insufficient":
+        # The model already said "nothing to judge" for exactly this input (post text +
+        # fetched page). Asking again costs money and cannot change the answer: wait for
+        # the input to change (e.g. the fetch just brought the page).
+        if item.defer_input_hash == scoring.input_hash(raw, fetched_text):
+            return _park_resume(item, deps)
     if (
         pf.keep and dup_id is None and scoring.is_link_only(raw, deps.link_only_min_chars)
         and len(fetched_text or "") < deps.link_only_min_chars
@@ -563,7 +583,8 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
 
             except InsufficientContent as exc:
                 # Not a failure and not a zero: park it, keep it, spend no attempt.
-                return _park_item(conn, item, deps, "insufficient", str(exc)[:200])
+                return _park_item(conn, item, deps, "insufficient", str(exc)[:200],
+                                  input_hash=scoring.input_hash(raw, fetched_text))
             except Exception as exc:  # noqa: BLE001 - degrade, never crash T2
                 # Unknown score != zero score: defer, never fabricate score=0
                 # (a 0 below min_persist_score gets the vacancy DELETED).

@@ -48,6 +48,7 @@ class WorkItem:
     score_attempts: int = 0
     score_failed: bool = False
     defer_reason: Optional[str] = None
+    defer_input_hash: Optional[str] = None
     fetched_text: Optional[str] = None
     fetch_status: Optional[str] = None
     fetch_attempts: int = 0
@@ -70,6 +71,7 @@ class WorkItem:
             score_attempts=row.get("score_attempts") or 0,
             score_failed=bool(row.get("score_failed")),
             defer_reason=row.get("defer_reason"),
+            defer_input_hash=row.get("defer_input_hash"),
             fetched_text=row.get("fetched_text"),
             fetch_status=row.get("fetch_status"),
             fetch_attempts=row.get("fetch_attempts") or 0,
@@ -348,6 +350,7 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
             conn.commit()
     for col, ddl in (
         ("defer_reason", "defer_reason TEXT"),
+        ("defer_input_hash", "defer_input_hash TEXT"),
         ("fetched_text", "fetched_text TEXT"),
         ("fetch_status", "fetch_status TEXT"),
         ("fetch_attempts", "fetch_attempts INTEGER NOT NULL DEFAULT 0"),
@@ -511,7 +514,7 @@ def update_state(
     """
     ts = now_iso()
     # Any state move resolves a parked item: clear its defer_reason.
-    sets = ["state = %s", "updated_at = %s", "defer_reason = NULL"]
+    sets = ["state = %s", "updated_at = %s", "defer_reason = NULL", "defer_input_hash = NULL"]
     params: list = [new_state, ts]
     if extracted_json is not None:
         sets.append("extracted_json = %s")
@@ -595,24 +598,28 @@ def set_defer_reason(
     *,
     audit_reason: Optional[str] = None,
     reset_attempts: bool = False,
+    input_hash: Optional[str] = None,
 ) -> bool:
     """Park an item (``link_only`` / ``insufficient``) or un-park it (None).
 
     Does NOT spend a score attempt and never touches state or score. With
     ``reset_attempts`` also zeroes score_attempts/score_failed (one-off repair).
-    Writes an audit row only when the reason actually changes. Returns True when
-    something changed.
+    ``input_hash`` (insufficient only) records what the model read, so the item is not
+    re-sent until that input changes. Writes an audit row only when the reason actually
+    changes. Returns True when something changed.
     """
     ts = now_iso()
+    new_hash = input_hash if reason == "insufficient" else None
     try:
         row = conn.execute(
-            "SELECT state, defer_reason, score_attempts, score_failed "
+            "SELECT state, defer_reason, defer_input_hash, score_attempts, score_failed "
             "FROM work_items WHERE id = %s", (item_id,),
         ).fetchone()
         if row is None:
             conn.rollback()
             return False
-        changed = (row["defer_reason"] != reason) or (
+        reason_changed = row["defer_reason"] != reason
+        changed = reason_changed or row["defer_input_hash"] != new_hash or (
             reset_attempts and (row["score_attempts"] or row["score_failed"])
         )
         if not changed:
@@ -620,29 +627,40 @@ def set_defer_reason(
             return False
         if reset_attempts:
             conn.execute(
-                "UPDATE work_items SET defer_reason = %s, score_attempts = 0, "
+                "UPDATE work_items SET defer_reason = %s, defer_input_hash = %s, score_attempts = 0, "
                 "score_failed = FALSE, updated_at = %s WHERE id = %s",
-                (reason, ts, item_id),
+                (reason, new_hash, ts, item_id),
             )
         else:
             conn.execute(
-                "UPDATE work_items SET defer_reason = %s, updated_at = %s WHERE id = %s",
-                (reason, ts, item_id),
+                "UPDATE work_items SET defer_reason = %s, defer_input_hash = %s, updated_at = %s WHERE id = %s",
+                (reason, new_hash, ts, item_id),
             )
-        conn.execute(
-            """
-            INSERT INTO state_transitions
-                (item_id, from_state, to_state, kind, actor, reason, created_at, channel)
-            VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s, 'system')
-            """,
-            (item_id, row["state"], row["state"],
-             audit_reason or f"score parked: {reason}", ts),
-        )
+        if reason_changed or reset_attempts:
+            conn.execute(
+                """
+                INSERT INTO state_transitions
+                    (item_id, from_state, to_state, kind, actor, reason, created_at, channel)
+                VALUES (%s, %s, %s, 'deterministic', 'system', %s, %s, 'system')
+                """,
+                (item_id, row["state"], row["state"],
+                 audit_reason or f"score parked: {reason}", ts),
+            )
     except Exception:
         conn.rollback()
         raise
     conn.commit()
     return True
+
+
+def set_input_hash(conn: psycopg.Connection, item_id: int, input_hash: str) -> None:
+    """Record the scorer-input hash of an already-parked `insufficient` item (one-off
+    repair). Touches nothing else, not even updated_at (the harvest queue order)."""
+    conn.execute(
+        "UPDATE work_items SET defer_input_hash = %s WHERE id = %s AND defer_reason = 'insufficient'",
+        (input_hash, item_id),
+    )
+    conn.commit()
 
 
 def set_url_keys(

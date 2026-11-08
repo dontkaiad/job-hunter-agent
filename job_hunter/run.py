@@ -71,6 +71,11 @@ def parked_line(stats: "pipeline.ScoreRunStats") -> str:
     return f"deferred: link_only {stats.link_only}, insufficient {stats.insufficient}"
 
 
+def insufficient_line(stats: "pipeline.ScoreRunStats") -> str:
+    """Vacancies the model already called `insufficient` and that were NOT re-sent. PURE."""
+    return f"insufficient parked {stats.insufficient_parked} (no re-score)"
+
+
 def fetch_line(stats: "pipeline.ScoreRunStats") -> str:
     """The `fetch: ok N, failed N, denylisted N` ops line. PURE."""
     return (
@@ -83,11 +88,11 @@ def parked_info_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
     """Quiet (non-red) ops lines when items were parked/fetched this run, else
     None. PURE."""
     if not (
-        stats.link_only or stats.insufficient or stats.fetched
+        stats.link_only or stats.insufficient or stats.insufficient_parked or stats.fetched
         or stats.fetch_failed or stats.denylisted or stats.duplicates
     ):
         return None
-    return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + fetch_line(stats) + (
+    return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + insufficient_line(stats) + "\n" + fetch_line(stats) + (
         f"\nduplicates dropped (same vacancy URL): {stats.duplicates}" if stats.duplicates else ""
     )
 
@@ -113,6 +118,7 @@ def scoring_alert_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
         f"error type: {kinds}",
         f"deferred (kept for retry): {stats.deferred}, marked score_failed: {stats.marked_failed}",
         parked_line(stats),
+        insufficient_line(stats),
         fetch_line(stats),
     ]
     if stats.halted:

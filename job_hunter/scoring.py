@@ -206,6 +206,16 @@ def prefilter(extracted: ExtractResult, raw_text: Optional[str] = None) -> Prefi
     return text_prefilter(probe)
 
 
+def input_hash(raw_text: Optional[str], fetched_text: Optional[str] = None) -> str:
+    """Hash of EVERYTHING the scorer would read for a vacancy (post text + fetched page
+    text). PURE. An `insufficient` verdict is only worth re-asking when this changes."""
+    import hashlib
+
+    return hashlib.sha1(
+        f"{raw_text or ''}\x00{fetched_text or ''}".encode("utf-8")
+    ).hexdigest()
+
+
 def clamp_score(value) -> int:
     """Validate + clamp a model score into an int in [0, 100]. PURE.
 

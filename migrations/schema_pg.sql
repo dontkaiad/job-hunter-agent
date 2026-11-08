@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS work_items (
     -- Why scoring is parked WITHOUT being a failure: 'link_only' (stub post, no
     -- text) or 'insufficient' (LLM said the posting lacks content). No attempt spent.
     defer_reason      TEXT,
+    -- sha1 of the scorer's input (raw_text + fetched_text) when the model last judged the
+    -- vacancy `insufficient`: it is NOT sent to the model again until this changes.
+    defer_input_hash  TEXT,
     -- Real page text fetched for a link-only stub (vacancy_fetch.py), its status
     -- (ok|denylisted|no_url|failed) and the number of failed fetch tries.
     fetched_text      TEXT,

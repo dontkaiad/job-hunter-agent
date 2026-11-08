@@ -142,7 +142,11 @@ def test_parked_item_is_unparked_once_scored(conn, fake_fx):
     item_id = _extracted_item(conn, deps)
     pipeline.advance_by_id(conn, item_id, deps=deps)
     assert store.get_item(conn, item_id).defer_reason == "insufficient"
-    pipeline.advance_by_id(conn, item_id, deps=deps)  # retried next harvest
+    # Same input -> NOT retried (see tests/test_insufficient_hash.py); the page text
+    # arriving changes the input, so the next harvest asks the model again.
+    conn.execute("UPDATE work_items SET fetched_text=%s WHERE id=%s", ("The full role description. " * 30, item_id))
+    conn.commit()
+    pipeline.advance_by_id(conn, item_id, deps=deps)
     it = store.get_item(conn, item_id)
     assert it.state != EXTRACTED and it.defer_reason is None
 
