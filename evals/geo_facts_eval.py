@@ -129,7 +129,16 @@ def run_offline() -> Dict[str, Any]:
     }
 
 
-def run_extract(max_usd: float, confirm: bool) -> Dict[str, Any]:
+def _needs_restriction_refresh(facts_json: str) -> bool:
+    """Facts stored before `relocation_restriction` existed, where relocation or a visa was offered."""
+    try:
+        f = json.loads(facts_json)
+    except ValueError:
+        return False
+    return "relocation_restriction" not in f and "offered" in (f.get("relocation_offered"), f.get("visa_sponsorship"))
+
+
+def run_extract(max_usd: float, confirm: bool, refresh_relocation: bool = False) -> Dict[str, Any]:
     from evals.common import live_ctx
     from job_hunter import store
     from job_hunter.clock import now_iso
@@ -138,6 +147,10 @@ def run_extract(max_usd: float, confirm: bool) -> Dict[str, Any]:
     items = labelled_items(ro)
     have = {r["item_id"] for r in ro.execute("SELECT item_id FROM eval_geo_facts").fetchall()}
     todo = [r for r in items if r["item_id"] not in have]
+    if refresh_relocation:
+        stale = {r["item_id"] for r in ro.execute("SELECT item_id, facts_json FROM eval_geo_facts").fetchall()
+                 if _needs_restriction_refresh(r["facts_json"])}
+        todo = [r for r in items if r["item_id"] in stale]
     tool_tokens = est_tokens(json.dumps(geo.GEO_TOOL))
     est = sum(est_call_usd(cfg.cheap_model, geo.GEO_SYSTEM, geo.build_geo_prompt(r["raw_text"], r["fetched_text"]),
                            150, extra_tokens=tool_tokens) for r in todo)
@@ -158,7 +171,8 @@ def run_extract(max_usd: float, confirm: bool) -> Dict[str, Any]:
             outcome[f"error {type(exc).__name__}"] += 1
             continue
         rw.execute("INSERT INTO eval_geo_facts (item_id, facts_json, model, cost_usd, created_at) VALUES (%s,%s,%s,%s,%s) "
-                   "ON CONFLICT (item_id) DO NOTHING",
+                   "ON CONFLICT (item_id) DO " + ("UPDATE SET facts_json=EXCLUDED.facts_json, model=EXCLUDED.model, "
+                   "cost_usd=EXCLUDED.cost_usd, created_at=EXCLUDED.created_at" if refresh_relocation else "NOTHING"),
                    (r["item_id"], json.dumps(facts.to_dict(), ensure_ascii=False), cfg.cheap_model,
                     client.meter.thread_cost(), now_iso()))
         rw.commit()
@@ -200,6 +214,8 @@ def main(argv=None) -> int:
     sub.add_parser("offline")
     e = sub.add_parser("extract")
     add_budget_args(e)
+    e.add_argument("--refresh-relocation", action="store_true",
+                   help="re-extract only stored facts that offer relocation/visa and predate relocation_restriction")
     r = sub.add_parser("report")
     r.add_argument("--split", choices=("dev", "held-out"), required=True)
     r.add_argument("--final", action="store_true")
@@ -208,7 +224,7 @@ def main(argv=None) -> int:
     if a.cmd == "offline":
         report("geo facts (offline)", run_offline())
     elif a.cmd == "extract":
-        report("geo facts: extract", run_extract(a.max_usd, a.confirm))
+        report("geo facts: extract", run_extract(a.max_usd, a.confirm, a.refresh_relocation))
     else:
         report(f"geo facts: guard vs labels ({a.split})", run_report(a.split, a.final, a.allow_repeat))
     return 0

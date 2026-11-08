@@ -249,3 +249,20 @@ def test_wave2_keeps_cards_that_were_already_labelled_and_counts_them():
     assert plain[0]["item_id"] == kept[0]["item_id"] and plain[0]["order_no"] == 1   # stays first
     assert sum(1 for r in w2 if r["item_id"] == kept[0]["item_id"] and not r["is_control"]) == 1   # never picked twice
     assert sorted(r["order_no"] for r in w2) == list(range(1, 66))
+
+
+def test_design_estimate_weights_strata_and_noise():
+    from job_hunter import golden as g
+    rows = ([{"stratum_band": "60-69", "cls": "relevant", "score": 65}] * 3
+            + [{"stratum_band": "60-69", "cls": "irrelevant", "score": 65}] * 1
+            + [{"stratum_band": "25-39", "cls": "relevant", "score": 30}] * 1
+            + [{"stratum_band": "25-39", "cls": "irrelevant", "score": 30}] * 9
+            + [{"stratum_band": "25-39", "cls": "geo", "score": 30}] * 2)
+    sizes = {"60-69": 40, "25-39": 600}
+    e = g.design_estimate(rows, sizes, 60)
+    assert abs(e["precision"] - 0.75) < 1e-9
+    assert 0.2 < e["recall"] < 0.4          # 30 relevant above vs ~50 below
+    lo, hi = g.design_interval(rows, sizes, 60, reps=500)["precision"]
+    assert lo < 0.75 < hi
+    po, k = g.cohen_kappa(["a", "a", "b", "b"], ["a", "b", "b", "b"], ["a", "b"])
+    assert po == 0.75 and 0 < k < 1

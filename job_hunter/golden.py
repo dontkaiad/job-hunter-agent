@@ -275,6 +275,122 @@ def interval(labels: Sequence[Dict[str, Any]], band_sizes: Dict[str, int], *,
     return {"precision_at_60": ci(prec), "recall_at_60": ci(rec)}
 
 
+# --- design-weighted evaluation of the CURRENT scorer ---------------------------------
+
+NO_SCORE = -1.0      # a vacancy the current system parks (insufficient content) is never surfaced
+
+
+def _decided(cls: str, sensitivity: bool) -> Optional[bool]:
+    """True relevant, False irrelevant, None not part of the main metric."""
+    if sensitivity and cls in ("excluded", "other", "unsure"):
+        cls = "irrelevant"
+    return True if cls == "relevant" else False if cls == "irrelevant" else None
+
+
+def _strata(rows: Sequence[Dict[str, Any]], sizes: Dict[str, int]) -> Dict[str, Dict[str, Any]]:
+    """Per sampling band: N (frame size), n (all sampled cards) and the labelled items."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for b in BAND_NAMES:
+        items = [r for r in rows if r["stratum_band"] == b]
+        if items:
+            out[b] = {"N": sizes.get(b, 0), "n": len(items), "items": items}
+    return out
+
+
+def design_cells(rows: Sequence[Dict[str, Any]], sizes: Dict[str, int], threshold: float,
+                 sensitivity: bool = False) -> Dict[str, Any]:
+    """Per stratum, counts of decided items in four cells (relevant/irrelevant x score>=T / <T).
+
+    rows: {stratum_band, cls, score}. Each stratum stands for N_h frame vacancies of which only
+    the DECIDED share (relevant or irrelevant; geo/stale/pay/other/unsure cards are outside the
+    main metric) enters precision and recall, so the stratum's weight is N_h * n_dec / n_h."""
+    cells = {}
+    for b, st in _strata(rows, sizes).items():
+        c = {"rel_hi": 0, "rel_lo": 0, "irr_hi": 0, "irr_lo": 0}
+        for r in st["items"]:
+            d = _decided(r["cls"], sensitivity)
+            if d is None:
+                continue
+            hi = r["score"] >= threshold
+            c[("rel" if d else "irr") + ("_hi" if hi else "_lo")] += 1
+        n_dec = sum(c.values())
+        cells[b] = {**c, "n_dec": n_dec, "N": st["N"], "n": st["n"],
+                    "W": st["N"] * n_dec / st["n"] if st["n"] else 0.0}
+    return cells
+
+
+def _pr_from_cells(totals: Dict[str, float]) -> Tuple[Optional[float], Optional[float]]:
+    hi = totals["rel_hi"] + totals["irr_hi"]
+    rel = totals["rel_hi"] + totals["rel_lo"]
+    return (totals["rel_hi"] / hi if hi > 0 else None, totals["rel_hi"] / rel if rel > 0 else None)
+
+
+def design_estimate(rows, sizes, threshold: float = 60, *, sensitivity: bool = False,
+                    noise: float = 0.0) -> Dict[str, Any]:
+    """Population precision / recall of 'score >= threshold' against the operator's labels.
+
+    `noise` is a symmetric label-flip rate eps: each observed relevant share inside a
+    (stratum, above/below threshold) group is corrected as (p - eps) / (1 - 2 eps), clipped."""
+    cells = design_cells(rows, sizes, threshold, sensitivity)
+    tot = {"rel_hi": 0.0, "rel_lo": 0.0, "irr_hi": 0.0, "irr_lo": 0.0}
+    for c in cells.values():
+        if c["n_dec"] == 0:
+            continue
+        for side in ("hi", "lo"):
+            n_side = c["rel_" + side] + c["irr_" + side]
+            if n_side == 0:
+                continue
+            p = c["rel_" + side] / n_side
+            if noise:
+                p = min(1.0, max(0.0, (p - noise) / (1 - 2 * noise)))
+            mass = c["W"] * n_side / c["n_dec"]
+            tot["rel_" + side] += mass * p
+            tot["irr_" + side] += mass * (1 - p)
+    prec, rec = _pr_from_cells(tot)
+    return {"threshold": threshold, "precision": prec, "recall": rec,
+            "est_relevant_above": tot["rel_hi"], "est_relevant_below": tot["rel_lo"],
+            "est_irrelevant_above": tot["irr_hi"]}
+
+
+def design_interval(rows, sizes, threshold: float = 60, *, sensitivity: bool = False,
+                    reps: int = 3000, seed: int = 20261109) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
+    """95% intervals: each stratum's four cell probabilities get a Jeffreys Dirichlet(count+.5)
+    posterior (a stratum with no relevant card keeps honest uncertainty)."""
+    rnd = random.Random(seed)
+    cells = design_cells(rows, sizes, threshold, sensitivity)
+    prec, rec = [], []
+    for _ in range(reps):
+        tot = {"rel_hi": 0.0, "rel_lo": 0.0, "irr_hi": 0.0, "irr_lo": 0.0}
+        for c in cells.values():
+            if c["n_dec"] == 0:
+                continue
+            draws = {k: rnd.gammavariate(c[k] + 0.5, 1.0) for k in tot}
+            s = sum(draws.values())
+            for k in tot:
+                tot[k] += c["W"] * draws[k] / s
+        p_, r_ = _pr_from_cells(tot)
+        if p_ is not None:
+            prec.append(p_)
+        if r_ is not None:
+            rec.append(r_)
+
+    def ci(v):
+        v = sorted(v)
+        return (v[int(0.025 * len(v))], v[min(len(v) - 1, int(0.975 * len(v)))]) if v else (None, None)
+
+    return {"precision": ci(prec), "recall": ci(rec)}
+
+
+def cohen_kappa(a: Sequence[str], b: Sequence[str], cats: Sequence[str]) -> Tuple[float, float]:
+    """(observed agreement, kappa) of two equally long label lists. PURE."""
+    n = len(a)
+    if n == 0:
+        return (float("nan"), float("nan"))
+    po = sum(x == y for x, y in zip(a, b)) / n
+    pe = sum((list(a).count(k) / n) * (list(b).count(k) / n) for k in cats)
+    return po, ((po - pe) / (1 - pe) if pe < 1 else float("nan"))
+
+
 def pr_curve(labels: Sequence[Dict[str, Any]], band_sizes: Dict[str, int],
              thresholds: Sequence[float] = (25, 40, 50, 60, 70, 80), *, sensitivity: bool = False) -> List[Dict[str, Any]]:
     """Weighted precision/recall by score threshold. Each labelled item stands for
