@@ -487,6 +487,89 @@ def run_rescore_labeled(max_usd: float, confirm: bool, judge_share: float = 0.15
     return {"to_score": len(rows), "done": done, "outcomes": dict(outcome), "cost": client.meter.report()}
 
 
+def run_report(exclude_urls: Optional[str]) -> Dict[str, Any]:
+    """Labels vs the CURRENT scorer (eval_frame). Read-only, no API. Aggregates only."""
+    import collections
+    cfg, _ro = db_ctx()
+    conn, _sel, frame = _frame_with_scores(cfg, exclude_urls)
+    sizes = collections.Counter(f["band"] for f in frame)
+    cur = {r["item_id"]: r for r in conn.execute("SELECT item_id, status, current_score FROM eval_frame").fetchall()}
+    stored = {r["id"]: r["relevance_score"] for r in conn.execute("SELECT id, relevance_score FROM work_items").fetchall()}
+    cards = [dict(r) for r in conn.execute(
+        "SELECT s.id, s.item_id, s.wave, s.stratum, s.band, s.is_control, s.control_of_item, l.label, l.chips "
+        "FROM eval_sample s JOIN eval_labels l ON l.sample_id = s.id ORDER BY s.wave, s.order_no").fetchall()]
+    rows, no_cur = [], 0
+    for c in cards:
+        if c["is_control"] or c["stratum"] != "core":
+            continue
+        f = cur.get(c["item_id"])
+        if f and f["status"] == "scored":
+            score = f["current_score"]
+        elif f and f["status"] == "insufficient":
+            score = golden.NO_SCORE
+        else:
+            score, no_cur = (stored.get(c["item_id"]) or 0.0), no_cur + 1
+        chips = [x for x in (c["chips"] or "").split(",") if x]
+        rows.append({"item_id": c["item_id"], "stratum_band": c["band"], "score": float(score),
+                     "label": c["label"], "chips": chips, "cls": golden.classify(c["label"], chips)})
+    out: Dict[str, Any] = {
+        "note": "design-weighted by the sampling band; frame sizes use the CURRENT-score band (approximation: "
+                "a few vacancies changed band after the re-score)",
+        "labelled_core_vacancies": len(rows), "scored_without_current_score": no_cur,
+        "frame_band_sizes": dict(sizes),
+        "classes": dict(collections.Counter(r["cls"] for r in rows)),
+    }
+    rnd = lambda v: None if v is None else round(v, 3)
+    for name, sens in (("main", False), ("sensitivity_geo_stale_pay_other_count_as_irrelevant", True)):
+        res = {}
+        for t in (50, 55, 60, 65, 70):
+            e = golden.design_estimate(rows, dict(sizes), t, sensitivity=sens)
+            iv = golden.design_interval(rows, dict(sizes), t, sensitivity=sens, reps=1500)
+            res[f"T{t}"] = {"precision": rnd(e["precision"]), "precision_95": [rnd(x) for x in iv["precision"]],
+                            "recall": rnd(e["recall"]), "recall_95": [rnd(x) for x in iv["recall"]]}
+        out[name] = res
+    out["label_noise_precision_recall_at_60"] = {
+        f"flip_{int(eps*100)}pct": {k: rnd(v) for k, v in golden.design_estimate(rows, dict(sizes), 60, noise=eps).items()
+                                    if k in ("precision", "recall")} for eps in (0.0, 0.05, 0.10, 0.15)}
+    # calibration by CURRENT score band (unweighted share among decided; label counts, not a population claim)
+    cal = collections.OrderedDict()
+    for b in BAND_NAMES:
+        grp = [r for r in rows if golden.band_of(r["score"]) == b]
+        dec = [r for r in grp if r["cls"] in ("relevant", "irrelevant")]
+        k = sum(1 for r in dec if r["cls"] == "relevant")
+        lo, hi = golden.wilson(k, len(dec))
+        cal[b] = {"cards": len(grp), "decided": len(dec), "relevant": k,
+                  "share": rnd(k / len(dec)) if dec else None, "wilson_95": [rnd(lo), rnd(hi)]}
+    out["calibration_by_current_score"] = cal
+    # reasons: what the cards at/above 60 and in 50-59 were rejected for
+    def reasons(lo_, hi_):
+        grp = [r for r in rows if lo_ <= r["score"] < hi_]
+        c = collections.Counter()
+        for r in grp:
+            c["yes" if r["label"] == "yes" else "unsure" if r["label"] == "unsure"
+              else ("+".join(sorted(r["chips"])) or "no chip")] += 1
+        return {"cards": len(grp), "by_label_or_chips": dict(c.most_common())}
+    out["reasons_score_60_plus"] = reasons(60, 1000)
+    out["reasons_score_50_59"] = reasons(50, 60)
+    # control pairs -> label noise
+    first = {}
+    for c in cards:
+        if not c["is_control"]:
+            first.setdefault(c["item_id"], c)
+    a3, b3, a2, b2 = [], [], [], []
+    for c in cards:
+        if c["is_control"] and c["control_of_item"] in first:
+            o = first[c["control_of_item"]]
+            a3.append(o["label"]); b3.append(c["label"])
+            if "unsure" not in (o["label"], c["label"]):
+                a2.append(o["label"]); b2.append(c["label"])
+    po3, k3 = golden.cohen_kappa(a3, b3, ("yes", "no", "unsure"))
+    po2, k2 = golden.cohen_kappa(a2, b2, ("yes", "no"))
+    out["label_noise_control_pairs"] = {"pairs": len(a3), "agreement_3class": rnd(po3), "kappa_3class": rnd(k3),
+                                        "pairs_binary": len(a2), "agreement_binary": rnd(po2), "kappa_binary": rnd(k2)}
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -503,6 +586,8 @@ def main(argv=None) -> int:
     w2.add_argument("--exclude-urls", default=None)
     w2.add_argument("--apply", action="store_true")
     sub.add_parser("estimate-labeled")
+    rp = sub.add_parser("report")
+    rp.add_argument("--exclude-urls", default=None)
     rl = sub.add_parser("rescore-labeled")
     rl.add_argument("--judge-share", type=float, default=0.15)
     add_budget_args(rl)
@@ -518,6 +603,8 @@ def main(argv=None) -> int:
         report("golden set: wave 2 re-plan (no API)", run_wave2(a.exclude_urls, a.apply))
     elif a.cmd == "rescore-labeled":
         report("golden set: re-score the labelled vacancies", run_rescore_labeled(a.max_usd, a.confirm, a.judge_share))
+    elif a.cmd == "report":
+        report("golden set: labels vs the current scorer (no API)", run_report(a.exclude_urls))
     elif a.cmd == "estimate-labeled":
         report("golden set: cost of re-scoring the labelled cards (no API)", run_estimate_labeled())
     return 0
