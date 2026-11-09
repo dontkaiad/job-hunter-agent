@@ -842,20 +842,25 @@ class JobHunterBot:
     # --- Ops-channel hooks (Part B) -----------------------------------------
 
     async def on_startup(self) -> None:
-        """aiogram @dp.startup() hook. A normal restart (deploy) is SILENT: the CI run already
-        records it. Ping the ops channel only when a scheduled harvest slot was missed
-        (obs.startup_ping_if_abnormal). SHORT_SHA is baked in at image build time."""
+        """aiogram @dp.startup() hook: ping the ops channel when polling starts (every start,
+        deploys included: the operator wants it). If a scheduled harvest slot was lost to this
+        restart, the same ping says so. SHORT_SHA is injected at image BUILD time (.dockerignore
+        excludes .git); ``tg_logger.send_log`` no-ops when unconfigured and never raises."""
         import os as _os
 
-        from . import obs, serve
+        from . import obs, serve, tg_logger
 
         short_sha = _os.environ.get("GIT_SHA", "unknown")
+        text = f"✅ jobhunter поднялся {short_sha}"
         try:
-            await obs.startup_ping_if_abnormal(
+            missed = obs.missed_slot_note(
                 self.conn, hour=serve.HARVEST_HOUR, minute=serve.HARVEST_MINUTE,
-                tz=serve.resolve_schedule_tz(_os.environ.get("SCHEDULE_TZ")), short_sha=short_sha)
-        except Exception as exc:  # noqa: BLE001 - a status ping must never block startup
+                tz=serve.resolve_schedule_tz(_os.environ.get("SCHEDULE_TZ")))
+            if missed:
+                text += "\n" + missed
+        except Exception as exc:  # noqa: BLE001 - the note is optional; the ping is not
             print(f"[startup] missed-harvest check failed (ignored): {exc!r}", flush=True)
+        await tg_logger.send_log(text)
 
     async def on_error(self, event) -> bool:  # noqa: ANN001
         """aiogram @dp.errors() global handler: report unhandled errors to ops.

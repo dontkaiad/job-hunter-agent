@@ -261,8 +261,8 @@ def _make_bot():
     return b
 
 
-def test_startup_is_silent_on_a_normal_restart(monkeypatch):
-    """A deploy between two harvest slots sends nothing."""
+def test_startup_ping_calls_send_log_with_git_sha(monkeypatch):
+    """on_startup pings ops on EVERY start (deploys included) with the git sha."""
     monkeypatch.setenv("GIT_SHA", "deadbee")
     sent = []
 
@@ -271,8 +271,8 @@ def test_startup_is_silent_on_a_normal_restart(monkeypatch):
 
     monkeypatch.setattr(tg_logger, "send_log", fake_send_log)
     b = _make_bot()
-    asyncio.run(b.on_startup())     # empty DB: no heartbeat baseline -> no alert
-    assert sent == []
+    asyncio.run(b.on_startup())     # empty DB: no baseline, so no missed-slot line
+    assert sent == ["✅ jobhunter поднялся deadbee"]
 
 
 def test_missed_harvest_slot_pure():

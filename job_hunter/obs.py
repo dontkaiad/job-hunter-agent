@@ -266,10 +266,9 @@ def missed_harvest_slot(last_harvest_at, now, hour: int, minute: int, tz):
     return slot if last_harvest_at < slot else None
 
 
-async def startup_ping_if_abnormal(conn, *, hour: int, minute: int, tz, short_sha: str, now=None) -> Optional[str]:
-    """A normal container restart (deploy) is silent. Ping ops only if a scheduled harvest slot
-    passed without a completed harvest (the restart ate the run, or the container was down over
-    it). Paused harvest and a missing baseline never alert."""
+def missed_slot_note(conn, *, hour: int, minute: int, tz, now=None) -> Optional[str]:
+    """One extra line for the startup ping when a scheduled harvest slot passed without a completed
+    harvest (the restart ate it). None on a normal restart, on pause, and with no baseline."""
     from . import store
 
     paused, _ = store.get_pipeline_pause_state(conn)
@@ -278,10 +277,7 @@ async def startup_ping_if_abnormal(conn, *, hour: int, minute: int, tz, short_sh
     slot = missed_harvest_slot(store.get_last_harvest_at(conn), now if now is not None else now_utc(), hour, minute, tz)
     if slot is None:
         return None
-    msg = (f"⚠️ jobhunter поднялся {short_sha}: плановый харвест {slot.strftime('%Y-%m-%d %H:%M')} "
-           f"не выполнен (рестарт или простой на момент запуска)")
-    await tg_logger.send_log(msg)
-    return msg
+    return f"⚠️ плановый харвест {slot.strftime('%Y-%m-%d %H:%M')} не выполнен; догоняющий запуск, если слот не старше 12 ч"
 
 
 async def check_harvest_staleness(
