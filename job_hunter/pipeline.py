@@ -138,6 +138,9 @@ class Deps:
     corridor_lo: int = 40
     corridor_hi: int = 60
     surface_threshold: int = 50
+    # Score prompt version (llm.SCORE_PROMPT_VERSIONS). Config default is v2 (live); this dataclass
+    # default stays v1 so a bare Deps() is the old behaviour. Roll back with SCORE_PROMPT_VERSION=v1.
+    score_prompt_version: str = "v1"
     # Geo guard: on only when explicitly enabled AND the private profile carries eligibility
     # constraints (profile.eligibility). Off by default so tests / the public example are inert.
     geo_guard: bool = False
@@ -585,6 +588,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                     deps.llm_client, extracted, raw, model=deps.cheap_model,
                     profile=deps.profile,
                     fetched_text=fetched_text,
+                    prompt_version=deps.score_prompt_version,
                 )
                 haiku_score = scoring.clamp_score(verdict["score"])
                 haiku_reasoning = verdict.get("reasoning", "")
@@ -598,6 +602,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                             deps.llm_client, extracted, raw,
                             model=deps.judge_model, profile=deps.profile,
                             fetched_text=fetched_text,
+                            prompt_version=deps.score_prompt_version,
                         )
                         score = scoring.clamp_score(judge_verdict["score"])
                         reasoning = judge_verdict.get("reasoning", "")

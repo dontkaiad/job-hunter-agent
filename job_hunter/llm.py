@@ -1214,7 +1214,8 @@ def llm_score(
             temperature=SCORE_TEMPERATURE,
         )
         return parse_score_tool_input(data)
-    system = build_score_system(profile) if profile is not None else SCORE_SYSTEM
+    system = (build_score_system(profile, version=prompt_version) if profile is not None
+              else build_score_system(example_profile(), version=prompt_version))
     text = client.complete(
         system,
         build_score_prompt(extracted, raw_text, fetched_text),

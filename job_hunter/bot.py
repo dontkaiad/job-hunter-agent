@@ -1381,6 +1381,7 @@ def build_deps(cfg: Config) -> Deps:
         corridor_lo=cfg.score_corridor_lo, corridor_hi=cfg.score_corridor_hi,
         surface_threshold=cfg.surface_threshold,
         geo_guard=cfg.geo_guard,
+        score_prompt_version=cfg.score_prompt_version,
         profile=profile,
         min_persist_score=cfg.min_persist_score,
         score_max_attempts=cfg.score_max_attempts,

@@ -543,3 +543,26 @@ def test_scoring_alert_text_thresholds():
                                      skipped_halted=30, kinds={pipeline.FAIL_FATAL: 1})
     text = scoring_alert_text(credits)
     assert "credits/auth" in text and "HALTED" in text and "30" in text
+
+
+def test_score_prompt_version_is_switchable_per_deps(conn, fake_llm, fake_fx):
+    """SCORE_PROMPT_VERSION: v1 (bare Deps default) vs v2 (config default) reach the model."""
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 85, "Обоснование": "good"}')
+    for version, expect in (("v1", False), ("v2", True)):
+        fake_llm.calls.clear()
+        deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, score_prompt_version=version)
+        item_id = _insert(conn, GOOD_POST + f" {version}", mid=version)
+        pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
+        pipeline.advance_by_id(conn, item_id, deps=deps)  # score
+        systems = [c["system"] for c in fake_llm.calls if "hiring-fit JUDGE" in c["system"]]
+        assert systems and all(("LOCATION IS NOT SCORED" in s) is expect for s in systems)
+
+
+def test_config_score_prompt_version_default_and_rollback():
+    import pytest
+    from job_hunter.config import load_config
+
+    assert load_config({}).score_prompt_version == "v2"
+    assert load_config({"SCORE_PROMPT_VERSION": "v1"}).score_prompt_version == "v1"
+    with pytest.raises(ValueError):
+        load_config({"SCORE_PROMPT_VERSION": "v9"})

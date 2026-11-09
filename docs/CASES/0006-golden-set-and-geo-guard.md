@@ -107,6 +107,37 @@ dev only.
 
 Cost of the whole phase: re-scoring the labelled cards $0.75, geo facts $0.33 + $0.01.
 
+## Follow-up: score prompt v1 → v2 (not proven; enabled by the owner's decision; monitored)
+
+**What changed in v2** (`job_hunter/llm.py`, `SCORE_PROMPT_VERSIONS`): location, remote scope,
+relocation, visa and timezone are not scored (the geo guard decides them), and an unstated salary is
+not a reason to lower the score. The location wording was also removed from the calibration anchors
+(same four numeric levels). Hypotheses about thin postings and seniority were deliberately left out
+to isolate the effect. Public diff: `python -m evals.score_prompt_eval diff`.
+
+**Design.** Dev split only (86 vacancies; 75 paired core cards after 5 `insufficient` and 6 without a
+stored v1 score). "Before" = the stored v1 score from the same judge corridor [50, 70]; "after" = v2
+with that corridor, so only the prompt differs. Held-out was not used. Cost $0.80, 110 calls.
+
+| Dev, threshold 50 | v1 | v2 |
+|---|---|---|
+| precision, unweighted (decided cards) | 0.61 | 0.55 |
+| recall, unweighted | 0.74 | 0.84 |
+| precision, design-weighted (95 %) | 0.60 (0.23–0.83) | 0.54 (0.23–0.77) |
+| recall, design-weighted (95 %) | 0.26 (0.12–0.62) | 0.27 (0.14–0.66) |
+
+Across the threshold: of 5 relevant cards below 50, **2 rose above it**; of 20 irrelevant cards below
+50, **4 rose above it**; none fell below. Mean shift: relevant +9.0, others −0.8. Relevant share in
+the 70–79 band 9/15 (v1 4/8); the 50–59 band thinned out (2/7 against 7/12).
+
+**Verdict: not proven.** v2 moves relevant cards up more than irrelevant ones, but the weighted
+precision and recall are indistinguishable (intervals overlap almost entirely) and n is small; the
+two changes are not separated. **Enabled in production by the owner's decision** (a missed vacancy
+costs more than an extra card), through `SCORE_PROMPT_VERSION` (default `v2`; rollback =
+set `SCORE_PROMPT_VERSION=v1`, one variable). To be watched: share of surfaced cards the operator
+rejects for fit/seniority, and the new decisions captured as labels (see the dashboard-label
+mechanism) as the check on whether precision dropped.
+
 ## Limitations
 
 - **One labeller, κ ≈ 0.34–0.44.** The "ground truth" is itself noisy; recall in particular

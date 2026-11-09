@@ -49,6 +49,9 @@ class Config:
     # Surface threshold T: relevance_score >= T is surfaced. Moved 60 -> 50 after the golden
     # report (docs/CASES/0006): the 50-59 band is as relevant as 70-79. Corridor follows T.
     surface_threshold: int = 50
+    # Score prompt: v2 = location / relocation / visa / timezone and a missing salary are NOT scored
+    # (docs/CASES/0006). Roll back by setting SCORE_PROMPT_VERSION=v1: one variable, no deploy of code.
+    score_prompt_version: str = "v2"
     # Geo guard (geo.py): on when the private profile has `eligibility` constraints.
     geo_guard: bool = True
 
@@ -262,6 +265,10 @@ def load_config(env: Optional[dict] = None) -> Config:
     score_corridor_lo = int(get("SCORE_CORRIDOR_LO") or 40)
     score_corridor_hi = int(get("SCORE_CORRIDOR_HI") or 60)
     surface_threshold = int(get("SURFACE_THRESHOLD") or 50)
+    score_prompt_version = (get("SCORE_PROMPT_VERSION") or "v2").lower()
+    from .llm import SCORE_PROMPT_VERSIONS  # local: llm imports config-free modules only
+    if score_prompt_version not in SCORE_PROMPT_VERSIONS:
+        raise ValueError(f"SCORE_PROMPT_VERSION must be one of {SCORE_PROMPT_VERSIONS}, got {score_prompt_version!r}")
 
     return Config(
         anthropic_api_key=get("ANTHROPIC_API_KEY") or None,
@@ -271,6 +278,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         score_corridor_lo=score_corridor_lo,
         score_corridor_hi=score_corridor_hi,
         surface_threshold=surface_threshold,
+        score_prompt_version=score_prompt_version,
         geo_guard=(get("GEO_GUARD") or "1").lower() not in ("0", "false", "no", "off"),
         ingest_mode=(get("INGEST_MODE") or "web").lower(),
         telegram_api_id=_int_or_none(get("TELEGRAM_API_ID")),
