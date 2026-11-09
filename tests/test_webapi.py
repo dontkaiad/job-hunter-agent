@@ -910,3 +910,30 @@ def test_pause_toggle_sends_nothing_without_a_bot_config(client, conn, monkeypat
     monkeypatch.setattr(socket.socket, "connect", boom)   # the TestClient itself is in-process
     assert client.post("/api/pipeline-status", json={"paused": True}).status_code == 200
     assert client.post("/api/pipeline-status", json={"paused": False}).status_code == 200
+
+
+# --- operator decisions become golden-set labels -----------------------------
+
+_BROWSER = {"origin": "https://dash.example"}
+
+
+def test_dashboard_approve_and_reject_become_labels_with_a_frozen_copy(client, conn):
+    a = _seed(conn, state=SURFACED, score=72, extracted=_extracted())
+    r = _seed(conn, state=SURFACED, score=58, extracted=_extracted())
+    assert client.post(f"/api/items/{a}/approve", headers=_BROWSER).status_code == 200
+    assert client.post(f"/api/items/{r}/reject", headers=_BROWSER, json={"chips": ["geo", "fit"]}).status_code == 200
+    rows = {x["item_id"]: x for x in conn.execute("SELECT * FROM eval_decision_labels").fetchall()}
+    assert rows[a]["label"] == "yes" and rows[a]["decision"] == "approve" and rows[a]["channel"] == "dashboard"
+    assert rows[r]["label"] == "no" and set(rows[r]["chips"].split(",")) == {"geo", "fit"}
+    assert rows[a]["score"] == 72 and rows[a]["state_before"] == "surfaced" and rows[a]["decided_at"]
+    frozen = {x["item_id"]: x for x in conn.execute("SELECT * FROM eval_vacancies").fetchall()}
+    assert frozen[a]["raw_text"] == "raw job text" and frozen[a]["origin"] == "decision"
+    # deleting the vacancy (harvest purge) leaves the label and its frozen copy intact
+    store.delete_item(conn, a)
+    assert conn.execute("SELECT count(*) n FROM eval_vacancies WHERE item_id=%s", (a,)).fetchone()["n"] == 1
+
+
+def test_only_dashboard_decisions_are_captured(client, conn):
+    i = _seed(conn, state=SURFACED, score=70, extracted=_extracted())
+    assert client.post(f"/api/items/{i}/approve").status_code == 200       # no browser headers -> channel 'api'
+    assert conn.execute("SELECT count(*) n FROM eval_decision_labels").fetchone()["n"] == 0

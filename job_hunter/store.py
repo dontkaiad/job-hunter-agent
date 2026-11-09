@@ -905,6 +905,48 @@ def set_skip_reasons(
     conn.commit()
 
 
+DECISION_LABEL_CHANNELS = ("dashboard",)
+
+
+def record_decision_label(
+    conn: psycopg.Connection, item: "WorkItem", *, decision: str, chips: List[str], channel: str,
+    actor_id: Optional[str], state_before: str, score_prompt_version: Optional[str] = None,
+    surface_threshold: Optional[int] = None,
+) -> bool:
+    """Capture an operator decision as a golden-set label (eval-only tables; never read by the pipeline).
+
+    approve -> 'yes'; reject -> 'no' (+ the reason chips). Only decisions made in the dashboard count
+    (DECISION_LABEL_CHANNELS). The vacancy text, extraction, score and geo facts are frozen in
+    eval_vacancies at that moment, so later purges cannot erode the label. Best effort: returns
+    False (and never raises) when nothing was recorded."""
+    if channel not in DECISION_LABEL_CHANNELS or decision not in ("approve", "reject"):
+        return False
+    ts = now_iso()
+    try:
+        conn.execute(
+            """INSERT INTO eval_vacancies (item_id, source_channel, source_link, raw_text, fetched_text, extracted_json,
+                   stored_score, posted_at, created_at, geo_facts_json, geo_verdict, copied_at, origin)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'decision') ON CONFLICT (item_id) DO NOTHING""",
+            (item.id, item.source_channel, item.source_link, item.raw_text, item.fetched_text, item.extracted_json,
+             item.relevance_score, item.posted_at, item.created_at, item.geo_facts, item.geo_verdict, ts))
+        conn.execute(
+            """INSERT INTO eval_decision_labels (item_id, label, chips, decision, channel, actor_id, state_before, score,
+                   geo_verdict, score_prompt_version, surface_threshold, decided_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (item.id, "yes" if decision == "approve" else "no", ",".join(chips or []), decision, channel,
+             None if actor_id is None else str(actor_id), state_before, item.relevance_score, item.geo_verdict,
+             score_prompt_version, surface_threshold, ts))
+        conn.commit()
+        return True
+    except Exception as exc:  # noqa: BLE001 - label capture must never break the decision itself
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"[label] decision label not recorded for id={item.id}: {exc!r}", flush=True)
+        return False
+
+
 SHADOW_SALT = "shadow-v1"
 
 

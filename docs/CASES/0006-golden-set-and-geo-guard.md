@@ -138,6 +138,16 @@ set `SCORE_PROMPT_VERSION=v1`, one variable). To be watched: share of surfaced c
 rejects for fit/seniority, and the new decisions captured as labels (see the dashboard-label
 mechanism) as the check on whether precision dropped.
 
+### Live labels: the operator's own decisions
+
+From 2026-11-09 every dashboard «Одобрить» / «Отклонить» (with reason chips) is also written to
+`eval_decision_labels` (approve → yes, reject → no + chips) with provenance (channel, actor, state,
+score shown, geo verdict, score prompt version, threshold) and the vacancy is frozen in
+`eval_vacancies` (`origin = 'decision'`). No API calls. Aggregates: `python -m evals.golden_eval decisions`.
+These labels cover only cards that were surfaced: they measure the **precision of what was shown**
+(useful to see whether v2 / T = 50 made it worse) and cannot measure recall; the stratified,
+blind golden set stays the instrument for that.
+
 ## Limitations
 
 - **One labeller, κ ≈ 0.34–0.44.** The "ground truth" is itself noisy; recall in particular

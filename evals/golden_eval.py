@@ -513,6 +513,30 @@ def run_snapshot() -> Dict[str, Any]:
                 "SELECT item_id FROM eval_vacancies").fetchall()})}
 
 
+def run_decisions() -> Dict[str, Any]:
+    """Aggregates of the operator's dashboard decisions captured as labels (no API, no texts)."""
+    cfg, ro = db_ctx()
+    rows = [dict(r) for r in ro.execute(
+        "SELECT item_id, label, chips, geo_verdict, score, score_prompt_version, decided_at FROM eval_decision_labels "
+        "ORDER BY id").fetchall()]
+    latest = {r["item_id"]: r for r in rows}                    # the last decision per vacancy wins
+    out: Dict[str, Any] = {"decisions": len(rows), "vacancies": len(latest),
+                           "note": "surfaced cards only: measures the precision of what was shown, never recall"}
+    for ver in sorted({r["score_prompt_version"] or "unknown" for r in latest.values()}):
+        g = [r for r in latest.values() if (r["score_prompt_version"] or "unknown") == ver]
+        yes = sum(1 for r in g if r["label"] == "yes")
+        out[f"prompt_{ver}"] = {"vacancies": len(g), "approved": yes, "rejected": len(g) - yes,
+                                "approved_share": round(yes / len(g), 3) if g else None}
+    chips = collections.Counter(c for r in latest.values() if r["label"] == "no" for c in (r["chips"] or "").split(",") if c)
+    out["reject_chips"] = dict(chips.most_common())
+    out["by_geo_verdict"] = {v or "not_checked": collections.Counter(r["label"] for r in latest.values()
+                                                                    if (r["geo_verdict"] or None) == v)
+                             for v in {r["geo_verdict"] for r in latest.values()}}
+    out["by_geo_verdict"] = {k: dict(v) for k, v in out["by_geo_verdict"].items()}
+    out["frozen_copies"] = ro.execute("SELECT count(*) AS n FROM eval_vacancies WHERE origin = 'decision'").fetchone()["n"]
+    return out
+
+
 def run_report(exclude_urls: Optional[str]) -> Dict[str, Any]:
     """Labels vs the CURRENT scorer (eval_frame). Read-only, no API. Aggregates only."""
     import collections
@@ -613,6 +637,7 @@ def main(argv=None) -> int:
     w2.add_argument("--apply", action="store_true")
     sub.add_parser("estimate-labeled")
     sub.add_parser("snapshot")
+    sub.add_parser("decisions")
     rp = sub.add_parser("report")
     rp.add_argument("--exclude-urls", default=None)
     rl = sub.add_parser("rescore-labeled")
@@ -630,6 +655,8 @@ def main(argv=None) -> int:
         report("golden set: wave 2 re-plan (no API)", run_wave2(a.exclude_urls, a.apply))
     elif a.cmd == "rescore-labeled":
         report("golden set: re-score the labelled vacancies", run_rescore_labeled(a.max_usd, a.confirm, a.judge_share))
+    elif a.cmd == "decisions":
+        report("golden set: dashboard decisions captured as labels (no API)", run_decisions())
     elif a.cmd == "snapshot":
         report("golden set: snapshot of the labelled vacancies (no API)", run_snapshot())
     elif a.cmd == "report":

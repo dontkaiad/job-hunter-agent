@@ -707,6 +707,16 @@ def _apply_decision(
     return _build_item_detail(conn, updated, fx)
 
 
+def _capture_label(conn, before, decision: str, chips: List[str], actor: "Actor", deps: Deps) -> None:
+    """The operator's decision becomes a golden-set label (store.record_decision_label). Never raises."""
+    if before is None:
+        return
+    store.record_decision_label(
+        conn, before, decision=decision, chips=chips, channel=actor.channel, actor_id=actor.actor_id,
+        state_before=before.state, score_prompt_version=getattr(deps, "score_prompt_version", None),
+        surface_threshold=getattr(deps, "surface_threshold", None))
+
+
 @writer_router.post("/items/{item_id}/approve", response_model=ItemDetail)
 def approve_item(
     item_id: int,
@@ -719,7 +729,10 @@ def approve_item(
 
     ONLY the approve transition (split from auto-draft; see module note). The
     item ends in 'approved'; call POST /draft next to generate the отклик."""
-    return _apply_decision(conn, item_id, DECISION_APPROVE, fx, deps, actor=actor)
+    before = store.get_item(conn, item_id)
+    detail = _apply_decision(conn, item_id, DECISION_APPROVE, fx, deps, actor=actor)
+    _capture_label(conn, before, "approve", [], actor, deps)
+    return detail
 
 
 @writer_router.post("/items/{item_id}/skip", response_model=ItemDetail)
@@ -748,10 +761,12 @@ def reject_item(
     transition) and optional reason chips (skip_reasons). ``skipped`` therefore
     means exactly "rejected at the entry gate". ``/skip`` stays as a bare alias."""
     reason = (body.reason or "").strip() or None
+    before = store.get_item(conn, item_id)
     detail = _apply_decision(conn, item_id, DECISION_SKIP, fx, deps, reason=reason, actor=actor)
     chips = skip_reasons_mod.normalize(body.chips or [])
     if chips:
         store.set_skip_reasons(conn, item_id, chips, "dashboard")
+    _capture_label(conn, before, "reject", chips, actor, deps)
     return detail
 
 

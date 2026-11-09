@@ -125,6 +125,27 @@ CREATE TABLE IF NOT EXISTS eval_vacancies (
     stored_score   DOUBLE PRECISION, posted_at TEXT, created_at TEXT,
     geo_facts_json TEXT, v1_status TEXT, v1_score DOUBLE PRECISION, copied_at TEXT
 );
+ALTER TABLE eval_vacancies ADD COLUMN IF NOT EXISTS origin TEXT;        -- sample | decision
+ALTER TABLE eval_vacancies ADD COLUMN IF NOT EXISTS geo_verdict TEXT;
+-- eval_decision_labels: the operator's own approve / reject decisions (dashboard) captured as labels
+-- for future golden sets, with provenance. NOT a random sample: only cards that were surfaced get a
+-- decision, so these measure precision of what was shown, never recall. The vacancy itself is frozen
+-- in eval_vacancies (origin = 'decision') at decision time.
+CREATE TABLE IF NOT EXISTS eval_decision_labels (
+    id                   SERIAL PRIMARY KEY,
+    item_id              INTEGER NOT NULL,
+    label                TEXT NOT NULL CHECK (label IN ('yes', 'no')),   -- approve -> yes, reject -> no
+    chips                TEXT NOT NULL DEFAULT '',                       -- skip_reasons codes (reject only)
+    decision             TEXT NOT NULL,                                  -- approve | reject
+    channel              TEXT NOT NULL,                                  -- dashboard
+    actor_id             TEXT,
+    state_before         TEXT,
+    score                DOUBLE PRECISION,                               -- relevance_score the card showed
+    geo_verdict          TEXT,
+    score_prompt_version TEXT,
+    surface_threshold    INTEGER,
+    decided_at           TEXT NOT NULL
+);
 -- eval_prompt_scores: paired scores of the labelled vacancies under a score-prompt version
 -- (evals/score_prompt_eval.py). Eval-only; never read by the pipeline.
 CREATE TABLE IF NOT EXISTS eval_prompt_scores (
