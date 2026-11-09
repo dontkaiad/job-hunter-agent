@@ -12,13 +12,14 @@ reproduce**.
 | [0003](0003-postmortem-2026-10-credit-outage.md) | Postmortem: credit outage → deleted vacancies | postmortem | regression tests |
 | [0004](0004-link-only-fetch.md) | Link-only stubs: fetching the linked page | eval | `evals/link_fetch_eval.py` |
 | [0005](0005-heuristic-vs-model-extract.md) | Heuristic vs model extract on the shadow sample (n = 21) | eval + fix | `scripts/oneoff/reextract_fallback.py` |
+| [0006](0006-golden-set-and-geo-guard.md) | Golden set: precision/recall of the score, calibration, geo guard | eval | `evals/golden_eval.py`, `evals/geo_facts_eval.py` |
 
 For the general method (what an eval is, how to choose a metric) see
 [../EVALS.md](../EVALS.md).
 
 ## What these evals do not measure
 
-**Scoring relevance.** There is no golden set. 0001–0004 measure repeatability,
+**Scoring relevance** is measured only in 0006 (one labeller, n = 115). 0001–0004 measure repeatability,
 parseability and text recovery — not whether a 72 is the right score. The planned
 next eval compares the score against the operator's real approve / skip decisions
 recorded in the DB.

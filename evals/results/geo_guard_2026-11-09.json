@@ -1,0 +1,102 @@
+{
+  "note": "rules (relocation restriction, regional remote -> unknown, whole-word matching) were fixed BEFORE the held-out look; held-out viewed once with --final",
+  "dev": {
+    "split": "dev",
+    "vacancies": 87,
+    "as_labelled": {
+      "geo_chip": {
+        "n": 29,
+        "cut": 10,
+        "eligible": 9,
+        "unknown": 10
+      },
+      "yes": {
+        "n": 21,
+        "wrongly_cut": 3,
+        "eligible": 8,
+        "unknown": 10
+      },
+      "other_no": {
+        "n": 37,
+        "cut": 13,
+        "eligible": 16,
+        "unknown": 8
+      },
+      "unknown_share": 0.322
+    },
+    "without_acknowledged_label_errors": {
+      "excluded": 3,
+      "geo_chip": {
+        "n": 29,
+        "cut": 10,
+        "eligible": 9,
+        "unknown": 10
+      },
+      "yes": {
+        "n": 18,
+        "wrongly_cut": 0,
+        "eligible": 8,
+        "unknown": 10
+      },
+      "other_no": {
+        "n": 37,
+        "cut": 13,
+        "eligible": 16,
+        "unknown": 8
+      },
+      "unknown_share": 0.333
+    }
+  },
+  "held_out": {
+    "split": "held-out",
+    "vacancies": 33,
+    "looked_once": true,
+    "as_labelled": {
+      "geo_chip": {
+        "n": 11,
+        "cut": 6,
+        "eligible": 3,
+        "unknown": 2
+      },
+      "yes": {
+        "n": 10,
+        "wrongly_cut": 2,
+        "eligible": 5,
+        "unknown": 3
+      },
+      "other_no": {
+        "n": 12,
+        "cut": 1,
+        "eligible": 3,
+        "unknown": 8
+      },
+      "unknown_share": 0.394
+    },
+    "without_acknowledged_label_errors": {
+      "excluded": 1,
+      "geo_chip": {
+        "n": 11,
+        "cut": 6,
+        "eligible": 3,
+        "unknown": 2
+      },
+      "yes": {
+        "n": 9,
+        "wrongly_cut": 1,
+        "eligible": 5,
+        "unknown": 3
+      },
+      "other_no": {
+        "n": 12,
+        "cut": 1,
+        "eligible": 3,
+        "unknown": 8
+      },
+      "unknown_share": 0.406
+    }
+  },
+  "spend_usd": {
+    "facts_120_calls": 0.3273,
+    "refresh_5_calls": 0.0145
+  }
+}

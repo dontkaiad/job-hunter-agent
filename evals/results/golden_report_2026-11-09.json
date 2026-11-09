@@ -1,0 +1,267 @@
+{
+  "note": "design-weighted by the sampling band; frame sizes use the CURRENT-score band (approximation: a few vacancies changed band after the re-score)",
+  "labelled_core_vacancies": 115,
+  "scored_without_current_score": 0,
+  "frame_band_sizes": {
+    "25-39": 1170,
+    "50-59": 36,
+    "40-49": 139,
+    "70-79": 145,
+    "<25": 164,
+    "80+": 20,
+    "60-69": 3
+  },
+  "classes": {
+    "irrelevant": 42,
+    "relevant": 31,
+    "excluded": 39,
+    "unsure": 1,
+    "other": 2
+  },
+  "main": {
+    "T50": {
+      "precision": 0.619,
+      "precision_95": [
+        0.268,
+        0.812
+      ],
+      "recall": 0.244,
+      "recall_95": [
+        0.136,
+        0.573
+      ]
+    },
+    "T55": {
+      "precision": 0.562,
+      "precision_95": [
+        0.206,
+        0.819
+      ],
+      "recall": 0.173,
+      "recall_95": [
+        0.092,
+        0.485
+      ]
+    },
+    "T60": {
+      "precision": 0.565,
+      "precision_95": [
+        0.214,
+        0.822
+      ],
+      "recall": 0.169,
+      "recall_95": [
+        0.086,
+        0.481
+      ]
+    },
+    "T65": {
+      "precision": 0.564,
+      "precision_95": [
+        0.21,
+        0.817
+      ],
+      "recall": 0.168,
+      "recall_95": [
+        0.086,
+        0.478
+      ]
+    },
+    "T70": {
+      "precision": 0.564,
+      "precision_95": [
+        0.21,
+        0.817
+      ],
+      "recall": 0.168,
+      "recall_95": [
+        0.086,
+        0.478
+      ]
+    }
+  },
+  "sensitivity_geo_stale_pay_other_count_as_irrelevant": {
+    "T50": {
+      "precision": 0.302,
+      "precision_95": [
+        0.177,
+        0.583
+      ],
+      "recall": 0.244,
+      "recall_95": [
+        0.133,
+        0.58
+      ]
+    },
+    "T55": {
+      "precision": 0.264,
+      "precision_95": [
+        0.134,
+        0.608
+      ],
+      "recall": 0.173,
+      "recall_95": [
+        0.09,
+        0.53
+      ]
+    },
+    "T60": {
+      "precision": 0.262,
+      "precision_95": [
+        0.135,
+        0.601
+      ],
+      "recall": 0.169,
+      "recall_95": [
+        0.089,
+        0.509
+      ]
+    },
+    "T65": {
+      "precision": 0.261,
+      "precision_95": [
+        0.142,
+        0.609
+      ],
+      "recall": 0.168,
+      "recall_95": [
+        0.088,
+        0.515
+      ]
+    },
+    "T70": {
+      "precision": 0.261,
+      "precision_95": [
+        0.142,
+        0.609
+      ],
+      "recall": 0.168,
+      "recall_95": [
+        0.088,
+        0.515
+      ]
+    }
+  },
+  "label_noise_precision_recall_at_60": {
+    "flip_0pct": {
+      "precision": 0.565,
+      "recall": 0.169
+    },
+    "flip_5pct": {
+      "precision": 0.564,
+      "recall": 0.195
+    },
+    "flip_10pct": {
+      "precision": 0.564,
+      "recall": 0.244
+    },
+    "flip_15pct": {
+      "precision": 0.562,
+      "recall": 0.358
+    }
+  },
+  "calibration_by_current_score": {
+    "<25": {
+      "cards": 18,
+      "decided": 9,
+      "relevant": 2,
+      "share": 0.222,
+      "wilson_95": [
+        0.063,
+        0.547
+      ]
+    },
+    "25-39": {
+      "cards": 34,
+      "decided": 23,
+      "relevant": 6,
+      "share": 0.261,
+      "wilson_95": [
+        0.125,
+        0.465
+      ]
+    },
+    "40-49": {
+      "cards": 12,
+      "decided": 9,
+      "relevant": 2,
+      "share": 0.222,
+      "wilson_95": [
+        0.063,
+        0.547
+      ]
+    },
+    "50-59": {
+      "cards": 22,
+      "decided": 18,
+      "relevant": 12,
+      "share": 0.667,
+      "wilson_95": [
+        0.437,
+        0.837
+      ]
+    },
+    "60-69": {
+      "cards": 2,
+      "decided": 1,
+      "relevant": 1,
+      "share": 1.0,
+      "wilson_95": [
+        0.207,
+        1.0
+      ]
+    },
+    "70-79": {
+      "cards": 21,
+      "decided": 10,
+      "relevant": 5,
+      "share": 0.5,
+      "wilson_95": [
+        0.237,
+        0.763
+      ]
+    },
+    "80+": {
+      "cards": 6,
+      "decided": 3,
+      "relevant": 3,
+      "share": 1.0,
+      "wilson_95": [
+        0.438,
+        1.0
+      ]
+    }
+  },
+  "reasons_score_60_plus": {
+    "cards": 29,
+    "by_label_or_chips": {
+      "geo": 10,
+      "yes": 9,
+      "stale": 4,
+      "seniority": 2,
+      "fit": 2,
+      "geo+stale": 1,
+      "fit+geo": 1
+    }
+  },
+  "reasons_score_50_59": {
+    "cards": 22,
+    "by_label_or_chips": {
+      "yes": 12,
+      "fit": 4,
+      "geo": 2,
+      "geo+stale": 1,
+      "stale": 1,
+      "fit+geo": 1,
+      "fit+seniority": 1
+    }
+  },
+  "label_noise_control_pairs": {
+    "pairs": 15,
+    "agreement_3class": 0.8,
+    "kappa_3class": 0.338,
+    "pairs_binary": 14,
+    "agreement_binary": 0.857,
+    "kappa_binary": 0.44
+  }
+}
