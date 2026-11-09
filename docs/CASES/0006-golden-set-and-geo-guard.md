@@ -12,11 +12,11 @@
 Cases 0001–0005 measured repeatability and parseability, not whether a score is *right*.
 This case compares the current scorer with one operator's labels on 115 vacancies.
 
-- **Precision@60 ≈ 0.56** (95 %: 0.21–0.82) and **recall@60 ≈ 0.17** (0.09–0.48). The
+- **Precision@60 ≈ 0.565** (95 %: 0.214–0.822) and **recall@60 ≈ 0.169** (0.086–0.481). The
   intervals are wide; the point estimates are not a claim of accuracy.
 - **Score 50–59 is as relevant as 70–79**: 12 of 18 decided cards (67 %, 0.44–0.84) against
-  5 of 10 (50 %). Moving the threshold 60 → 50 gives precision 0.62 (0.27–0.81) and recall
-  0.24 (0.14–0.57). It was moved (separate, revertible commit; the judge corridor follows: [40, 60]).
+  5 of 10 (50 %). Moving the threshold 60 → 50 gives precision 0.619 (0.268–0.812) and recall
+  0.244 (0.136–0.573). It was moved (separate, revertible commit; the judge corridor follows: [40, 60]).
 - Of 20 rejected cards at score ≥ 60, **15 were rejected only for geography, staleness or both**,
   things the scorer cannot see from text: hence the deterministic geo guard.
 - The operator's label noise is high (κ 0.34 over three classes, 0.44 binary, 15 control pairs).
@@ -53,32 +53,33 @@ Frame sizes: `<25` 164, `25–39` 1 170, `40–49` 139, `50–59` 36, `60–69` 
 
 | Threshold | Precision (95 %) | Recall (95 %) |
 |---|---|---|
-| 50 | 0.62 (0.27–0.81) | 0.24 (0.14–0.57) |
-| 55 | 0.56 (0.21–0.82) | 0.17 (0.09–0.49) |
-| 60 | 0.57 (0.21–0.82) | 0.17 (0.09–0.48) |
-| 70 | 0.56 (0.21–0.82) | 0.17 (0.09–0.48) |
+| 50 | 0.619 (0.268–0.812) | 0.244 (0.136–0.573) |
+| 55 | 0.562 (0.206–0.819) | 0.173 (0.092–0.485) |
+| 60 | 0.565 (0.214–0.822) | 0.169 (0.086–0.481) |
+| 65 | 0.564 (0.210–0.817) | 0.168 (0.086–0.478) |
+| 70 | 0.564 (0.210–0.817) | 0.168 (0.086–0.478) |
 
-Strict reading (geo/stale/pay/other counted as irrelevant): precision@60 **0.26** (0.14–0.60),
-@50 0.30, recall unchanged.
+Strict reading (geo/stale/pay/other counted as irrelevant): precision@60 **0.262** (0.135–0.601),
+@50 0.302, recall unchanged.
 
 Calibration (relevant share among decided cards, by current score; Wilson 95 %):
 
 | Band | decided | relevant | share |
 |---|---|---|---|
-| < 25 | 9 | 2 | 22 % |
+| < 25 | 9 | 2 | 22 % (6–55 %) |
 | 25–39 | 23 | 6 | 26 % (13–47 %) |
-| 40–49 | 9 | 2 | 22 % |
+| 40–49 | 9 | 2 | 22 % (6–55 %) |
 | 50–59 | 18 | 12 | **67 %** (44–84 %) |
-| 60–69 | 1 | 1 | – |
+| 60–69 | 1 | 1 | 100 % (21–100 %) |
 | 70–79 | 10 | 5 | 50 % (24–76 %) |
-| 80+ | 3 | 3 | – |
+| 80+ | 3 | 3 | 100 % (44–100 %) |
 
 Recall@60 is driven by the `25–39` band, which holds 1 170 of ≈ 1 700 vacancies: 6 relevant of 23
 decided there already means a few hundred relevant vacancies below the threshold.
 
 **Label noise.** 15 control pairs: agreement 80 % (3 classes), κ = 0.34; without `unsure`
-(14 pairs) 86 %, κ = 0.44. A 5–15 % flip rate leaves precision at ≈ 0.56 and lifts recall from
-0.17 to 0.36. One labeller, no adjudication.
+(14 pairs) 86 %, κ = 0.44. A 5–15 % flip rate leaves precision at ≈ 0.562–0.564 and lifts recall from
+0.169 to 0.358. One labeller, no adjudication.
 
 ### Geo guard (facts from the model, verdict from a deterministic function)
 
@@ -105,7 +106,6 @@ employer's country; a regional remote (a region or several countries) is `UNKNOW
 Held-out was then looked at once (`--final`, recorded in `eval_looks`). The tuning set was
 dev only.
 
-Cost of the whole phase: re-scoring the labelled cards $0.75, geo facts $0.33 + $0.01.
 
 ## Follow-up: score prompt v1 → v2 (not proven; enabled by the owner's decision; monitored)
 
@@ -164,6 +164,20 @@ blind golden set stays the instrument for that.
   operator would take is cut by the rule as stated; the held-out "yes" cut for that reason is
   a rule/label disagreement, not an extraction error.
 - **No second look at held-out.** Prompt changes made from here on are tuned on dev only.
+
+## Cost
+
+Measured from API usage (`llm_usage`, steps `eval:…`), all behind the spending guard (`--max-usd`, estimate first, `--confirm`):
+
+| Step | Calls | USD |
+|---|---|---|
+| re-score the labelled vacancies on the current system (Haiku 77, Sonnet 22) | 99 | 0.75 |
+| geo facts for the labelled vacancies, incl. 5 refreshed | 125 | 0.34 |
+| restore of the rejected 50–59 through the guard | 6 | 0.02 |
+| score prompt v2 on dev (Haiku 86, Sonnet 24) | 110 | 0.80 |
+| **Total** | | **≈ 1.91** |
+
+The report itself (`golden_eval report`, `geo_facts_eval report`) makes no API call.
 
 ## Reproduce
 
