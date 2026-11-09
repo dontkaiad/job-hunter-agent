@@ -189,16 +189,17 @@ def run_offline() -> Dict[str, Any]:
 
 # --- live -------------------------------------------------------------------
 
-def score_current(client, ex, raw: str, fetched: Optional[str], cfg, profile):
+def score_current(client, ex, raw: str, fetched: Optional[str], cfg, profile, prompt_version: str = "v1"):
     """The production scoring route: Haiku first pass; in the corridor the Sonnet judge
     decides (and on a judge failure the Haiku score stands). Raises InsufficientContent."""
     from job_hunter import llm
 
-    h = llm.llm_score(client, ex, raw, model=cfg.cheap_model, profile=profile, fetched_text=fetched)["score"]
+    h = llm.llm_score(client, ex, raw, model=cfg.cheap_model, profile=profile, fetched_text=fetched,
+                      prompt_version=prompt_version)["score"]
     if cfg.score_corridor_lo <= h <= cfg.score_corridor_hi:
         try:
             return llm.llm_score(client, ex, raw, model=cfg.judge_model, profile=profile,
-                                 fetched_text=fetched)["score"], True
+                                 fetched_text=fetched, prompt_version=prompt_version)["score"], True
         except Exception:  # noqa: BLE001
             return h, False
     return h, False

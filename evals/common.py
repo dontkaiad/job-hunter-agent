@@ -200,11 +200,11 @@ def est_call_usd(model, system, user, out_tokens, *, extra_tokens=0, batch=False
     return usd * (0.5 if batch else 1.0)
 
 
-def est_score_call_usd(model, profile, extracted, raw, fetched=None, *, batch=False):
+def est_score_call_usd(model, profile, extracted, raw, fetched=None, *, batch=False, version="v1"):
     """USD to score one vacancy with the production tool prompt on ``model``."""
     from job_hunter import llm
 
-    system = llm.build_score_system(profile, tool=True)
+    system = llm.build_score_system(profile, tool=True, version=version)
     user = llm.build_score_prompt(extracted, raw or "", fetched)
     out = 420 if "haiku" in model else 435          # measured means (cost_probe)
     return est_call_usd(model, system, user, out,

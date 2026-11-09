@@ -117,6 +117,18 @@ CREATE TABLE IF NOT EXISTS eval_frame (
     cost_usd      DOUBLE PRECISION,          -- measured from API usage
     scored_at     TEXT NOT NULL
 );
+-- eval_prompt_scores: paired scores of the labelled vacancies under a score-prompt version
+-- (evals/score_prompt_eval.py). Eval-only; never read by the pipeline.
+CREATE TABLE IF NOT EXISTS eval_prompt_scores (
+    item_id    INTEGER NOT NULL,
+    version    TEXT NOT NULL,
+    status     TEXT NOT NULL,                -- scored | insufficient
+    score      DOUBLE PRECISION,
+    judge_used BOOLEAN,
+    cost_usd   DOUBLE PRECISION,
+    scored_at  TEXT NOT NULL,
+    PRIMARY KEY (item_id, version)
+);
 -- eval_sample: the ordered cards of each labelling wave (controls repeat earlier cards).
 CREATE TABLE IF NOT EXISTS eval_sample (
     id              SERIAL PRIMARY KEY,

@@ -95,3 +95,32 @@ def test_eval_modules_do_not_create_api_clients_on_import():
     for mod in ("evals.score_stability_eval", "evals.parse_robustness_eval", "evals.link_fetch_eval"):
         sys.modules.pop(mod, None)
         importlib.import_module(mod)  # must not need an API key or DB
+
+
+def test_score_prompt_v2_is_v1_minus_location_and_salary_deductions():
+    from evals import score_prompt_eval as sp
+    from job_hunter import llm
+    from job_hunter.profile import example_profile
+
+    p = example_profile()
+    v1 = llm.build_score_system(p, tool=True)
+    assert v1 == llm.build_score_system(p, tool=True, version="v1") and v1 == llm.build_score_system(p, tool=True)
+    v2 = llm.build_score_system(p, tool=True, version="v2")
+    for gone in ("LOCATION PRIORITY", "Location priority", "soft timezone-overlap", "salary unstated", "RF-office"):
+        assert gone in v1 and gone not in v2
+    assert "LOCATION IS NOT SCORED" in v2 and "does not state a salary is NOT a reason" in v2
+    # hypotheses 3 and 4 untouched: seniority / thin-text wording identical
+    assert "a senior role requiring proven tenure" in v2 and "REQUIREMENT SEVERITY" in v2
+    assert "submit_score" in v2
+    d = sp.prompt_diff()
+    assert d.startswith("--- v1") and "-- LOCATION PRIORITY" in d
+
+
+def test_score_prompt_paired_metrics():
+    from evals import score_prompt_eval as sp
+
+    rows = [{"label": "yes", "before": 45, "after": 55}, {"label": "no", "before": 55, "after": 40},
+            {"label": "yes", "before": 70, "after": 72}]
+    m = sp.paired_metrics(rows, 50)
+    assert m["n"] == 3 and m["crossed_up_over_threshold"] == 1 and m["crossed_down_under_threshold"] == 1
+    assert m["yes_at_or_above_T_before"] == 1 and m["yes_at_or_above_T_after"] == 2

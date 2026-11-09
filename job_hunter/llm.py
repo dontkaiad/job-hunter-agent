@@ -527,7 +527,7 @@ def _render_bullets(items: List[str]) -> str:
     return "\n".join(f"  - {line}" for line in items) if items else "  - (none)"
 
 
-def render_profile_block(profile: Profile) -> str:
+def render_profile_block(profile: Profile, with_location: bool = True) -> str:
     """Render the candidate-SPECIFIC CANDIDATE PROFILE block from the loaded
     profile DATA. PURE.
 
@@ -548,9 +548,12 @@ def render_profile_block(profile: Profile) -> str:
         f"done experience):\n"
         f"{_render_bullets(profile.in_development)}\n"
         f"- Stack:\n{_render_bullets(profile.stack)}\n"
-        f"- Languages: {profile.languages}\n"
-        f"- Location priority (highest -> lowest):\n"
-        f"{_render_bullets(profile.location_priority)}"
+        f"- Languages: {profile.languages}"
+        + (
+            f"\n- Location priority (highest -> lowest):\n"
+            f"{_render_bullets(profile.location_priority)}"
+            if with_location else ""
+        )
     )
 
 
@@ -663,6 +666,65 @@ _SCORE_SCAFFOLD = (
 )
 
 
+# --- Score prompt versions ----------------------------------------------------
+# v1 = production. v2 = candidate (evals/score_prompt_eval.py, tested on dev only): location,
+# relocation, visa and timezone are NOT scored (the geo guard decides them), and a missing
+# salary is not a reason to lower the score. v2 is derived from v1 by exact replacements, so the
+# diff is explicit and v1 stays byte-identical. Production keeps v1 until a decision.
+SCORE_PROMPT_VERSIONS = ("v1", "v2")
+_V2_LOCATION_OLD_START = "- LOCATION PRIORITY — read the PROFILE ladder carefully."
+_V2_LOCATION_OLD_END = "> RF-office.\n"
+_V2_LOCATION_NEW = (
+    "- LOCATION IS NOT SCORED. Where the job is, remote scope, relocation, visa / work-permit "
+    "support, residency and timezone are decided by a separate deterministic guard AFTER you. "
+    "Do NOT raise or lower the score for any of them (a posting is not worse because it is "
+    "office-based, restricted to a region, or asks for a timezone overlap, and not better "
+    "because it is international). Judge ROLE FIT only: responsibilities, stack, grade.\n"
+)
+_V2_FLAG_OLD = ("- FLAG / DOWN-WEIGHT (do NOT reject, just lower the score): salary "
+                "unstated; an English-required role")
+_V2_FLAG_NEW = ("- FLAG / DOWN-WEIGHT (do NOT reject, just lower the score): an English-required role")
+_V2_TZ_OLD_START = "; a 'remote' \"\n    \"posting"
+_V2_SALARY_NEW = (
+    "A posting that does not state a salary is NOT a reason to lower the score. "
+)
+
+
+def _score_scaffold_v2() -> str:
+    s = _SCORE_SCAFFOLD
+    a = s.index(_V2_LOCATION_OLD_START)
+    b = s.index(_V2_LOCATION_OLD_END, a) + len(_V2_LOCATION_OLD_END)
+    s = s[:a] + _V2_LOCATION_NEW + s[b:]
+    assert _V2_FLAG_OLD in s
+    s = s.replace(_V2_FLAG_OLD, _V2_FLAG_NEW, 1)
+    # drop the soft-timezone deduction clause (from "; a 'remote' posting ..." up to its sentence end)
+    t0 = s.index("; a 'remote' posting with a soft timezone-overlap ask")
+    t1 = s.index("it as a reject-worthy signal if it ever does).\n", t0) + len("it as a reject-worthy signal if it ever does).\n")
+    s = s[:t0] + ".\n" + s[t1:]
+    marker = "Do NOT consider salary thresholds"
+    assert marker in s
+    s = s.replace(marker, _V2_SALARY_NEW + marker, 1)
+    return s
+
+
+def _build_calibration_block_v2(profile: Profile) -> str:
+    """The v1 anchors with their location wording removed (same four numeric levels). PURE."""
+    return (
+        "  ~10  — Backend/fullstack developer role, pure CRUD / microservices Python work, no LLM "
+        "or AI involvement, mandatory CS degree required. (Wrong domain + hard degree block.)\n"
+        "  ~42  — Data Scientist role (model training, statistics, Jupyter), Python livecoding "
+        "interview expected, fluent English required 'right now'. (Wrong domain: DS/ML training "
+        "≠ LLM engineering; coding interview = near-certain fail; language gap is an immediate "
+        "blocker.)\n"
+        "  ~65  — LLM / Prompt Engineer, RAG and prompt engineering are core, matching stack, but "
+        "3+ years commercial LLM experience required as HARD (candidate has ~1.5 years relevant). "
+        "Grade is correct, but the hard seniority gap prevents a strong score.\n"
+        "  ~88  — AI / Prompt Engineer who owns LLM behavior end-to-end (prompt engineering, RAG, "
+        "cost routing, monitoring), middle grade expected, no degree requirement. (Exact match on "
+        "role, grade and stack — no hard blockers.)"
+    )
+
+
 def _build_calibration_block(profile: Profile) -> str:
     """Four numeric anchors that tell the model where the scale sits for THIS
     candidate. Purely cosmetic relative to the rubric — these calibrate the
@@ -690,7 +752,7 @@ def _build_calibration_block(profile: Profile) -> str:
     )
 
 
-def build_score_system(profile: Profile, tool: bool = False) -> str:
+def build_score_system(profile: Profile, tool: bool = False, version: str = "v1") -> str:
     """Render the full SCORE system prompt from the loaded profile. PURE.
 
     The JUDGE instructions + RUBRIC structure + OUTPUT FORMAT live in
@@ -698,10 +760,14 @@ def build_score_system(profile: Profile, tool: bool = False) -> str:
     ``render_profile_block(profile)`` and ``_build_calibration_block(profile)``.
     No personal specifics are hardcoded.
     """
+    if version not in SCORE_PROMPT_VERSIONS:
+        raise ValueError(f"unknown score prompt version {version!r}")
+    v2 = version == "v2"
     system = (
-        _SCORE_SCAFFOLD
-        .replace("{profile_block}", render_profile_block(profile))
-        .replace("{calibration_block}", _build_calibration_block(profile))
+        (_score_scaffold_v2() if v2 else _SCORE_SCAFFOLD)
+        .replace("{profile_block}", render_profile_block(profile, with_location=not v2))
+        .replace("{calibration_block}",
+                 _build_calibration_block_v2(profile) if v2 else _build_calibration_block(profile))
     )
     if tool:
         assert _SCORE_JSON_TAIL in system
@@ -1123,6 +1189,7 @@ def llm_score(
     model: str = JUDGE_MODEL,
     profile: Optional[Profile] = None,
     fetched_text: Optional[str] = None,
+    prompt_version: str = "v1",
 ) -> Dict[str, Any]:
     """Rubric relevance score -> routed to the judgment (Sonnet) model.
 
@@ -1136,7 +1203,7 @@ def llm_score(
     use_tool = hasattr(client, "complete_tool")
     if use_tool:
         # Production path: forced tool call -> schema-shaped object, no prose.
-        system = build_score_system(profile or example_profile(), tool=True)
+        system = build_score_system(profile or example_profile(), tool=True, version=prompt_version)
         data = client.complete_tool(
             system,
             build_score_prompt(extracted, raw_text, fetched_text),
