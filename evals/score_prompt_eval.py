@@ -29,6 +29,15 @@ from evals.geo_facts_eval import split_of
 from job_hunter import golden
 
 JUDGE_SHARES = (0.15, 0.30, 1.0)
+# The stored "before" scores (eval_frame) were produced with the corridor [50, 70]; the iteration
+# runs v2 with the SAME corridor so the only difference between before and after is the prompt.
+PAIRED_CORRIDOR = (50, 70)
+
+
+def paired_cfg(cfg):
+    import dataclasses
+
+    return dataclasses.replace(cfg, score_corridor_lo=PAIRED_CORRIDOR[0], score_corridor_hi=PAIRED_CORRIDOR[1])
 
 
 def prompt_diff() -> str:
@@ -65,6 +74,7 @@ def run_estimate() -> Dict[str, Any]:
     from job_hunter.profile import load_profile
 
     cfg, conn = db_ctx()
+    cfg = paired_cfg(cfg)
     profile = load_profile()
     items = dev_items(conn)
     ids = [r["item_id"] for r in items]
@@ -94,6 +104,7 @@ def run_score(versions: List[str], max_usd: float, confirm: bool, judge_share: f
     from job_hunter.schema_extract import from_dict
 
     cfg, profile, ro = live_ctx()
+    cfg = paired_cfg(cfg)
     items = dev_items(ro)
     have = {(r["item_id"], r["version"]) for r in ro.execute("SELECT item_id, version FROM eval_prompt_scores").fetchall()}
     todo = [(r, v) for v in versions for r in items if (r["item_id"], v) not in have]
@@ -161,6 +172,10 @@ def run_report() -> Dict[str, Any]:
     for r in conn.execute("SELECT item_id, version, status, score FROM eval_prompt_scores").fetchall():
         if r["item_id"] in items and r["status"] == "scored":
             sc[r["item_id"]][r["version"]] = r["score"]
+    # "before" = the stored v1 score from the same corridor (eval_frame) unless v1 was re-run here
+    for r in conn.execute("SELECT item_id, status, current_score FROM eval_frame").fetchall():
+        if r["item_id"] in items and r["status"] == "scored":
+            sc[r["item_id"]].setdefault("v1", r["current_score"])
     rows = [{"label": items[i]["label"], "before": v["v1"], "after": v["v2"]} for i, v in sc.items()
             if "v1" in v and "v2" in v]
     out = {"dev_vacancies": len(items), "paired": len(rows), "threshold": cfg.surface_threshold}
