@@ -1176,6 +1176,14 @@ def get_competencies(
     }
 
 
+@router.get("/profile-card")
+def get_profile_card() -> dict:
+    """Private sidebar data from the profile (market benchmark chips). Empty when none are configured."""
+    from .profile import load_profile
+
+    return {"benchmarks": load_profile().market_benchmarks}
+
+
 # --- Pipeline pause switch ---------------------------------------------------
 #
 # GET/POST /api/pipeline-status — dashboard toggle for pausing the daily

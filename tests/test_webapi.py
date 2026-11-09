@@ -937,3 +937,13 @@ def test_only_dashboard_decisions_are_captured(client, conn):
     i = _seed(conn, state=SURFACED, score=70, extracted=_extracted())
     assert client.post(f"/api/items/{i}/approve").status_code == 200       # no browser headers -> channel 'api'
     assert conn.execute("SELECT count(*) n FROM eval_decision_labels").fetchone()["n"] == 0
+
+
+def test_profile_card_returns_configured_benchmarks_or_nothing(client, monkeypatch):
+    from dataclasses import replace
+    from job_hunter import profile as prof
+
+    assert client.get("/api/profile-card").json() == {"benchmarks": []}      # the public example has none
+    monkeypatch.setattr(prof, "load_profile",
+                        lambda *a, **k: replace(prof.example_profile(), market_benchmarks=[{"label": "x", "value": "1–2"}]))
+    assert client.get("/api/profile-card").json() == {"benchmarks": [{"label": "x", "value": "1–2"}]}

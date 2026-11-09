@@ -243,3 +243,11 @@ def test_scoring_source_has_no_personal_floor_literal():
     assert personal_floor not in src, (
         "no specific personal salary figure must appear in scoring.py"
     )
+
+
+def test_market_benchmarks_parse_and_default_empty():
+    from job_hunter.profile import example_profile, parse_profile
+
+    assert example_profile().market_benchmarks == []
+    p = parse_profile({"market_benchmarks": [{"label": "a", "value": "1–2"}, {"label": "no value"}, "junk"]})
+    assert p.market_benchmarks == [{"label": "a", "value": "1–2"}]

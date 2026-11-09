@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { api } from "../api.js";
 import { NavLink } from "react-router-dom";
 import Filters from "./Filters.jsx";
 import HarvestSwitch from "./HarvestSwitch.jsx";
@@ -23,6 +24,21 @@ const avatar = Object.values(_avatars)[0] ?? null;
 
 export default function Sidebar() {
   const { filters, setFilter, resetFilters } = useFilters();
+
+  // Market benchmark chips come from the private profile (GET /api/profile-card); none are baked in.
+  const [benchmarks, setBenchmarks] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getProfileCard()
+      .then((c) => {
+        if (!cancelled) setBenchmarks(Array.isArray(c && c.benchmarks) ? c.benchmarks : []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Profile name/role are env-driven (no real name baked into the repo). The
   // default fallback is used when VITE_PROFILE_NAME is not set at build time.
@@ -55,14 +71,15 @@ export default function Sidebar() {
         <div className="profile-id">
           <div className="profile-name">{profileName}</div>
           <div className="profile-role">{profileRole}</div>
-          <NavLink to="/market-worth" className="profile-salary">
-            <span className="profile-salary-line">
-              🇷🇺 <span className="profile-salary-val">200–300к</span>
-            </span>
-            <span className="profile-salary-line">
-              🌍 <span className="profile-salary-val">$4.5–8k</span>
-            </span>
-          </NavLink>
+          {benchmarks.length > 0 && (
+            <NavLink to="/market-worth" className="profile-salary">
+              {benchmarks.map((b, i) => (
+                <span className="profile-salary-line" key={i}>
+                  {b.label} <span className="profile-salary-val">{b.value}</span>
+                </span>
+              ))}
+            </NavLink>
+          )}
         </div>
       </section>
 

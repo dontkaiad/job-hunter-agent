@@ -92,3 +92,10 @@ draft_signature:
 #   "{floor}" is replaced by salary_floor_eur. v2 anchors carry no location wording.
 score_low_fit_extra:
   - "an interview format the candidate cannot pass (example placeholder)"
+
+# Market benchmark chips shown in the dashboard sidebar (OPTIONAL, private: keep real figures in
+# profile.local.yaml). Empty / absent = no chips. Example shape:
+# market_benchmarks:
+#   - {label: "home market", value: "X–Y"}
+#   - {label: "international", value: "X–Y"}
+market_benchmarks: []

@@ -150,6 +150,11 @@ export const api = {
   // Harvest pause switch: GET returns { paused, changed_at }. changed_at is
   // an ISO-8601 UTC string, or null if the switch has never been toggled.
   // POST sets it and returns the same shape.
+  // Private sidebar chips from the profile: { benchmarks: [{label, value}] }; [] when none are configured.
+  getProfileCard() {
+    return request("/api/profile-card");
+  },
+
   getPipelineStatus() {
     return request("/api/pipeline-status");
   },
