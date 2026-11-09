@@ -238,3 +238,13 @@ def deps(fake_llm, fake_fx):
         '{"relevance_score": 85, "Обоснование": "applied-LLM role, remote, good stack"}',
     )
     return Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_telegram(monkeypatch):
+    """Tests must never message the operator: a developer's .env carries a real bot token and chat
+    id, and an un-mocked POST /api/pipeline-status used to send real pause / resume pings on every
+    local run. Empty values count as set, so load_dotenv() (override=False) cannot refill them."""
+    for k in ("BOT_TOKEN", "NOTIFY_CHAT_ID", "ALLOWED_USER_IDS", "TG_LOG_BOT_TOKEN", "TG_LOG_CHAT_ID",
+              "TG_LOGIN_BOT_TOKEN"):
+        monkeypatch.setenv(k, "")

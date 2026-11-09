@@ -897,3 +897,16 @@ def test_pipeline_status_requires_auth(conn, auth_conn):
         resp = c.get("/api/pipeline-status")
     app.dependency_overrides.clear()
     assert resp.status_code == 401
+
+
+def test_pause_toggle_sends_nothing_without_a_bot_config(client, conn, monkeypatch):
+    """Regression: an un-mocked POST used to send REAL pause / resume pings from a developer's
+    .env on every local test run (conftest now blanks the bot env for every test)."""
+    import socket
+
+    def boom(*a, **k):
+        raise AssertionError("a test tried to open a network connection")
+
+    monkeypatch.setattr(socket.socket, "connect", boom)   # the TestClient itself is in-process
+    assert client.post("/api/pipeline-status", json={"paused": True}).status_code == 200
+    assert client.post("/api/pipeline-status", json={"paused": False}).status_code == 200
