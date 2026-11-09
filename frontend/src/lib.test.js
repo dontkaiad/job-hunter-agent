@@ -15,10 +15,10 @@ describe("scoreBand", () => {
     expect(scoreBand(90)).toBe("green");
     expect(scoreBand(75)).toBe("green");
     expect(scoreBand(74)).toBe("amber");
-    expect(scoreBand(60)).toBe("amber");
-    expect(scoreBand(59)).toBe("borderline");
-    expect(scoreBand(50)).toBe("borderline");
-    expect(scoreBand(49)).toBe("red");
+    expect(scoreBand(50)).toBe("amber");
+    expect(scoreBand(49)).toBe("borderline");
+    expect(scoreBand(40)).toBe("borderline");
+    expect(scoreBand(39)).toBe("red");
     expect(scoreBand(null)).toBe("none");
     expect(scoreBand(undefined)).toBe("none");
   });
@@ -131,12 +131,12 @@ describe("pipelineQuery", () => {
     expect(pipelineQuery({ status: "all", remote: "any", q: "   " })).toBe("");
   });
 
-  it("borderline view params: min_score=50&max_score=60 (half-open)", () => {
-    // The BorderlineView calls api.listPipeline({ minScore: 50, maxScore: 60 }).
+  it("borderline view params: min_score=40&max_score=50 (half-open)", () => {
+    // The BorderlineView calls api.listPipeline({ minScore: 40, maxScore: 50 }).
     // max_score=60 is half-open (score < 60), so score=60 is excluded. This is
-    // the correct band for 50–59 distinct from the 60–74 amber.
-    expect(pipelineQuery({ minScore: 50, maxScore: 60 })).toBe(
-      "?min_score=50&max_score=60"
+    // the correct band for 40–49 distinct from the 50–74 amber.
+    expect(pipelineQuery({ minScore: 40, maxScore: 50 })).toBe(
+      "?min_score=40&max_score=50"
     );
   });
 
@@ -168,17 +168,17 @@ describe("scoreBand edge cases", () => {
     expect(scoreBand(NaN)).toBe("none");
   });
 
-  it("50-59 is DISTINCT from 60-74 (the whole point of the borderline band)", () => {
+  it("40-49 is DISTINCT from 50-74 (the whole point of the borderline band)", () => {
+    const band40 = scoreBand(40);
+    const band49 = scoreBand(49);
     const band50 = scoreBand(50);
-    const band59 = scoreBand(59);
-    const band60 = scoreBand(60);
     const band74 = scoreBand(74);
     // All borderline values must share one label, all amber another, and the two must differ.
-    expect(band50).toBe("borderline");
-    expect(band59).toBe("borderline");
-    expect(band60).toBe("amber");
+    expect(band40).toBe("borderline");
+    expect(band49).toBe("borderline");
+    expect(band50).toBe("amber");
     expect(band74).toBe("amber");
-    expect(band50).not.toBe(band60);
+    expect(band40).not.toBe(band50);
   });
 });
 

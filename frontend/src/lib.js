@@ -12,19 +12,23 @@ import {
   OFFER,
 } from "./states.js";
 
-// Score band classification. The 50-59 BORDERLINE band is deliberately a
-// distinct colour (orange) from the 60-74 amber/yellow band so sub-surface
-// candidates read differently at a glance.
+// The surface threshold T (backend: Config.surface_threshold / SURFACE_THRESHOLD, 50 since
+// 2026-11-09). Keep in sync with the server.
+export const SURFACE_THRESHOLD = 50;
+
+// Score band classification. The BORDERLINE band (T-10 .. T-1, i.e. 40-49) is deliberately a
+// distinct colour (orange) from the amber surfaced band so sub-surface candidates read
+// differently at a glance.
 //   green      >= 75
-//   amber      60-74
-//   borderline 50-59  (distinct orange)
-//   red        < 50
+//   amber      T .. 74      (50-74)
+//   borderline T-10 .. T-1  (40-49, distinct orange)
+//   red        < T-10       (< 40)
 //   none       null/undefined score
 export function scoreBand(score) {
   if (score == null || Number.isNaN(score)) return "none";
   if (score >= 75) return "green";
-  if (score >= 60) return "amber";
-  if (score >= 50) return "borderline";
+  if (score >= SURFACE_THRESHOLD) return "amber";
+  if (score >= SURFACE_THRESHOLD - 10) return "borderline";
   return "red";
 }
 

@@ -9,9 +9,14 @@ import { FiltersProvider } from "./state/FiltersContext.jsx";
 // views fetch from /api, so they are exercised by the pure-logic + backend
 // tests rather than a full integration render here.)
 describe("Sidebar smoke", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
 
   it("renders profile and nav items", () => {
+    // The profile name is build-time env (no name is baked into the repo): stub a generic one.
+    vi.stubEnv("VITE_PROFILE_NAME", "Кандидат");
     render(
       <MemoryRouter>
         <FiltersProvider>

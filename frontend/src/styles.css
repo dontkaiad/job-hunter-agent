@@ -2,7 +2,7 @@
    JOB HUNTER — visual restyle (CSS only)
    Dark teal-forward "hacker-witch terminal". Structure, class names and DOM are
    untouched; this file only repaints. Score bands keep their logic:
-     green >=75  ·  amber 60-74  ·  borderline 50-59  ·  red <50  ·  none null
+     green >=75  ·  amber 50-74  ·  borderline 40-49  ·  red <40  ·  none null
    Repainted as a signal gradient: bright teal → olive-khaki → orange → oxblood.
    ========================================================================== */
 
@@ -893,7 +893,7 @@ h1::before {
   box-shadow: 0 0 7px rgba(84, 199, 182, 0.85);
 }
 .score-amber {
-  /* 60-74 — still "good", quieter olive-khaki */
+  /* 50-74 — still "good", quieter olive-khaki */
   background: var(--khaki);
   box-shadow: 0 0 6px rgba(182, 173, 108, 0.55);
 }
