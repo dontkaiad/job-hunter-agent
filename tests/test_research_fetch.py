@@ -278,8 +278,8 @@ def test_select_prefers_contact_when_link():
 def test_select_contact_link_telegram_falls_through_to_body():
     # A t.me contact-as-link is NOT a valid primary -> fall to raw_text scan.
     ex = _ex(contact_type="link", contact="https://t.me/recruiter", source_link=_TG)
-    raw = "More at https://career.avito.com/vacancies/dev/19566/"
-    assert select_primary_url(ex, raw) == "https://career.avito.com/vacancies/dev/19566/"
+    raw = "More at https://career.examplejobs.test/vacancies/dev/19566/"
+    assert select_primary_url(ex, raw) == "https://career.examplejobs.test/vacancies/dev/19566/"
 
 
 def test_select_inbody_hh_url_over_telegram_source_link():
@@ -290,8 +290,8 @@ def test_select_inbody_hh_url_over_telegram_source_link():
 
 def test_select_inbody_career_url():
     ex = _ex(source_link=_TG)
-    raw = "career.avito link: https://career.avito.com/vacancies/development/19566/ "
-    assert select_primary_url(ex, raw) == "https://career.avito.com/vacancies/development/19566/"
+    raw = "career.examplejobs link: https://career.examplejobs.test/vacancies/development/19566/ "
+    assert select_primary_url(ex, raw) == "https://career.examplejobs.test/vacancies/development/19566/"
 
 
 def test_select_hh_and_github_not_excluded_from_primary():

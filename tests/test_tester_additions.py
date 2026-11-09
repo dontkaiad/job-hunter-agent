@@ -926,8 +926,8 @@ def test_reconcile_real_body_email_from_llm_not_stripped():
     email address from the body is neither the channel nor the source link, so
     it must survive the reconcile pass unchanged.
     """
-    channel = "ai_rabota"
-    link = "https://t.me/ai_rabota/999"
+    channel = "jobs_channel"
+    link = "https://t.me/jobs_channel/999"
     llm_good_contact = _from_dict({
         "title": "ML Engineer",
         "source_channel": channel,
@@ -957,7 +957,7 @@ def test_ingest_web_parser_captures_bottom_of_long_post():
     length cap. A contact on the very last line of a long post must appear in
     IngestMessage.raw_text — confirming no truncation occurs.
 
-    This reproduces the netbell scenario: «Контакты: info@netbell.ru» appears
+    This reproduces the examplecorp scenario: «Контакты: info@examplecorp.example» appears
     at the very bottom of a multi-section vacancy, and the parser must deliver
     the complete text so reconcile/heuristic can detect the contact.
     """
@@ -1058,8 +1058,8 @@ def test_reconcile_fills_null_llm_remote_false_on_office_signal():
     assert out.remote is False, f"expected fill to False, got {out.remote}"
 
 
-def test_reconcile_remote_upgraded_by_hashtag_netbell_case():
-    """NETBELL: a #УдаленкаРФ hashtag is a positive remote signal and WINS,
+def test_reconcile_remote_upgraded_by_hashtag_examplecorp_case():
+    """EXAMPLECORP: a #УдаленкаРФ hashtag is a positive remote signal and WINS,
     upgrading even a (wrong) LLM remote=False to True."""
     out = _extract_mod.reconcile(
         _llm_remote(False), "Вакансия Python\n#УдаленкаРФ #middle", "@ch", None
@@ -1196,7 +1196,7 @@ def test_agents_draft_appends_deterministic_signature(fake_llm):
     from job_hunter.schema_extract import ExtractResult
 
     fake_llm.set_for("application message", "Здравствуйте, мне интересна позиция.")
-    ex = ExtractResult(title="AI Eng", company="Нетбелл", source_channel="@c")
+    ex = ExtractResult(title="AI Eng", company="Примерсофт", source_channel="@c")
     out = agents.draft(fake_llm, ex, "raw vacancy text")
 
     assert out.startswith("Здравствуйте, мне интересна позиция.")

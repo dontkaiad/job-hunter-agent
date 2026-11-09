@@ -125,9 +125,9 @@ _LONG_POST = (
 
 
 def test_contact_email_on_last_line_of_long_post():
-    r = extract(_LONG_POST.format(tail="Контакты: info@netbell.ru"), "@jobschan",
+    r = extract(_LONG_POST.format(tail="Контакты: info@examplecorp.example"), "@jobschan",
                 "https://t.me/jobschan/5")
-    assert r.contact == "info@netbell.ru"
+    assert r.contact == "info@examplecorp.example"
     # email -> no clean enum slot, contact_type null (documented mapping).
     assert r.contact_type is None
     # source channel must NOT be used as contact.
@@ -135,16 +135,16 @@ def test_contact_email_on_last_line_of_long_post():
 
 
 def test_contact_handle_at_bottom_of_long_post():
-    r = extract(_LONG_POST.format(tail="Писать: @netbell_hr"), "@jobschan",
+    r = extract(_LONG_POST.format(tail="Писать: @examplecorp_hr"), "@jobschan",
                 "https://t.me/jobschan/5")
-    assert r.contact == "@netbell_hr"
+    assert r.contact == "@examplecorp_hr"
     assert r.contact_type == "dm"
 
 
 def test_contact_apply_url_at_bottom():
-    r = extract(_LONG_POST.format(tail="Откликнуться: https://netbell.ru/apply"),
+    r = extract(_LONG_POST.format(tail="Откликнуться: https://examplecorp.example/apply"),
                 "@jobschan", "https://t.me/jobschan/5")
-    assert r.contact == "https://netbell.ru/apply"
+    assert r.contact == "https://examplecorp.example/apply"
     assert r.contact_type == "form"
 
 
@@ -242,13 +242,13 @@ def test_bottom_contact_still_captured_with_hashtags_and_remote():
         "AI / Prompt инженер.\n"
         "Что мы предлагаем:\n- Полная удалёнка\n\n"
         "#УдаленкаРФ #middle #Москва\n"
-        "Контакты: info@netbell.ru"
+        "Контакты: info@examplecorp.example"
     )
     r = extract(text, "@jobschan", "https://t.me/jobschan/5")
     assert r.remote is True
     assert r.location == "Москва"
     assert r.seniority == "middle"
-    assert r.contact == "info@netbell.ru"
+    assert r.contact == "info@examplecorp.example"
     assert r.contact_type is None
 
 

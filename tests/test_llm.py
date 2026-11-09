@@ -495,9 +495,9 @@ def test_draft_system_instructs_company_links_and_resume_placeholder():
 
 
 def test_build_draft_prompt_names_company_when_present():
-    ex = ExtractResult(title="AI Eng", company="Нетбелл", source_channel="@c")
+    ex = ExtractResult(title="AI Eng", company="Примерсофт", source_channel="@c")
     prompt = llm.build_draft_prompt(ex, "raw")
-    assert "Нетбелл" in prompt
+    assert "Примерсофт" in prompt
     assert "TARGET COMPANY" in prompt
 
 

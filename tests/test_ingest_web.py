@@ -289,60 +289,60 @@ class _Extracted:
 
 
 def test_apply_href_captured_and_chrome_dropped_end_to_end():
-    """The real ai_rabota/1137 case: <a href=career.avito.com>Откликнуться</a>
+    """The real jobs_channel/1137 case: <a href=career.examplejobs.test>Откликнуться</a>
     plus в VK (vk.com), в Max (max.ru), a t.me link and a ?q=#hashtag link.
 
-    raw_text must CONTAIN the avito apply URL and NOT the vk/max/t.me/?q= ones,
-    and the unchanged select_primary_url must then return the avito URL."""
+    raw_text must CONTAIN the examplejobs apply URL and NOT the vk/max/t.me/?q= ones,
+    and the unchanged select_primary_url must then return the examplejobs URL."""
     html = (
-        '<div class="tgme_widget_message js-widget_message" data-post="ai_rabota/1137">'
+        '<div class="tgme_widget_message js-widget_message" data-post="jobs_channel/1137">'
         '<div class="tgme_widget_message_text js-message_text" dir="auto">'
-        'Data Scientist в Avito<br>'
-        '<a href="https://career.avito.com/vacancies/data-science/19566/">Откликнуться</a> '
-        '<a href="https://t.me/ai_rabota/1137">в Telegram</a> '
-        '<a href="https://vk.com/ai_rabota">в VK</a> '
-        '<a href="https://max.ru/ai_rabota">в Max</a> '
+        'Data Scientist в ExampleJobs<br>'
+        '<a href="https://career.examplejobs.test/vacancies/data-science/19566/">Откликнуться</a> '
+        '<a href="https://t.me/jobs_channel/1137">в Telegram</a> '
+        '<a href="https://vk.com/jobs_channel">в VK</a> '
+        '<a href="https://max.ru/jobs_channel">в Max</a> '
         '<a href="?q=%23senior">#senior</a>'
         '</div>'
-        '<a class="tgme_widget_message_date" href="https://t.me/ai_rabota/1137">'
+        '<a class="tgme_widget_message_date" href="https://t.me/jobs_channel/1137">'
         '<time datetime="2026-06-20T10:00:00+00:00">10:00</time></a>'
         '</div>'
     )
-    msgs = web.parse_channel_html(html, "@ai_rabota")
+    msgs = web.parse_channel_html(html, "@jobs_channel")
     assert len(msgs) == 1
     raw = msgs[0].raw_text
 
-    assert "https://career.avito.com/vacancies/data-science/19566/" in raw
+    assert "https://career.examplejobs.test/vacancies/data-science/19566/" in raw
     # Chrome / mirror / telegram / relative links are NOT appended.
     assert "vk.com" not in raw
     assert "max.ru" not in raw
     assert "t.me" not in raw
     assert "?q=" not in raw
     # Visible body text is preserved.
-    assert "Data Scientist в Avito" in raw
+    assert "Data Scientist в ExampleJobs" in raw
     assert "Откликнуться" in raw
 
     # End-to-end: ingest -> EXISTING selector picks the apply URL.
     picked = rf.select_primary_url(_Extracted(), raw)
-    assert picked == "https://career.avito.com/vacancies/data-science/19566/"
+    assert picked == "https://career.examplejobs.test/vacancies/data-science/19566/"
 
 
 def test_visible_text_url_anchor_not_double_printed():
-    """ai_rabota/1136 case: the visible anchor text IS the URL (goldapple).
+    """jobs_channel/1136 case: the visible anchor text IS the URL (shopexample).
     The link still lands in raw_text and is selector-reachable, without an
     ugly 'url: url' duplication."""
     html = (
-        '<div class="tgme_widget_message js-widget_message" data-post="ai_rabota/1136">'
+        '<div class="tgme_widget_message js-widget_message" data-post="jobs_channel/1136">'
         '<div class="tgme_widget_message_text js-message_text">'
-        'Frontend at Gold Apple<br>'
-        '<a href="https://job.goldapple.ru/vacancy/12345">https://job.goldapple.ru/vacancy/12345</a>'
+        'Frontend at Shop Example<br>'
+        '<a href="https://job.shopexample.test/vacancy/12345">https://job.shopexample.test/vacancy/12345</a>'
         '</div></div>'
     )
-    msgs = web.parse_channel_html(html, "@ai_rabota")
+    msgs = web.parse_channel_html(html, "@jobs_channel")
     raw = msgs[0].raw_text
-    assert "https://job.goldapple.ru/vacancy/12345" in raw
-    assert "https://job.goldapple.ru/vacancy/12345: https://job.goldapple.ru/vacancy/12345" not in raw
-    assert rf.select_primary_url(_Extracted(), raw) == "https://job.goldapple.ru/vacancy/12345"
+    assert "https://job.shopexample.test/vacancy/12345" in raw
+    assert "https://job.shopexample.test/vacancy/12345: https://job.shopexample.test/vacancy/12345" not in raw
+    assert rf.select_primary_url(_Extracted(), raw) == "https://job.shopexample.test/vacancy/12345"
 
 
 def test_repeated_anchor_deduped_once():
@@ -365,19 +365,19 @@ def test_repeated_anchor_deduped_once():
 
 
 def test_garbled_email_as_link_not_appended():
-    """The garbled 'http://Контакты:job@selecty.ru/' email-as-link has an '@'
+    """The garbled 'http://Контакты:job@mail.example/' email-as-link has an '@'
     in the netloc and must NOT be appended."""
     html = (
         '<div class="tgme_widget_message js-widget_message" data-post="ch/77">'
         '<div class="tgme_widget_message_text js-message_text">'
         'HR contact<br>'
-        '<a href="http://Контакты:job@selecty.ru/">Контакты: job@selecty.ru</a>'
+        '<a href="http://Контакты:job@mail.example/">Контакты: job@mail.example</a>'
         '</div></div>'
     )
     msgs = web.parse_channel_html(html, "@ch")
     raw = msgs[0].raw_text
     # Visible anchor text stays; the LINK TARGET (an http URL) is NOT appended.
-    assert raw == "HR contact\nКонтакты: job@selecty.ru"
+    assert raw == "HR contact\nКонтакты: job@mail.example"
     assert "http://" not in raw
     # No real apply URL -> selector returns None -> desk fallback.
     assert rf.select_primary_url(_Extracted(), raw) is None
@@ -446,7 +446,7 @@ def test_select_primary_url_prefers_link_contact_unchanged():
     html = (
         '<div class="tgme_widget_message js-widget_message" data-post="ch/101">'
         '<div class="tgme_widget_message_text js-message_text">'
-        'Role.<br><a href="https://career.avito.com/v/1">Откликнуться</a>'
+        'Role.<br><a href="https://career.examplejobs.test/v/1">Откликнуться</a>'
         '</div></div>'
     )
     raw = web.parse_channel_html(html, "@ch")[0].raw_text

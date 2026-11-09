@@ -110,7 +110,7 @@ _COMPANY_LABEL_RE = re.compile(
 def _detect_company(text: str) -> Optional[str]:
     """Capture an explicit 'Компания: X' / 'Company: X' label line. PURE.
 
-    Returns the cleaned company name (e.g. 'Нетбелл' from 'Компания: Нетбелл'),
+    Returns the cleaned company name (e.g. 'Примерсофт' from 'Компания: Примерсофт'),
     or None when no such labelled line is present. Only the labelled form is
     trusted here -- free-form company guessing is left to the LLM extractor.
     """
@@ -550,8 +550,8 @@ def extract(
 # In the LIVE path T1 uses the LLM (Haiku) extractor and takes its JSON as the
 # ExtractResult. The heuristic resolvers in this module were ONLY used as the
 # offline fallback, so hashtag/company/benefit/contact signals that Haiku missed
-# (e.g. #УдаленкаРФ -> remote, #middle -> seniority, "Компания: Нетбелл",
-# the «Что мы предлагаем» benefits, the bottom-line contact info@netbell.ru)
+# (e.g. #УдаленкаРФ -> remote, #middle -> seniority, "Компания: Примерсофт",
+# the «Что мы предлагаем» benefits, the bottom-line contact info@examplecorp.example)
 # never reached the card. ``reconcile`` runs a deterministic ENRICH/RECONCILE
 # pass over the SAME raw_text AFTER the LLM step so those fields are guaranteed.
 #
@@ -560,7 +560,7 @@ def extract(
 #                 never downgrade, a definite LLM value:
 #                   (a) a POSITIVE remote signal (h_remote is True: #УдаленкаРФ /
 #                       «удалёнка» / remote / hybrid) WINS -> remote=True. This
-#                       can flip a LLM False/None up to True (the netbell fix).
+#                       can flip a LLM False/None up to True (the examplecorp fix).
 #                   (b) when the LLM value is NULL, the heuristic FILLS it with
 #                       whatever it found: True for a remote signal, False for an
 #                       office-only signal (unknown -> resolved).
@@ -609,7 +609,7 @@ def reconcile(
     d = llm_result.to_dict()
 
     # --- remote: directional merge (upgrade only; never downgrade) ------------
-    # (a) a positive remote signal (h_remote is True) WINS -> True (netbell).
+    # (a) a positive remote signal (h_remote is True) WINS -> True (examplecorp).
     # (b) a null LLM value is FILLED by any heuristic read (True or False).
     # (c) a definite LLM value is otherwise left untouched: an office-only
     #     (h_remote is False) or unknown (None) heuristic never clobbers it.

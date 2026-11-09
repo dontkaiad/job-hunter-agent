@@ -89,9 +89,9 @@ def _should_keep_href(href: Optional[str]) -> bool:
       - host is NOT a channel social-mirror / chrome host (vk.com / max.ru),
       - host looks like a real domain: contains a dot, has NO ``@`` in the
         netloc, and contains no spaces/control chars (this drops the garbled
-        ``http://Контакты:job@selecty.ru/`` email-as-link).
+        ``http://Контакты:job@mail.example/`` email-as-link).
 
-    hh.ru / career.* / job.goldapple.ru / getonbrd.com / application-form hosts
+    hh.ru / career.* / job.shopexample.test / getonbrd.com / application-form hosts
     / company sites all pass -- those are exactly what we want. Never raises.
     """
     try:
@@ -104,7 +104,7 @@ def _should_keep_href(href: Optional[str]) -> bool:
         netloc = parsed.netloc or ""
         # No userinfo / garbled email-as-link, and no whitespace/control chars
         # anywhere in the authority. ``urlparse`` keeps userinfo in netloc, so
-        # an "@" here means a host like ``Контакты:job@selecty.ru``.
+        # an "@" here means a host like ``Контакты:job@mail.example``.
         if "@" in netloc:
             return False
         if any(ch.isspace() or ord(ch) < 0x20 for ch in netloc):

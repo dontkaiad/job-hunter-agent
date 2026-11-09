@@ -386,7 +386,7 @@ EXTRACT_SYSTEM = (
     "for unknown values. contact_type must be one of dm|form|link or null.\n"
     "COMPANY: if the post has an explicit label line like 'Компания: X', "
     "'Company: X', 'Работодатель: X', or 'Employer: X', set company to exactly "
-    "that name (e.g. 'Компания: Нетбелл' -> company='Нетбелл'). Read the WHOLE "
+    "that name (e.g. 'Компания: Примерсофт' -> company='Примерсофт'). Read the WHOLE "
     "post for it, including near the top. Use null only when no company is "
     "named.\n"
     "SALARY: extract ONLY monetary pay. NEVER read a date or a deadline as "
