@@ -46,6 +46,7 @@ def _cfg(allowed=None):
         bot_token="x",
         notify_chat_id=123,
         allowed_user_ids={ALLOWED_UID} if allowed is None else set(allowed),
+        surface_threshold=60,
     )
 
 

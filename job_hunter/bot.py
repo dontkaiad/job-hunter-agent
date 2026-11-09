@@ -887,8 +887,13 @@ class JobHunterBot:
         )
 
     # Half-open borderline band [BORDERLINE_MIN, BORDERLINE_MAX): 50..59.
-    BORDERLINE_MIN = 50.0
-    BORDERLINE_MAX = 60.0  # exclusive -> 60 is SURFACE_THRESHOLD, stays surfaced
+    @property
+    def BORDERLINE_MAX(self) -> float:  # noqa: N802 - exclusive: T itself is surfaced
+        return float(self.cfg.surface_threshold)
+
+    @property
+    def BORDERLINE_MIN(self) -> float:  # noqa: N802
+        return float(self.cfg.surface_threshold) - 10.0
 
     async def handle_borderline(self, message) -> None:  # noqa: ANN001
         """READ-ONLY /borderline: list cards scoring [50, 60), highest-first.
@@ -1367,6 +1372,7 @@ def build_deps(cfg: Config) -> Deps:
         llm_client=llm_client, fx=fx,
         cheap_model=cfg.cheap_model, judge_model=cfg.judge_model,
         corridor_lo=cfg.score_corridor_lo, corridor_hi=cfg.score_corridor_hi,
+        surface_threshold=cfg.surface_threshold,
         profile=profile,
         min_persist_score=cfg.min_persist_score,
         score_max_attempts=cfg.score_max_attempts,

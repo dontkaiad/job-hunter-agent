@@ -130,7 +130,7 @@ def test_shadow_check_reports_aggregates_and_writes_nothing(conn, env, monkeypat
         _shadow(conn, ids[0] + 1 + n)                         # inside the cohort id range
     _shadow(conn, 10_000_000, kind="score")                    # outside the range: ignored
     _shadow(conn, ids[0] + 6, kind="topic")                    # inside the range but another kind: ignored
-    client = FakeClient([80.0, 40.0, 10.0, None])
+    client = FakeClient([80.0, 30.0, 10.0, None])
     monkeypatch.setattr(rx, "make_client", lambda *a, **k: (common._GATE.update(x=1), client)[1])
     before = conn.execute("select count(*) n from work_items").fetchone()["n"]
     out = rx.run_shadow_check(types.SimpleNamespace(from_date="2026-11-02", to_date="2026-11-05",

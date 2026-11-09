@@ -35,15 +35,15 @@ from .schema_extract import ExtractResult
 
 # --- Tunables ---------------------------------------------------------------
 
-SURFACE_THRESHOLD = 60          # T: at/above -> surfaced, below -> rejected
+SURFACE_THRESHOLD = 50          # fallback T (the live value is Config.surface_threshold): at/above -> surfaced
 
 # Confidence corridor: Haiku scores in [SCORE_CORRIDOR_LO, SCORE_CORRIDOR_HI]
 # trigger a full judge re-score (score becomes final from judge model).
 # Intentionally wider than the threshold on both sides — catches vacancies Haiku
 # might mis-score in either direction near the decision boundary.
 # Overridable via SCORE_CORRIDOR_LO / SCORE_CORRIDOR_HI env vars (see config.py).
-SCORE_CORRIDOR_LO = 50
-SCORE_CORRIDOR_HI = 70
+SCORE_CORRIDOR_LO = 40
+SCORE_CORRIDOR_HI = 60
 
 # Hard salary floor (EUR / month GROSS equivalent). The ACTUAL floor is loaded
 # from the candidate profile (``Profile.salary_floor_eur`` in
@@ -230,9 +230,10 @@ def clamp_score(value) -> int:
     return max(0, min(100, n))
 
 
-def passes_threshold(score_value) -> bool:
-    """T4 vs T3: at/above T -> surfaced, below -> rejected. PURE."""
-    return clamp_score(score_value) >= SURFACE_THRESHOLD
+def passes_threshold(score_value, threshold: Optional[float] = None) -> bool:
+    """T4 vs T3: at/above T -> surfaced, below -> rejected. PURE. T comes from config
+    (Config.surface_threshold); the module constant is only the fallback."""
+    return clamp_score(score_value) >= (SURFACE_THRESHOLD if threshold is None else threshold)
 
 
 def salary_guard_reject(

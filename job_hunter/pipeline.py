@@ -129,8 +129,9 @@ class Deps:
     # Confidence corridor bounds (default: [50, 70]).
     # Haiku scores in this range trigger a full judge re-score; judge's score
     # becomes final. Overridable via Config.score_corridor_lo/hi → env vars.
-    corridor_lo: int = 50
-    corridor_hi: int = 70
+    corridor_lo: int = 40
+    corridor_hi: int = 60
+    surface_threshold: int = 50
     # Candidate profile (loaded from config/profile.*.yaml). Drives the rubric
     # profile block, the draft gender/honesty/signature, and the salary floor.
     # Defaults to the GENERIC example profile so deterministic-only / test runs
@@ -607,7 +608,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                             flush=True,
                         )
 
-                elif haiku_score >= scoring.SURFACE_THRESHOLD:
+                elif haiku_score >= deps.surface_threshold:
                     # Above corridor: confident surface. Haiku score AND text both
                     # final — no Sonnet call. (#303: Sonnet used to "refine" the
                     # Обоснование here even though the score was already decided;
@@ -642,7 +643,7 @@ def _do_score(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
                 return _defer_scoring(conn, item, deps, exc)
         else:
             # No judge available: surface for manual review rather than silent reject.
-            score = scoring.SURFACE_THRESHOLD
+            score = deps.surface_threshold
             reasoning = "no LLM judge configured; surfaced for manual review"
             used = "no-llm"
             print(f"[score] id={item.id} final={score} (no-llm)", flush=True)
@@ -782,7 +783,7 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
         )
 
     score = extracted.relevance_score if extracted.relevance_score is not None else 0
-    if passes_threshold(score):
+    if passes_threshold(score, deps.surface_threshold if deps is not None else None):
         store.update_state(
             conn, item.id, SURFACED,
             from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,

@@ -99,7 +99,7 @@ def _fetch_counter(final_url=None):
 
 
 def test_one_teletype_page_in_three_channels_keeps_only_the_first(conn, fake_fx):
-    fetch, llm = _fetch_counter(), ToolLLM(SCORE(40))
+    fetch, llm = _fetch_counter(), ToolLLM(SCORE(30))
     deps = _deps(llm, fake_fx, fetch)
     a = _post(conn, deps, f"Remote AI Job\n{BASE}", "@Relocats", "1")
     b = _post(conn, deps, f"Relocation job\nhttps://TeleType.in/@remote_ai_jobs/AbCdEf123/?utm_source=tg", "@Remoteit", "2")
@@ -115,7 +115,7 @@ def test_one_teletype_page_in_three_channels_keeps_only_the_first(conn, fake_fx)
 
 
 def test_different_path_case_is_not_a_duplicate(conn, fake_fx):
-    fetch, llm = _fetch_counter(), ToolLLM(SCORE(40), SCORE(40))
+    fetch, llm = _fetch_counter(), ToolLLM(SCORE(30), SCORE(30))
     deps = _deps(llm, fake_fx, fetch)
     a = _post(conn, deps, f"Job\n{BASE}", "@a", "1")
     b = _post(conn, deps, "Job\nhttps://teletype.in/@remote_ai_jobs/abcdef123", "@b", "2")
@@ -126,7 +126,7 @@ def test_different_path_case_is_not_a_duplicate(conn, fake_fx):
 
 
 def test_different_meaningful_query_is_not_a_duplicate(conn, fake_fx):
-    fetch, llm = _fetch_counter(), ToolLLM(SCORE(40), SCORE(40))
+    fetch, llm = _fetch_counter(), ToolLLM(SCORE(30), SCORE(30))
     deps = _deps(llm, fake_fx, fetch)
     a = _post(conn, deps, "Python LLM engineer wanted, remote work\nhttps://x.io/job?id=1", "@a", "1")
     b = _post(conn, deps, "Python LLM engineer wanted, remote work\nhttps://x.io/job?id=2", "@b", "2")
@@ -136,7 +136,7 @@ def test_different_meaningful_query_is_not_a_duplicate(conn, fake_fx):
 
 
 def test_site_root_links_never_merge_posts(conn, fake_fx):
-    fetch, llm = _fetch_counter(), ToolLLM(SCORE(40), SCORE(40))
+    fetch, llm = _fetch_counter(), ToolLLM(SCORE(30), SCORE(30))
     deps = _deps(llm, fake_fx, fetch)
     a = _post(conn, deps, "Great job board https://weworkremotely.com/", "@a", "1")
     b = _post(conn, deps, "Another post https://weworkremotely.com", "@b", "2")
@@ -159,7 +159,7 @@ def test_repost_of_an_already_sent_vacancy_is_dropped(conn, fake_fx):
 
 
 def test_two_short_links_resolving_to_one_page_are_merged_after_fetch(conn, fake_fx):
-    fetch, llm = _fetch_counter(final_url=BASE), ToolLLM(SCORE(40))
+    fetch, llm = _fetch_counter(final_url=BASE), ToolLLM(SCORE(30))
     deps = _deps(llm, fake_fx, fetch)
     a = _post(conn, deps, "Job\nhttps://short.example/aaa", "@a", "1")
     b = _post(conn, deps, "Job\nhttps://short.example/bbb", "@b", "2")
@@ -229,7 +229,7 @@ def test_hn_hiring_posts_are_never_url_deduped():
 
 
 def test_two_roles_at_one_company_careers_page_are_both_kept(conn, fake_fx):
-    fetch, llm = _fetch_counter(), ToolLLM(SCORE(40), SCORE(40))
+    fetch, llm = _fetch_counter(), ToolLLM(SCORE(30), SCORE(30))
     deps = _deps(llm, fake_fx, fetch)
     a = _post(conn, deps, "Prompt engineer wanted, remote. Apply: https://acme.io/careers", "@a", "1")
     b = _post(conn, deps, "Backend developer wanted, remote. Apply: https://acme.io/careers", "@b", "2")

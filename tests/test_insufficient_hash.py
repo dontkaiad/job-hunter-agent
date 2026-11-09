@@ -97,7 +97,7 @@ def test_a_changed_raw_text_is_scored_again(conn, fake_fx):
 
 
 def test_the_fetch_that_brings_the_page_triggers_exactly_one_rescore(conn, fake_fx):
-    client = ToolLLM(INSUFFICIENT, SCORE(40))
+    client = ToolLLM(INSUFFICIENT, SCORE(30))
     calls = []
 
     def fetch(raw, link, denylist=()):

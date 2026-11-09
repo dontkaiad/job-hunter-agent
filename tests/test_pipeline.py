@@ -203,8 +203,8 @@ def test_score_stored_with_reasoning(conn, fake_llm, fake_fx):
 def test_score_routes_haiku_only_below_threshold(conn, fake_llm, fake_fx):
     """Score < 60: only the cheap (Haiku) model is called — Sonnet is NOT invoked."""
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    # Score 45 < SURFACE_THRESHOLD (60) → no Sonnet refinement.
-    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 45, "Обоснование": "weak fit"}')
+    # Score 30 < corridor_lo (40) → no Sonnet refinement.
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 30, "Обоснование": "weak fit"}')
     item_id = _insert(conn, GOOD_POST)
     pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
     pipeline.advance_by_id(conn, item_id, deps=deps)  # score
@@ -237,18 +237,18 @@ def test_score_routes_haiku_only_above_corridor(conn, fake_llm, fake_fx):
 
 
 def test_score_below_corridor_haiku_only(conn, fake_llm, fake_fx):
-    """Haiku score < corridor_lo (40 < 50): confident reject zone, judge NOT called.
+    """Haiku score < corridor_lo (30 < 40): confident reject zone, judge NOT called.
 
     Exactly one LLM call (Haiku); stored score is Haiku's.
     """
     deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 40, "Обоснование": "weak fit"}')
+    fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 30, "Обоснование": "weak fit"}')
     item_id = _insert(conn, GOOD_POST)
     pipeline.advance_by_id(conn, item_id, deps=deps)  # extract
     pipeline.advance_by_id(conn, item_id, deps=deps)  # score
 
     item = store.get_item(conn, item_id)
-    assert item.relevance_score == 40.0
+    assert item.relevance_score == 30.0
 
     score_calls = [c for c in fake_llm.calls if "hiring-fit JUDGE" in c["system"]]
     assert len(score_calls) == 1, f"expected 1 call (Haiku only, below corridor), got {len(score_calls)}"

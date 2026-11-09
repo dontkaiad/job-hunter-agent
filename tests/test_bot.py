@@ -513,6 +513,7 @@ def _cfg(allowed=None):
         notify_chat_id=123,
         anthropic_api_key=None,
         allowed_user_ids={ALLOWED_UID} if allowed is None else set(allowed),
+        surface_threshold=60,   # band-geometry tests below are written for T=60; see the T=50 test
     )
 
 
@@ -1961,3 +1962,10 @@ def test_notify_pause_toggle_sync_never_raises_on_send_failure(monkeypatch):
 
     # Must not raise.
     bot.notify_pause_toggle_sync(cfg, True, None)
+
+
+def test_borderline_band_follows_the_configured_threshold(conn, deps):
+    b50 = bot.JobHunterBot(Config(bot_token="x", notify_chat_id=1, anthropic_api_key=None,
+                                  allowed_user_ids={ALLOWED_UID}, surface_threshold=50), conn, deps)
+    assert (b50.BORDERLINE_MIN, b50.BORDERLINE_MAX) == (40.0, 50.0)
+    assert Config().surface_threshold == 50

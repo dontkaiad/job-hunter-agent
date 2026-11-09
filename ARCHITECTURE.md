@@ -30,7 +30,7 @@ stateDiagram-v2
     [*] --> discovered: ingest (deterministic)
     discovered --> extracted: extract — Haiku (agent)
     extracted --> scored: score — Sonnet judge (agent)
-    scored --> surfaced: T4 score ≥ 60 (deterministic)
+    scored --> surfaced: T4 score ≥ T (deterministic, T = 50, config)
     scored --> rejected: below threshold / salary-floor guard (deterministic)
     surfaced --> approved: Approve (HITL)
     surfaced --> backlog: Backlog (HITL)
@@ -64,7 +64,7 @@ discovered → extracted → scored ──► surfaced ──► approved ──
   (0–100) plus a human-readable rationale. A deterministic salary-floor guard
   then converts the posting's salary to a common currency via live FX and can
   reject below the candidate's floor — independent of the model. Surface
-  threshold is 60; the 50–59 **borderline** band is surfaced for separate review.
+  threshold T is 50 (`SURFACE_THRESHOLD`); the 40–49 **borderline** band (T-10..T) is kept for review.
 - **surface gate** — the bot/dashboard present the card; the human chooses
   Approve, Backlog, or Skip.
 - **research / draft** — run **only after Approve**: Haiku researches the company
