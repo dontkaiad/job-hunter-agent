@@ -840,19 +840,20 @@ class JobHunterBot:
     # --- Ops-channel hooks (Part B) -----------------------------------------
 
     async def on_startup(self) -> None:
-        """aiogram @dp.startup() hook: ping the ops channel when polling starts.
-
-        SHORT_SHA is injected at image BUILD time (.dockerignore excludes .git,
-        so it cannot be read from git at runtime inside the container); defaults
-        to "unknown" for local runs. ``tg_logger.send_log`` no-ops gracefully
-        when the ops vars are unset and never raises.
-        """
+        """aiogram @dp.startup() hook. A normal restart (deploy) is SILENT: the CI run already
+        records it. Ping the ops channel only when a scheduled harvest slot was missed
+        (obs.startup_ping_if_abnormal). SHORT_SHA is baked in at image build time."""
         import os as _os
 
-        from . import tg_logger
+        from . import obs, serve
 
         short_sha = _os.environ.get("GIT_SHA", "unknown")
-        await tg_logger.send_log(f"✅ jobhunter поднялся {short_sha}")
+        try:
+            await obs.startup_ping_if_abnormal(
+                self.conn, hour=serve.HARVEST_HOUR, minute=serve.HARVEST_MINUTE,
+                tz=serve.resolve_schedule_tz(_os.environ.get("SCHEDULE_TZ")), short_sha=short_sha)
+        except Exception as exc:  # noqa: BLE001 - a status ping must never block startup
+            print(f"[startup] missed-harvest check failed (ignored): {exc!r}", flush=True)
 
     async def on_error(self, event) -> bool:  # noqa: ANN001
         """aiogram @dp.errors() global handler: report unhandled errors to ops.

@@ -250,6 +250,40 @@ def build_staleness_message(last_harvest_at_iso: str) -> str:
     )
 
 
+def missed_harvest_slot(last_harvest_at, now, hour: int, minute: int, tz):
+    """PURE: the most recent scheduled harvest slot (aware datetime) that has passed without a
+    completed harvest, or None. A restart that merely happens between two slots is NOT a miss.
+
+    last_harvest_at: aware datetime or None (no baseline -> None). now: aware datetime."""
+    from datetime import timedelta
+
+    if last_harvest_at is None:
+        return None
+    local = now.astimezone(tz)
+    slot = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if slot > local:
+        slot -= timedelta(days=1)
+    return slot if last_harvest_at < slot else None
+
+
+async def startup_ping_if_abnormal(conn, *, hour: int, minute: int, tz, short_sha: str, now=None) -> Optional[str]:
+    """A normal container restart (deploy) is silent. Ping ops only if a scheduled harvest slot
+    passed without a completed harvest (the restart ate the run, or the container was down over
+    it). Paused harvest and a missing baseline never alert."""
+    from . import store
+
+    paused, _ = store.get_pipeline_pause_state(conn)
+    if paused:
+        return None
+    slot = missed_harvest_slot(store.get_last_harvest_at(conn), now if now is not None else now_utc(), hour, minute, tz)
+    if slot is None:
+        return None
+    msg = (f"⚠️ jobhunter поднялся {short_sha}: плановый харвест {slot.strftime('%Y-%m-%d %H:%M')} "
+           f"не выполнен (рестарт или простой на момент запуска)")
+    await tg_logger.send_log(msg)
+    return msg
+
+
 async def check_harvest_staleness(
     conn,
     *,

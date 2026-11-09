@@ -261,9 +261,8 @@ def _make_bot():
     return b
 
 
-def test_startup_ping_calls_send_log_with_git_sha(monkeypatch):
-    """on_startup (the @dp.startup hook body) calls send_log once with the ✅
-    text containing GIT_SHA."""
+def test_startup_is_silent_on_a_normal_restart(monkeypatch):
+    """A deploy between two harvest slots sends nothing."""
     monkeypatch.setenv("GIT_SHA", "deadbee")
     sent = []
 
@@ -271,12 +270,26 @@ def test_startup_ping_calls_send_log_with_git_sha(monkeypatch):
         sent.append(text)
 
     monkeypatch.setattr(tg_logger, "send_log", fake_send_log)
-
     b = _make_bot()
-    asyncio.run(b.on_startup())
+    asyncio.run(b.on_startup())     # empty DB: no heartbeat baseline -> no alert
+    assert sent == []
 
-    assert len(sent) == 1
-    assert sent[0] == "✅ jobhunter поднялся deadbee"
+
+def test_missed_harvest_slot_pure():
+    from datetime import datetime, timezone, timedelta
+    from job_hunter import obs
+
+    tz = timezone.utc
+    d = lambda h, day=9: datetime(2026, 11, day, h, 0, tzinfo=tz)
+    # restart at 14:00, harvest ran today at 10:05 -> no miss
+    assert obs.missed_harvest_slot(d(10) + timedelta(minutes=5), d(14), 10, 0, tz) is None
+    # restart at 09:00 before today's slot, yesterday's ran -> no miss
+    assert obs.missed_harvest_slot(d(10, 8) + timedelta(minutes=5), d(9), 10, 0, tz) is None
+    # restart at 10:05 and today's harvest did not run -> miss of today's slot
+    assert obs.missed_harvest_slot(d(10, 8), d(10) + timedelta(minutes=5), 10, 0, tz) == d(10)
+    # down for two days
+    assert obs.missed_harvest_slot(d(10, 6), d(14), 10, 0, tz) == d(10)
+    assert obs.missed_harvest_slot(None, d(14), 10, 0, tz) is None
 
 
 def test_startup_hook_registered_on_existing_dispatcher():
