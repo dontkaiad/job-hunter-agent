@@ -949,7 +949,26 @@ def advance(
             script) and the Telegram id behind it; stored on the transition row.
     """
     deps = deps or Deps()
+    try:
+        return _advance(conn, item, decision, deps, reason, channel, actor_id)
+    except store.StateConflict as exc:
+        # Another actor (a human in the bot / dashboard, or a parallel run) moved the item first.
+        # Their move stands; this one is dropped, not retried and not forced.
+        print(f"[advance] id={item.id} {exc}; the earlier move stands", flush=True)
+        return AdvanceResult("noop", item.id, exc.actual or item.state,
+                             reason=f"state changed concurrently ({exc.expected} -> {exc.actual})",
+                             extra={"conflict": True})
 
+
+def _advance(
+    conn: psycopg.Connection,
+    item: WorkItem,
+    decision: Optional[str],
+    deps: Deps,
+    reason: Optional[str],
+    channel: Optional[str],
+    actor_id: Optional[str],
+) -> AdvanceResult:
     # 7) Idempotency: terminal items never move.
     if is_terminal(item.state):
         return AdvanceResult("terminal", item.id, item.state, reason="terminal state")

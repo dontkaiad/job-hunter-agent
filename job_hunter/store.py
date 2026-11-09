@@ -541,6 +541,14 @@ def list_by_state(
     return [WorkItem.from_row(r) for r in rows]
 
 
+class StateConflict(Exception):
+    """The item's state is no longer the one the caller read (someone else moved it meanwhile)."""
+
+    def __init__(self, item_id: int, expected: str, actual: Optional[str]):
+        super().__init__(f"item {item_id}: expected state {expected!r}, found {actual!r}")
+        self.item_id, self.expected, self.actual = item_id, expected, actual
+
+
 def update_state(
     conn: psycopg.Connection,
     item_id: int,
@@ -564,6 +572,11 @@ def update_state(
     system. A human (hitl) decision made by code that did not say where it came from
     is recorded as ``script`` -- never silently as the dashboard or the bot.
 
+    Optimistic lock: the UPDATE only applies while the row is still in ``from_state``; otherwise
+    nothing is written and ``StateConflict`` is raised (the harvest runs on a worker thread and a
+    human may act on the same vacancy at the same moment: the earlier move wins, the later one
+    is told so instead of silently overwriting it).
+
     Only ``pipeline.advance`` should call this.
     """
     ts = now_iso()
@@ -579,10 +592,16 @@ def update_state(
     if extract_mode is not None:
         sets.append("extract_mode = %s")
         params.append(extract_mode)
-    params.append(item_id)
+    params.extend([item_id, from_state])
 
     try:
-        conn.execute(f"UPDATE work_items SET {', '.join(sets)} WHERE id = %s", params)
+        moved = conn.execute(
+            f"UPDATE work_items SET {', '.join(sets)} WHERE id = %s AND state = %s RETURNING id", params
+        ).fetchone()
+        if moved is None:
+            actual = conn.execute("SELECT state FROM work_items WHERE id = %s", (item_id,)).fetchone()
+            conn.rollback()
+            raise StateConflict(item_id, from_state, actual["state"] if actual else None)
         conn.execute(
             """
             INSERT INTO state_transitions
