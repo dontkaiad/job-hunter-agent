@@ -21,7 +21,7 @@ describe("Sidebar smoke", () => {
     );
     expect(screen.getByText("Кандидат")).toBeDefined();
     expect(screen.getByText("Пайплайн")).toBeDefined();
-    expect(screen.getByText("Пограничные (50-59)")).toBeDefined();
+    expect(screen.getByText("Пограничные (40-49)")).toBeDefined();
     expect(screen.getByText("Компетенции")).toBeDefined();
   });
 });

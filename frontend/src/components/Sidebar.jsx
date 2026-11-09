@@ -73,7 +73,10 @@ export default function Sidebar() {
           Пайплайн
         </NavLink>
         <NavLink to="/borderline" className="nav-link">
-          Пограничные (50-59)
+          Пограничные (40-49)
+        </NavLink>
+        <NavLink to="/geo-cut" className="nav-link">
+          Отрезано по гео
         </NavLink>
         <NavLink to="/competencies" className="nav-link">
           Компетенции

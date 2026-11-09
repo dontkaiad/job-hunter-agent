@@ -285,6 +285,8 @@ def render_surfaced(item: store.WorkItem, salary_rub: Optional[float] = None) ->
         if ex.source_link:
             src = f"{src} {ex.source_link}".strip()
         field_lines.append(f"{_b(lang['source'])}: {_esc(src)}")
+    if getattr(item, "geo_verdict", None) == "unknown":
+        field_lines.append(f"🌍 {_b('гео?')}: {_esc(item.geo_reason or 'location terms unclear')}")
     if field_lines:
         lines.append("")
         lines.extend(field_lines)
@@ -1373,6 +1375,7 @@ def build_deps(cfg: Config) -> Deps:
         cheap_model=cfg.cheap_model, judge_model=cfg.judge_model,
         corridor_lo=cfg.score_corridor_lo, corridor_hi=cfg.score_corridor_hi,
         surface_threshold=cfg.surface_threshold,
+        geo_guard=cfg.geo_guard,
         profile=profile,
         min_persist_score=cfg.min_persist_score,
         score_max_attempts=cfg.score_max_attempts,

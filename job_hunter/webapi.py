@@ -113,6 +113,8 @@ class PipelineItem(BaseModel):
     published_at: Optional[str] = None  # = created_at (INGESTION time)
     source: Source
     decline_reason: Optional[str] = None  # reason from state_transitions for declined items
+    geo_verdict: Optional[str] = None  # eligible | ineligible | unknown | None (guard did not run)
+    geo_reason: Optional[str] = None
 
 
 class Transition(BaseModel):
@@ -150,6 +152,8 @@ class ItemDetail(BaseModel):
     published_at: Optional[str] = None  # = created_at (INGESTION time)
     updated_at: Optional[str] = None
     history: List[Transition] = []
+    geo_verdict: Optional[str] = None
+    geo_reason: Optional[str] = None
 
 
 class AddRequest(BaseModel):
@@ -396,6 +400,9 @@ def get_pipeline(
     q: Optional[str] = Query(
         default=None, description="Case-insensitive substring over company + role + stack"
     ),
+    geo: Optional[str] = Query(
+        default=None, description="cut = cut by the geo guard (kept 30 days); unknown = flagged \"гео?\""
+    ),
     conn: psycopg.Connection = Depends(get_conn),
     fx: fx_mod.FxRates = Depends(get_fx),
 ) -> List[PipelineItem]:
@@ -413,6 +420,7 @@ def get_pipeline(
         min_score=min_score,
         max_score=max_score,
         processed=processed,
+        geo=geo if geo in ("cut", "unknown") else None,
         limit=_PIPELINE_LIMIT,
     )
 
@@ -469,6 +477,8 @@ def get_pipeline(
                 published_at=item.created_at,  # INGESTION time (see module docstring)
                 source=Source(channel=item.source_channel, link=item.source_link),
                 decline_reason=decline_reasons.get(item.id),
+                geo_verdict=item.geo_verdict,
+                geo_reason=item.geo_reason,
             )
         )
     return out
@@ -534,6 +544,8 @@ def _build_item_detail(
         published_at=item.created_at,  # INGESTION time (see module docstring)
         updated_at=item.updated_at,
         history=history,
+        geo_verdict=item.geo_verdict,
+        geo_reason=item.geo_reason,
     )
 
 

@@ -33,7 +33,12 @@ export default function PipelineTable({ items, selectedId, onSelect }) {
               <td>
                 <ScoreDot score={it.score} />
               </td>
-              <td className="cell-role">{it.role || "—"}</td>
+              <td className="cell-role">
+                {it.role || "—"}
+                {it.geo_verdict === "unknown" && (
+                  <span className="geo-flag" title={it.geo_reason || ""}> 🌍 гео?</span>
+                )}
+              </td>
               <td className="cell-company">{it.company || "—"}</td>
               <td className="cell-stack" title={stackText(it.stack)}>
                 {stackText(it.stack)}

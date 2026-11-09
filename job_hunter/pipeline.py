@@ -23,7 +23,7 @@ import psycopg
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import agents, scoring, store, vacancy_fetch, vacancy_url
+from . import agents, geo, scoring, store, vacancy_fetch, vacancy_url
 from .extract import extract as heuristic_extract
 from .extract import reconcile as reconcile_extract
 from .fx import FxRates
@@ -106,6 +106,12 @@ class ScoreRunStats:
     extract_skipped_halted: int = 0   # not tried: credits/auth outage earlier in the run
     heuristic_kept: int = 0           # cut by the score but extracted heuristically: kept, not deleted
     heuristic_purged: int = 0         # such vacancies expired after heuristic_keep_days
+    # geo guard (only vacancies that cleared the score threshold are checked)
+    geo_checked: int = 0
+    geo_cut: int = 0                  # INELIGIBLE: rejected, kept 30 days, shown in the dashboard
+    geo_unknown: int = 0              # UNKNOWN: surfaced as a normal card flagged "гео?"
+    geo_purged: int = 0               # geo-cut vacancies expired after 30 days
+    geo_failed: int = 0               # facts call failed: surfaced unchecked (never cut on an error)
 
 
 @dataclass
@@ -132,6 +138,9 @@ class Deps:
     corridor_lo: int = 40
     corridor_hi: int = 60
     surface_threshold: int = 50
+    # Geo guard: on only when explicitly enabled AND the private profile carries eligibility
+    # constraints (profile.eligibility). Off by default so tests / the public example are inert.
+    geo_guard: bool = False
     # Candidate profile (loaded from config/profile.*.yaml). Drives the rubric
     # profile block, the draft gender/honesty/signature, and the salary floor.
     # Defaults to the GENERIC example profile so deterministic-only / test runs
@@ -693,6 +702,39 @@ def _maybe_shadow_copy(conn: psycopg.Connection, item: WorkItem, deps: Deps, sco
         print(f"[shadow] id={item.id} copy failed (deletion continues): {exc!r}", flush=True)
 
 
+def _geo_check(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> Optional[str]:
+    """Geo guard for a vacancy that cleared the threshold. Returns the cut reason when INELIGIBLE,
+    else None (the item is surfaced; UNKNOWN is recorded so the card carries the "гео?" flag).
+
+    Facts come from one Haiku call (geo.llm_geo_facts, facts only); the verdict is the pure
+    geo.decide() against the candidate's private eligibility constraints. A failed call never
+    cuts: the item is surfaced unchecked and counted in geo_failed."""
+    if deps is None or not deps.geo_guard or deps.llm_client is None:
+        return None
+    elig = getattr(deps.profile, "eligibility", None)
+    if elig is None or not getattr(elig, "home_markets", None):
+        return None
+    if item.geo_verdict is not None:        # already judged (re-advance): reuse
+        return item.geo_reason if item.geo_verdict == geo.INELIGIBLE.lower() else None
+    stats = deps.score_stats
+    stats.geo_checked += 1
+    try:
+        facts = geo.llm_geo_facts(deps.llm_client, item.raw_text or "", item.fetched_text, model=deps.cheap_model)
+    except Exception as exc:  # noqa: BLE001 - a status check must never cut or crash on an error
+        stats.geo_failed += 1
+        print(f"[geo] id={item.id} facts failed, surfaced unchecked: {exc!r}", flush=True)
+        return None
+    verdict, reason = geo.decide(facts, elig)
+    store.set_geo(conn, item.id, verdict.lower(), reason, json.dumps(facts.to_dict(), ensure_ascii=False))
+    if verdict == geo.INELIGIBLE:
+        stats.geo_cut += 1
+        print(f"[geo] id={item.id} cut: {reason}", flush=True)
+        return reason
+    if verdict == geo.UNKNOWN:
+        stats.geo_unknown += 1
+    return None
+
+
 def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceResult:
     """T3/T4: scored -> rejected | surfaced.
 
@@ -784,6 +826,17 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
 
     score = extracted.relevance_score if extracted.relevance_score is not None else 0
     if passes_threshold(score, deps.surface_threshold if deps is not None else None):
+        cut = _geo_check(conn, item, deps)
+        if cut is not None:
+            store.update_state(
+                conn, item.id, REJECTED,
+                from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,
+                reason=f"geo cut: {cut}",
+            )
+            return AdvanceResult(
+                "moved", item.id, item.state, REJECTED, "T3", "geo cut",
+                extra={"score": scoring.clamp_score(score), "geo_reason": cut},
+            )
         store.update_state(
             conn, item.id, SURFACED,
             from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,

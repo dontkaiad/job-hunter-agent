@@ -247,3 +247,86 @@ def test_metrics_variants_drop_only_the_acknowledged_label_errors():
     assert v["acknowledged_label_errors_excluded"] == 1
     assert v["as_labelled"]["yes"]["wrongly_cut"] == 2 and v["without_acknowledged_label_errors"]["yes"]["wrongly_cut"] == 1
     assert v["without_acknowledged_label_errors"]["geo_chip"]["n"] == 1             # a 'no' card with that reason stays
+
+
+# --- harvest integration -----------------------------------------------------
+
+def _elig():
+    return geo.Eligibility(home_markets=(geo.HomeMarket(names=("homeland",), office_cities=("homecity",)),))
+
+
+class _GeoLLM:
+    """Scores 70, then answers the facts call with `facts`."""
+    def __init__(self, facts, fail=False):
+        self.facts, self.fail, self.facts_calls = facts, fail, 0
+
+    def complete_tool(self, system, prompt, tool, **k):
+        if tool.get("name") == "submit_geo_facts":
+            self.facts_calls += 1
+            if self.fail:
+                raise RuntimeError("boom")
+            return self.facts
+        return {"relevance_score": 70, "insufficient_content": False, "reasoning": "fit"}
+
+    def complete(self, *a, **k):  # pragma: no cover
+        raise AssertionError("text path used")
+
+
+def _run(conn, fake_fx, facts, fail=False, guard=True):
+    from dataclasses import replace
+    from job_hunter import pipeline, store
+    from job_hunter.pipeline import Deps
+    from job_hunter.profile import example_profile
+
+    prof = replace(example_profile(), eligibility=_elig())
+    llm = _GeoLLM(facts, fail)
+    deps = Deps(llm_client=llm, fx=fake_fx, use_llm_extract=False, profile=prof, geo_guard=guard)
+    iid = store.insert_item(conn, raw_text="Remote Python LLM engineer, RAG, Claude API, FastAPI. @hr_acme",
+                            source_channel="@c", source_link="https://t.me/c/1", source_message_id="1")
+    pipeline.run_to_gate(conn, iid, deps=deps)
+    return store.get_item(conn, iid), deps, llm
+
+
+_FACTS_COUNTRY = {"relocation_offered": None, "visa_sponsorship": None, "remote_scope": "country",
+                  "remote_locations": ["otherland"], "onsite": "none", "role_city": None,
+                  "employer_country": "otherland", "employer_city": None, "relocation_restriction": None}
+_FACTS_REGION = {**_FACTS_COUNTRY, "remote_locations": ["otherland", "thirdland"]}
+
+
+def test_guard_cuts_ineligible_keeps_it_rejected_with_reason(conn, fake_fx):
+    item, deps, llm = _run(conn, fake_fx, _FACTS_COUNTRY)
+    assert item.state == "rejected" and item.geo_verdict == "ineligible"
+    assert item.relevance_score == 70.0 and item.geo_reason
+    assert deps.score_stats.geo_cut == 1 and llm.facts_calls == 1
+
+
+def test_guard_unknown_surfaces_flagged(conn, fake_fx):
+    from job_hunter import bot
+    item, deps, _ = _run(conn, fake_fx, _FACTS_REGION)
+    assert item.state == "surfaced" and item.geo_verdict == "unknown"
+    assert deps.score_stats.geo_unknown == 1
+    assert "гео?" in bot.render_surfaced(item)
+
+
+def test_guard_failure_never_cuts(conn, fake_fx):
+    item, deps, _ = _run(conn, fake_fx, _FACTS_COUNTRY, fail=True)
+    assert item.state == "surfaced" and item.geo_verdict is None and deps.score_stats.geo_failed == 1
+
+
+def test_guard_off_makes_no_call(conn, fake_fx):
+    item, deps, llm = _run(conn, fake_fx, _FACTS_COUNTRY, guard=False)
+    assert item.state == "surfaced" and llm.facts_calls == 0
+
+
+def test_geo_cut_expires_after_30_days(conn, fake_fx):
+    from job_hunter import store
+    item, _, _ = _run(conn, fake_fx, _FACTS_COUNTRY)
+    assert store.purge_expired_geo_cut(conn) == 0
+    conn.execute("UPDATE work_items SET updated_at = '2020-01-01T00:00:00' WHERE id = %s", (item.id,))
+    assert store.purge_expired_geo_cut(conn) == 1 and store.get_item(conn, item.id) is None
+
+
+def test_ops_line_reports_geo_cut_and_unknown():
+    from job_hunter import pipeline, run
+    s = pipeline.ScoreRunStats(geo_cut=3, geo_unknown=5)
+    assert run.geo_line(s) == "geo cut 3, geo? 5"

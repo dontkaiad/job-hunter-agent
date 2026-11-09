@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Sidebar from "./components/Sidebar.jsx";
 import PipelineView from "./views/PipelineView.jsx";
 import BorderlineView from "./views/BorderlineView.jsx";
+import GeoCutView from "./views/GeoCutView.jsx";
 import CompetenciesView from "./views/CompetenciesView.jsx";
 import MarketWorthView from "./views/MarketWorthView.jsx";
 import LabelView from "./views/LabelView.jsx";
@@ -22,6 +23,8 @@ export default function App() {
           <Route path="/item/:id" element={<PipelineView />} />
           <Route path="/borderline" element={<BorderlineView />} />
           <Route path="/borderline/item/:id" element={<BorderlineView />} />
+          <Route path="/geo-cut" element={<GeoCutView />} />
+          <Route path="/geo-cut/item/:id" element={<GeoCutView />} />
           <Route path="/competencies" element={<CompetenciesView />} />
           <Route path="/market-worth" element={<MarketWorthView />} />
           <Route path="/label" element={<LabelView />} />

@@ -49,6 +49,8 @@ class Config:
     # Surface threshold T: relevance_score >= T is surfaced. Moved 60 -> 50 after the golden
     # report (docs/CASES/0006): the 50-59 band is as relevant as 70-79. Corridor follows T.
     surface_threshold: int = 50
+    # Geo guard (geo.py): on when the private profile has `eligibility` constraints.
+    geo_guard: bool = True
 
     # Ingestion mode: "web" (default, public t.me/s/ over HTTP, NO auth) or
     # "telethon" (optional userbot fallback, requires api_id/hash/session).
@@ -269,6 +271,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         score_corridor_lo=score_corridor_lo,
         score_corridor_hi=score_corridor_hi,
         surface_threshold=surface_threshold,
+        geo_guard=(get("GEO_GUARD") or "1").lower() not in ("0", "false", "no", "off"),
         ingest_mode=(get("INGEST_MODE") or "web").lower(),
         telegram_api_id=_int_or_none(get("TELEGRAM_API_ID")),
         telegram_api_hash=get("TELEGRAM_API_HASH") or None,

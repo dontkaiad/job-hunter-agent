@@ -59,7 +59,7 @@ async function request(path, options = {}) {
 // "any" values so the server applies only the active filters.
 function pipelineQuery(filters = {}) {
   const params = new URLSearchParams();
-  const { status, minScore, maxScore, remote, processed, q } = filters;
+  const { status, minScore, maxScore, remote, processed, q, geo } = filters;
   if (status && status !== "all") params.set("status", status);
   if (minScore !== "" && minScore != null) params.set("min_score", minScore);
   if (maxScore !== "" && maxScore != null) params.set("max_score", maxScore);
@@ -67,6 +67,7 @@ function pipelineQuery(filters = {}) {
   if (processed === "true" || processed === "false")
     params.set("processed", processed);
   if (q && q.trim()) params.set("q", q.trim());
+  if (geo === "cut" || geo === "unknown") params.set("geo", geo);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

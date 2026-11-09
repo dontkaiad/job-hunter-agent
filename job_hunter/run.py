@@ -76,6 +76,12 @@ def heuristic_line(stats: "pipeline.ScoreRunStats") -> str:
     return f"heuristic extract: kept {stats.heuristic_kept}, expired {stats.heuristic_purged}"
 
 
+def geo_line(stats: "pipeline.ScoreRunStats") -> str:
+    """The geo guard ops line: `geo cut N, geo? M`. PURE."""
+    return f"geo cut {stats.geo_cut}, geo? {stats.geo_unknown}" + (
+        f" (check failed {stats.geo_failed}, surfaced unchecked)" if stats.geo_failed else "")
+
+
 def insufficient_line(stats: "pipeline.ScoreRunStats") -> str:
     """Vacancies the model already called `insufficient` and that were NOT re-sent. PURE."""
     return f"insufficient parked {stats.insufficient_parked} (no re-score)"
@@ -97,12 +103,16 @@ def parked_info_text(stats: "pipeline.ScoreRunStats") -> Optional[str]:
         or stats.fetch_failed or stats.denylisted or stats.duplicates
         or stats.extract_deferred or stats.extract_failed_final
         or stats.heuristic_kept or stats.heuristic_purged
+        or stats.geo_checked or stats.geo_purged
     ):
         return None
     return "\u2139\ufe0f jobhunter scoring: " + parked_line(stats) + "\n" + insufficient_line(stats) + "\n" + fetch_line(stats) + (
         ("\n" + extract_line(stats)) if (stats.extract_deferred or stats.extract_failed_final) else ""
     ) + (
         ("\n" + heuristic_line(stats)) if (stats.heuristic_kept or stats.heuristic_purged) else ""
+    ) + (
+        ("\n" + geo_line(stats) + (f", expired {stats.geo_purged}" if stats.geo_purged else ""))
+        if (stats.geo_checked or stats.geo_purged) else ""
     ) + (
         f"\nduplicates dropped (same vacancy URL): {stats.duplicates}" if stats.duplicates else ""
     )
@@ -246,6 +256,10 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
             print(f"[harvest] expired {run_stats.heuristic_purged} kept heuristic-extract rejects", flush=True)
     except Exception as exc:  # noqa: BLE001 - housekeeping must never stop a harvest
         print(f"[harvest] heuristic purge failed (ignored): {exc!r}", flush=True)
+    try:   # geo-cut vacancies are kept 30 days (dashboard section), then expire
+        run_stats.geo_purged = store.purge_expired_geo_cut(conn)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[harvest] geo purge failed (ignored): {exc!r}", flush=True)
     newly_surfaced: List[int] = []
     try:
         for item_id in sorted(to_process):

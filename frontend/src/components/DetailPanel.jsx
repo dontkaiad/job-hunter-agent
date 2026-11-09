@@ -148,6 +148,15 @@ export default function DetailPanel({ itemId, onClose, onUpdated }) {
             </div>
           )}
 
+          {detail.geo_verdict && detail.geo_verdict !== "eligible" && (
+            <div className="detail-field">
+              <span className="detail-label">
+                {detail.geo_verdict === "ineligible" ? "Отрезано по гео" : "гео?"}
+              </span>
+              <span>{detail.geo_reason}</span>
+            </div>
+          )}
+
           {/* Обоснование — перед текстом вакансии, свёрнуто */}
           <TextBlock label="Обоснование" value={detail.reasoning} collapsible />
 

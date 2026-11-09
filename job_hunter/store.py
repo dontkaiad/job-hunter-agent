@@ -58,6 +58,9 @@ class WorkItem:
     fetch_attempts: int = 0
     primary_url_key: Optional[str] = None
     final_url_key: Optional[str] = None
+    geo_verdict: Optional[str] = None
+    geo_reason: Optional[str] = None
+    geo_facts: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "WorkItem":
@@ -85,6 +88,9 @@ class WorkItem:
             fetch_attempts=row.get("fetch_attempts") or 0,
             primary_url_key=row.get("primary_url_key"),
             final_url_key=row.get("final_url_key"),
+            geo_verdict=row.get("geo_verdict"),
+            geo_reason=row.get("geo_reason"),
+            geo_facts=row.get("geo_facts"),
         )
 
 
@@ -379,6 +385,9 @@ def _ensure_score_failure_columns(conn: psycopg.Connection) -> None:
         ("fetch_attempts", "fetch_attempts INTEGER NOT NULL DEFAULT 0"),
         ("primary_url_key", "primary_url_key TEXT"),
         ("final_url_key", "final_url_key TEXT"),
+        ("geo_verdict", "geo_verdict TEXT"),
+        ("geo_reason", "geo_reason TEXT"),
+        ("geo_facts", "geo_facts TEXT"),
     ):
         if col not in have:
             conn.execute(f"ALTER TABLE work_items ADD COLUMN IF NOT EXISTS {ddl}")
@@ -959,6 +968,30 @@ def purge_expired_heuristic(conn: psycopg.Connection, days: int) -> int:
     return len(ids)
 
 
+def set_geo(conn: psycopg.Connection, item_id: int, verdict: str, reason: str, facts_json: str) -> None:
+    """Record the geo guard's verdict. Metadata only: never touches state or updated_at
+    (the state change, if any, goes through advance()/update_state)."""
+    conn.execute("UPDATE work_items SET geo_verdict = %s, geo_reason = %s, geo_facts = %s WHERE id = %s",
+                 (verdict, reason, facts_json, item_id))
+    conn.commit()
+
+
+GEO_CUT_KEEP_DAYS = 30
+
+
+def purge_expired_geo_cut(conn: psycopg.Connection, days: int = GEO_CUT_KEEP_DAYS) -> int:
+    """Delete geo-cut vacancies (still REJECTED, i.e. nobody moved them) older than ``days``."""
+    from datetime import datetime, timedelta
+
+    cutoff = (datetime.fromisoformat(now_iso()) - timedelta(days=days)).isoformat()
+    ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM work_items WHERE state = 'rejected' AND geo_verdict = 'ineligible' "
+        "AND updated_at < %s", (cutoff,)).fetchall()]
+    for item_id in ids:
+        delete_item(conn, item_id)
+    return len(ids)
+
+
 def replace_extraction(
     conn: psycopg.Connection, item_id: int, extracted_json: str, mode: str, reason: str
 ) -> None:
@@ -1036,6 +1069,7 @@ def list_pipeline(
     min_score: Optional[float] = None,
     max_score: Optional[float] = None,
     processed: Optional[bool] = None,
+    geo: Optional[str] = None,
     limit: int = 1000,
 ) -> List[WorkItem]:
     """Return work items for the dashboard, SQL-side filtered (READ-ONLY).
@@ -1075,6 +1109,11 @@ def list_pipeline(
     if max_score is not None:
         clauses.append("relevance_score IS NOT NULL AND relevance_score < %s")
         params.append(float(max_score))
+
+    if geo == "cut":
+        clauses.append("geo_verdict = 'ineligible'")
+    elif geo == "unknown":
+        clauses.append("geo_verdict = 'unknown'")
 
     if processed is not None:
         placeholders = ", ".join(["%s"] * len(_UNPROCESSED_STATES))

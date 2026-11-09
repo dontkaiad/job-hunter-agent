@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS work_items (
     -- date, RSS pubDate, HN comment time). NULL = the source gave none / older rows.
     -- Not back-filled; used to measure and later gate freshness.
     posted_at         TEXT,
+    -- Geo guard (geo.py): the deterministic verdict on the candidate's eligibility constraints,
+    -- eligible | ineligible | unknown, its reason, and the model-extracted facts (JSON).
+    -- ineligible = cut (state rejected, kept 30 days, shown in the dashboard); unknown = a normal
+    -- card flagged "гео?". NULL = the guard did not run.
+    geo_verdict       TEXT,
+    geo_reason        TEXT,
+    geo_facts         TEXT,
     -- Real page text fetched for a link-only stub (vacancy_fetch.py), its status
     -- (ok|denylisted|no_url|failed) and the number of failed fetch tries.
     fetched_text      TEXT,

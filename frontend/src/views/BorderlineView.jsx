@@ -4,7 +4,7 @@ import { api } from "../api.js";
 import PipelineTable from "../components/PipelineTable.jsx";
 import DetailPanel from "../components/DetailPanel.jsx";
 
-// Пограничные (50-59): a single flat list of sub-surface candidates loaded with
+// Пограничные (40-49, just below T=50): a single flat list of sub-surface candidates loaded with
 // a FIXED band GET /api/pipeline?min_score=50&max_score=60 (max is half-open in
 // the API, so 60 excludes 60+). These sit below the surface threshold so they
 // are not in the main lanes. Same table + detail panel + actions.
@@ -21,7 +21,7 @@ export default function BorderlineView() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.listPipeline({ minScore: 50, maxScore: 60 });
+      const data = await api.listPipeline({ minScore: 40, maxScore: 50 });
       setItems(data);
     } catch (e) {
       setError("Ошибка загрузки");
@@ -49,7 +49,7 @@ export default function BorderlineView() {
   return (
     <div className="view">
       <div className="view-list">
-        <h1>Пограничные (50-59)</h1>
+        <h1>Пограничные (40-49)</h1>
         {loading && <div className="loading">Загрузка…</div>}
         {error && <div className="error">{error}</div>}
         <PipelineTable
