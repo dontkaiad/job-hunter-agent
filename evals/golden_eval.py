@@ -488,6 +488,31 @@ def run_rescore_labeled(max_usd: float, confirm: bool, judge_share: float = 0.15
     return {"to_score": len(rows), "done": done, "outcomes": dict(outcome), "cost": client.meter.report()}
 
 
+def run_snapshot() -> Dict[str, Any]:
+    """Freeze every sampled vacancy into eval_vacancies (idempotent; no API). The harvest deletes
+    low-score and duplicate rows, which would otherwise erode the labelled set."""
+    from job_hunter import store
+    from job_hunter.clock import now_iso
+
+    cfg, ro = db_ctx()
+    sample = [r["item_id"] for r in ro.execute("SELECT DISTINCT item_id FROM eval_sample").fetchall()]
+    present = {r["id"] for r in ro.execute("SELECT id FROM work_items WHERE id = ANY(%s)", (sample,)).fetchall()}
+    rw = store.connect(cfg.database_url)
+    store.init_db(rw)
+    rw.execute(
+        "INSERT INTO eval_vacancies (item_id, source_channel, source_link, raw_text, fetched_text, extracted_json, "
+        "stored_score, posted_at, created_at, geo_facts_json, v1_status, v1_score, copied_at) "
+        "SELECT w.id, w.source_channel, w.source_link, w.raw_text, w.fetched_text, w.extracted_json, w.relevance_score, "
+        "w.posted_at, w.created_at, g.facts_json, f.status, f.current_score, %s "
+        "FROM work_items w LEFT JOIN eval_geo_facts g ON g.item_id = w.id LEFT JOIN eval_frame f ON f.item_id = w.id "
+        "WHERE w.id = ANY(%s) ON CONFLICT (item_id) DO NOTHING", (now_iso(), sample))
+    rw.commit()
+    kept = rw.execute("SELECT count(*) AS n FROM eval_vacancies WHERE item_id = ANY(%s)", (sample,)).fetchone()["n"]
+    return {"sampled_vacancies": len(sample), "in_work_items": len(present), "in_eval_vacancies": kept,
+            "lost_before_snapshot": len(set(sample) - present - {r["item_id"] for r in rw.execute(
+                "SELECT item_id FROM eval_vacancies").fetchall()})}
+
+
 def run_report(exclude_urls: Optional[str]) -> Dict[str, Any]:
     """Labels vs the CURRENT scorer (eval_frame). Read-only, no API. Aggregates only."""
     import collections
@@ -587,6 +612,7 @@ def main(argv=None) -> int:
     w2.add_argument("--exclude-urls", default=None)
     w2.add_argument("--apply", action="store_true")
     sub.add_parser("estimate-labeled")
+    sub.add_parser("snapshot")
     rp = sub.add_parser("report")
     rp.add_argument("--exclude-urls", default=None)
     rl = sub.add_parser("rescore-labeled")
@@ -604,6 +630,8 @@ def main(argv=None) -> int:
         report("golden set: wave 2 re-plan (no API)", run_wave2(a.exclude_urls, a.apply))
     elif a.cmd == "rescore-labeled":
         report("golden set: re-score the labelled vacancies", run_rescore_labeled(a.max_usd, a.confirm, a.judge_share))
+    elif a.cmd == "snapshot":
+        report("golden set: snapshot of the labelled vacancies (no API)", run_snapshot())
     elif a.cmd == "report":
         report("golden set: labels vs the current scorer (no API)", run_report(a.exclude_urls))
     elif a.cmd == "estimate-labeled":

@@ -52,9 +52,13 @@ def prompt_diff() -> str:
 
 def dev_items(conn) -> List[Dict[str, Any]]:
     rows = conn.execute(
-        "SELECT DISTINCT ON (s.item_id) s.item_id, s.held_out, l.label, w.raw_text, w.fetched_text, w.extracted_json "
-        "FROM eval_sample s JOIN eval_labels l ON l.sample_id = s.id JOIN work_items w ON w.id = s.item_id "
-        "WHERE NOT s.is_control ORDER BY s.item_id, s.wave").fetchall()
+        "SELECT DISTINCT ON (s.item_id) s.item_id, s.held_out, l.label, "
+        "COALESCE(w.raw_text, v.raw_text) AS raw_text, COALESCE(w.fetched_text, v.fetched_text) AS fetched_text, "
+        "COALESCE(w.extracted_json, v.extracted_json) AS extracted_json "
+        "FROM eval_sample s JOIN eval_labels l ON l.sample_id = s.id "
+        "LEFT JOIN work_items w ON w.id = s.item_id LEFT JOIN eval_vacancies v ON v.item_id = s.item_id "
+        "WHERE NOT s.is_control AND COALESCE(w.raw_text, v.raw_text) IS NOT NULL "
+        "ORDER BY s.item_id, s.wave").fetchall()
     return [dict(r) for r in rows if split_of(r) == "dev"]
 
 

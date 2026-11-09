@@ -117,6 +117,14 @@ CREATE TABLE IF NOT EXISTS eval_frame (
     cost_usd      DOUBLE PRECISION,          -- measured from API usage
     scored_at     TEXT NOT NULL
 );
+-- eval_vacancies: a frozen copy of every labelled vacancy (text, extraction, facts, v1 score) so the
+-- harvest's purges / dedup can never erode the golden set. Written by `golden_eval snapshot`.
+CREATE TABLE IF NOT EXISTS eval_vacancies (
+    item_id        INTEGER PRIMARY KEY,
+    source_channel TEXT, source_link TEXT, raw_text TEXT, fetched_text TEXT, extracted_json TEXT,
+    stored_score   DOUBLE PRECISION, posted_at TEXT, created_at TEXT,
+    geo_facts_json TEXT, v1_status TEXT, v1_score DOUBLE PRECISION, copied_at TEXT
+);
 -- eval_prompt_scores: paired scores of the labelled vacancies under a score-prompt version
 -- (evals/score_prompt_eval.py). Eval-only; never read by the pipeline.
 CREATE TABLE IF NOT EXISTS eval_prompt_scores (

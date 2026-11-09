@@ -124,3 +124,25 @@ def test_score_prompt_paired_metrics():
     m = sp.paired_metrics(rows, 50)
     assert m["n"] == 3 and m["crossed_up_over_threshold"] == 1 and m["crossed_down_under_threshold"] == 1
     assert m["yes_at_or_above_T_before"] == 1 and m["yes_at_or_above_T_after"] == 2
+
+
+def test_restore_candidates_selects_only_recent_system_rejects_in_band(conn):
+    from datetime import datetime, timedelta, timezone
+    from job_hunter import store
+    from scripts.oneoff.restore_rejected_50_59 import restore_candidates
+
+    def mk(n, score, days_old=1, state="rejected", actor="system", reason="score x < T"):
+        i = store.insert_item(conn, raw_text=f"t{n}", source_channel="@c", source_link=f"https://t.me/c/{n}",
+                              source_message_id=str(n))
+        created = (datetime.now(timezone.utc) - timedelta(days=days_old)).isoformat()
+        conn.execute("UPDATE work_items SET state=%s, relevance_score=%s, created_at=%s WHERE id=%s",
+                     (state, score, created, i))
+        conn.execute("INSERT INTO state_transitions (item_id, from_state, to_state, kind, actor, reason, created_at) "
+                     "VALUES (%s,'scored','rejected','deterministic',%s,%s,%s)", (i, actor, reason, created))
+        conn.commit()
+        return i
+
+    ok = mk(1, 55)
+    mk(2, 45); mk(3, 65); mk(4, 55, days_old=40); mk(5, 55, state="surfaced")
+    mk(6, 55, reason="hard reject: salary below floor"); mk(7, 55, actor="user")
+    assert restore_candidates(conn, 30) == [ok]
