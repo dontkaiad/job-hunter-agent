@@ -55,6 +55,40 @@ async def ingest(cfg: Config, conn) -> List[int]:
     return new_ids
 
 
+def _drive_items(conn, item_ids: List[int], deps) -> List[int]:
+    """Blocking: run each item to its gate; return the ids that crossed into SURFACED. PURE sync."""
+    newly: List[int] = []
+    for item_id in item_ids:
+        results = pipeline.run_to_gate(conn, item_id, deps=deps)
+        if any(r.to_state == SURFACED for r in results):
+            newly.append(item_id)
+    return newly
+
+
+def _drive_items_own_connection(cfg, item_ids: List[int], deps) -> List[int]:
+    conn = store.connect(cfg.database_url)
+    try:
+        return _drive_items(conn, item_ids, deps)
+    finally:
+        conn.close()
+
+
+async def process_items(cfg, conn, item_ids: List[int], deps) -> List[int]:
+    """Score / gate the harvest's items WITHOUT blocking the event loop.
+
+    The scoring client is synchronous (several seconds per call, ~10-15 minutes a harvest), so on
+    the loop it froze the bot and the dashboard-facing handlers. The whole pass runs on ONE worker
+    thread with its OWN connection (psycopg connections are not shared across threads; the loop's
+    ``conn`` stays on the loop). One thread = items stay sequential, so the per-run counters and the
+    credits-outage halt behave as before. A human acting on an item meanwhile is safe: state moves
+    are optimistic (store.update_state raises StateConflict; advance() drops the later move).
+    Without a database URL (unit tests with an injected connection) it runs inline.
+    """
+    if not getattr(cfg, "database_url", None):
+        return _drive_items(conn, item_ids, deps)
+    return await asyncio.to_thread(_drive_items_own_connection, cfg, item_ids, deps)
+
+
 SCORE_FAIL_ALERT_RATIO = 0.20
 
 
@@ -262,10 +296,7 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
         print(f"[harvest] geo purge failed (ignored): {exc!r}", flush=True)
     newly_surfaced: List[int] = []
     try:
-        for item_id in sorted(to_process):
-            results = pipeline.run_to_gate(conn, item_id, deps=deps)
-            if any(r.to_state == SURFACED for r in results):
-                newly_surfaced.append(item_id)
+        newly_surfaced = await process_items(cfg, conn, sorted(to_process), deps)
     finally:
         _set_score_stats(deps, pipeline.ScoreRunStats())  # non-halting again for add-by-URL
     alert = scoring_alert_text(run_stats)
