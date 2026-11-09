@@ -120,7 +120,7 @@ concrete score tied to the real candidate profile:
 
 ```
 ~10  — backend developer, RF office, no LLM/AI, mandatory degree
-~42  — data scientist (model training), livecoding interview, language gap
+~42  — data scientist (model training), a failing interview format, language gap
 ~65  — LLM/prompt engineer, remote, right stack, but hard seniority gap
 ~88  — AI/prompt engineer, EU relocation/remote, exact profile match, no blockers
 ```

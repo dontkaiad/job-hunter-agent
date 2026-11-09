@@ -67,6 +67,12 @@ class Profile:
     draft_signature: DraftSignature = field(default_factory=DraftSignature)
     # Candidate eligibility constraints (private; see job_hunter/geo.py). Empty by default.
     eligibility: Any = None
+    # Candidate-specific scoring wording (private; see config/profile.example.yaml). Empty = the
+    # generic defaults in job_hunter/llm.py.
+    score_location_rubric: str = ""
+    score_low_fit_extra: List[str] = field(default_factory=list)
+    calibration_anchors: List[str] = field(default_factory=list)
+    calibration_anchors_v2: List[str] = field(default_factory=list)
     # The path the profile was loaded from (None when built directly).
     source_path: Optional[str] = None
 
@@ -75,6 +81,18 @@ def _as_str(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _as_raw(value: Any) -> str:
+    """Like _as_str but keeps the text byte-exact (prompt fragments carry their own newlines)."""
+    return "" if value is None else str(value)
+
+
+def _as_raw_list(value: Any) -> List[str]:
+    """A list of prompt lines kept byte-exact (leading indentation matters)."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(v) for v in value if str(v).strip()]
 
 
 def _as_list(value: Any) -> List[str]:
@@ -127,6 +145,10 @@ def parse_profile(data: Mapping[str, Any], source_path: Optional[str] = None) ->
         salary_floor_eur=floor,
         draft_signature=sig,
         eligibility=_parse_eligibility(data.get("eligibility")),
+        score_location_rubric=_as_raw(data.get("score_location_rubric")),
+        score_low_fit_extra=_as_list(data.get("score_low_fit_extra")),
+        calibration_anchors=_as_raw_list(data.get("calibration_anchors")),
+        calibration_anchors_v2=_as_raw_list(data.get("calibration_anchors_v2")),
         source_path=source_path,
     )
 

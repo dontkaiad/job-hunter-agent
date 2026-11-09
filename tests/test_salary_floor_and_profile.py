@@ -223,9 +223,12 @@ def test_score_system_low_reject_rules_present():
     s = " ".join(llm.SCORE_SYSTEM.split()).lower()
     # backend-with-LLM-on-the-side underfit
     assert "backend developer with llm 'on the side'" in s
-    # livecoding / hardcore algo
-    assert "livecoding from scratch" in s
-    assert "hardcore algorithmic interview" in s
+    # candidate-specific low-fit items come from the PROFILE (score_low_fit_extra), never from code
+    from dataclasses import replace
+    s2 = " ".join(llm.build_score_system(
+        replace(llm.example_profile(), score_low_fit_extra=["a synthetic interview format"])).split()).lower()
+    assert "dm training; a synthetic interview format; a hard requirement" in s2.replace("ds / ml model tra", "dm tra") or \
+        "a synthetic interview format; a hard requirement" in s2
     # hard degree requirement
     assert "hard requirement for a technical degree" in s
     # lead/management not a fit

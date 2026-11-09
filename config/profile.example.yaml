@@ -81,3 +81,14 @@ draft_signature:
   # Resume reference — a literal PLACEHOLDER the operator swaps at send time.
   # Never a fabricated real URL.
   resume: "[resume: link]"
+
+# --- Candidate-specific scoring wording (all OPTIONAL; generic defaults live in job_hunter/llm.py) ---
+# Keep your real wording in config/profile.local.yaml (gitignored). The public code carries none of it.
+#
+# score_location_rubric: a multi-line rubric paragraph that ranks locations / employer markets for
+#   the v1 scoring prompt (v2 does not score location). Omit it to use the generic sentence.
+# score_low_fit_extra: extra "low score" items appended to the rubric's LOW / REJECT-WORTHY list.
+# calibration_anchors / calibration_anchors_v2: four numeric anchor lines (~10 / ~42 / ~65 / ~88).
+#   "{floor}" is replaced by salary_floor_eur. v2 anchors carry no location wording.
+score_low_fit_extra:
+  - "an interview format the candidate cannot pass (example placeholder)"

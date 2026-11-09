@@ -120,7 +120,7 @@ class Config:
 
     # --- Jobicy international-remote source (OPTIONAL) ---
     # Jobicy (jobicy.com/api/v2/remote-jobs) is a no-auth JSON job board used as
-    # the first international-remote auto-source (EU relocation / Blue Card goal).
+    # the first international-remote auto-source (EU relocation goal).
     # ``jobicy_geos`` is a SMALL list of geo slugs swept each harvest (e.g.
     # europe,poland,serbia,czechia,germany). EMPTY => the source is DISABLED
     # (no Jobicy fetch happens), so it is purely opt-in. Each geo watermarks

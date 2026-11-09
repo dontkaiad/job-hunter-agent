@@ -106,7 +106,7 @@ def test_score_prompt_v2_is_v1_minus_location_and_salary_deductions():
     v1 = llm.build_score_system(p, tool=True)
     assert v1 == llm.build_score_system(p, tool=True, version="v1") and v1 == llm.build_score_system(p, tool=True)
     v2 = llm.build_score_system(p, tool=True, version="v2")
-    for gone in ("LOCATION PRIORITY", "Location priority", "soft timezone-overlap", "salary unstated", "RF-office"):
+    for gone in ("LOCATION PRIORITY", "Location priority", "soft timezone-overlap", "salary unstated"):
         assert gone in v1 and gone not in v2
     assert "LOCATION IS NOT SCORED" in v2 and "does not state a salary is NOT a reason" in v2
     # hypotheses 3 and 4 untouched: seniority / thin-text wording identical

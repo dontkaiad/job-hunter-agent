@@ -589,19 +589,7 @@ _SCORE_SCAFFOLD = (
     "behavior — Prompt / AI / LLM Engineer, AI Product Engineer, applied-LLM; "
     "where RAG / routing / prompts are the CORE of the job; grade matches the "
     "target grade above.\n"
-    "- LOCATION PRIORITY — read the PROFILE ladder carefully. For THIS candidate "
-    "TWO top-tier paths are EQUAL and both are primary goals:\n"
-    "  (1) INTERNATIONAL REMOTE: a foreign / non-RF employer offering remote work "
-    "(anywhere). Remote IS the target format — do NOT penalise it for not being "
-    "a physical relocation.\n"
-    "  (2) EU RELOCATION: European employer with relocation + visa / Blue Card "
-    "support. Also a top-tier goal.\n"
-    "  CRITICAL DISTINCTION — judge by EMPLOYER MARKET, NOT work format:\n"
-    "    RF employer, remote within RF (РФ-рынок, RUB salary) -> lower tier.\n"
-    "    Foreign / international employer, remote -> TOP tier (same as EU "
-    "relocation).\n"
-    "  Score ladder: international-remote ≈ EU-relocation >> RF-remote > hybrid "
-    "> RF-office.\n"
+    "{location_rubric}"
     "- FLAG / DOWN-WEIGHT (do NOT reject, just lower the score): salary "
     "unstated; an English-required role demanding fluent English 'right now' "
     "when the profile's language note flags that as a current gap; a senior "
@@ -614,8 +602,7 @@ _SCORE_SCAFFOLD = (
     "it as a reject-worthy signal if it ever does).\n"
     "- LOW / REJECT-WORTHY (low score): backend developer with LLM 'on the "
     "side' (underfit); pure PM; marketing / lead-gen; DS / ML model training; "
-    "Python livecoding from scratch / a hardcore algorithmic interview "
-    "(near-certain failure); a HARD requirement for a technical degree "
+    "{low_fit_extra}a HARD requirement for a technical degree "
     "(mandatory wording) when the profile says the candidate has none -> flag + "
     "low score (this applies ONLY when the post WORDS the degree as HARD — see "
     "REQUIREMENT SEVERITY below; a degree merely 'preferred / будет плюсом' is "
@@ -657,7 +644,7 @@ _SCORE_SCAFFOLD = (
     "- CRITICAL: each bullet MUST be a FULL, SHORT SENTENCE — substantive and "
     "self-contained — NOT a choppy fragment and NOT a single word. "
     "GOOD (full sentence, do this): «✅ Роль — про внедрение LLM (RAG, "
-    "prompt-eng), что точно совпадает с её хендз-он опытом.» "
+    "prompt-eng), что точно совпадает с практическим опытом кандидата.» "
     "BAD (terse fragment, FORBIDDEN): «✅ RAG».\n"
     "- Keep it scannable (the verdict line plus the bullets), but every bullet a "
     "complete sentence. Do NOT write a single flowing paragraph / wall of text, "
@@ -672,8 +659,6 @@ _SCORE_SCAFFOLD = (
 # salary is not a reason to lower the score. v2 is derived from v1 by exact replacements, so the
 # diff is explicit and v1 stays byte-identical. Production keeps v1 until a decision.
 SCORE_PROMPT_VERSIONS = ("v1", "v2")
-_V2_LOCATION_OLD_START = "- LOCATION PRIORITY — read the PROFILE ladder carefully."
-_V2_LOCATION_OLD_END = "> RF-office.\n"
 _V2_LOCATION_NEW = (
     "- LOCATION IS NOT SCORED. Where the job is, remote scope, relocation, visa / work-permit "
     "support, residency and timezone are decided by a separate deterministic guard AFTER you. "
@@ -684,17 +669,13 @@ _V2_LOCATION_NEW = (
 _V2_FLAG_OLD = ("- FLAG / DOWN-WEIGHT (do NOT reject, just lower the score): salary "
                 "unstated; an English-required role")
 _V2_FLAG_NEW = ("- FLAG / DOWN-WEIGHT (do NOT reject, just lower the score): an English-required role")
-_V2_TZ_OLD_START = "; a 'remote' \"\n    \"posting"
 _V2_SALARY_NEW = (
     "A posting that does not state a salary is NOT a reason to lower the score. "
 )
 
 
 def _score_scaffold_v2() -> str:
-    s = _SCORE_SCAFFOLD
-    a = s.index(_V2_LOCATION_OLD_START)
-    b = s.index(_V2_LOCATION_OLD_END, a) + len(_V2_LOCATION_OLD_END)
-    s = s[:a] + _V2_LOCATION_NEW + s[b:]
+    s = _SCORE_SCAFFOLD.replace("{location_rubric}", _V2_LOCATION_NEW, 1)
     assert _V2_FLAG_OLD in s
     s = s.replace(_V2_FLAG_OLD, _V2_FLAG_NEW, 1)
     # drop the soft-timezone deduction clause (from "; a 'remote' posting ..." up to its sentence end)
@@ -707,49 +688,52 @@ def _score_scaffold_v2() -> str:
     return s
 
 
+# Generic fallbacks. The candidate-specific wording (location ladder, anchors, extra low-fit items)
+# lives in the PROFILE (config/profile.local.yaml, gitignored); these defaults carry no personal data.
+DEFAULT_LOCATION_RUBRIC = (
+    "- LOCATION PRIORITY — follow the location ladder in the CANDIDATE PROFILE above; judge by the "
+    "EMPLOYER's market and the work format as that ladder ranks them.\n"
+)
+DEFAULT_CALIBRATION_ANCHORS = (
+    "  ~10  — A role in the wrong domain with a hard requirement the candidate lacks. "
+    "(Wrong domain + hard blocker.)",
+    "  ~42  — An adjacent domain; the candidate misses a key requirement or the interview "
+    "format is a near-certain fail.",
+    "  ~65  — The right domain and stack, but a HARD seniority requirement the candidate does "
+    "not meet. The grade is close, the hard gap prevents a strong score.",
+    "  ~88  — An exact match on role, grade and stack, no hard blockers, salary >= EUR "
+    "{floor}/month.",
+)
+DEFAULT_CALIBRATION_ANCHORS_V2 = (
+    "  ~10  — A role in the wrong domain with a hard requirement the candidate lacks. "
+    "(Wrong domain + hard blocker.)",
+    "  ~42  — An adjacent domain; the candidate misses a key requirement or the interview "
+    "format is a near-certain fail.",
+    "  ~65  — The right domain and stack, but a HARD seniority requirement the candidate does "
+    "not meet. The grade is close, the hard gap prevents a strong score.",
+    "  ~88  — An exact match on role, grade and stack, no hard blockers.",
+)
+
+
+def _anchors(lines, default, profile: Profile) -> str:
+    floor = int(round(profile.salary_floor_eur))
+    return "\n".join(lines or default).replace("{floor}", str(floor))
+
+
 def _build_calibration_block_v2(profile: Profile) -> str:
-    """The v1 anchors with their location wording removed (same four numeric levels). PURE."""
-    return (
-        "  ~10  — Backend/fullstack developer role, pure CRUD / microservices Python work, no LLM "
-        "or AI involvement, mandatory CS degree required. (Wrong domain + hard degree block.)\n"
-        "  ~42  — Data Scientist role (model training, statistics, Jupyter), Python livecoding "
-        "interview expected, fluent English required 'right now'. (Wrong domain: DS/ML training "
-        "≠ LLM engineering; coding interview = near-certain fail; language gap is an immediate "
-        "blocker.)\n"
-        "  ~65  — LLM / Prompt Engineer, RAG and prompt engineering are core, matching stack, but "
-        "3+ years commercial LLM experience required as HARD (candidate has ~1.5 years relevant). "
-        "Grade is correct, but the hard seniority gap prevents a strong score.\n"
-        "  ~88  — AI / Prompt Engineer who owns LLM behavior end-to-end (prompt engineering, RAG, "
-        "cost routing, monitoring), middle grade expected, no degree requirement. (Exact match on "
-        "role, grade and stack — no hard blockers.)"
-    )
+    """Four numeric anchors without location wording (v2). From the profile, else generic. PURE."""
+    return _anchors(getattr(profile, "calibration_anchors_v2", None), DEFAULT_CALIBRATION_ANCHORS_V2, profile)
 
 
 def _build_calibration_block(profile: Profile) -> str:
-    """Four numeric anchors that tell the model where the scale sits for THIS
-    candidate. Purely cosmetic relative to the rubric — these calibrate the
-    numeric output without changing the judgment criteria. PURE.
-    """
-    floor = int(round(profile.salary_floor_eur))
-    return (
-        f"  ~10  — Backend/fullstack developer role in an RF office, pure CRUD / "
-        f"microservices Python work, no LLM or AI involvement, mandatory CS degree "
-        f"required. (Wrong domain + wrong location + hard degree block.)\n"
-        f"  ~42  — Data Scientist role (model training, statistics, Jupyter), Python "
-        f"livecoding interview expected, fluent English required 'right now'. (Wrong "
-        f"domain: DS/ML training ≠ LLM engineering; coding interview = near-certain "
-        f"fail; language gap is an immediate blocker.)\n"
-        f"  ~65  — LLM / Prompt Engineer, fully remote, RAG and prompt engineering "
-        f"are core, matching stack, but 3+ years commercial LLM experience required "
-        f"as HARD (candidate has ~1.5 years relevant). Grade is correct, location "
-        f"is ideal, but the hard seniority gap prevents a strong score.\n"
-        f"  ~88  — AI / Prompt Engineer, international remote (foreign employer, "
-        f"remote work) OR EU relocation with visa/Blue Card sponsorship, owns LLM "
-        f"behavior end-to-end (prompt engineering, RAG, cost routing, monitoring), "
-        f"middle grade expected, no degree requirement, salary >= EUR {floor}/month. "
-        f"(Exact profile match on role, location, grade, stack — no hard blockers. "
-        f"International remote = EU relocation in priority.)"
-    )
+    """Four numeric anchors that tell the model where the scale sits for THIS candidate (v1).
+    From the profile (``calibration_anchors``), else generic. They calibrate the numeric output
+    without changing the judgment criteria. PURE."""
+    return _anchors(getattr(profile, "calibration_anchors", None), DEFAULT_CALIBRATION_ANCHORS, profile)
+
+
+def _low_fit_extra(profile: Profile) -> str:
+    return "".join(f"{x}; " for x in (getattr(profile, "score_low_fit_extra", None) or ()))
 
 
 def build_score_system(profile: Profile, tool: bool = False, version: str = "v1") -> str:
@@ -763,8 +747,11 @@ def build_score_system(profile: Profile, tool: bool = False, version: str = "v1"
     if version not in SCORE_PROMPT_VERSIONS:
         raise ValueError(f"unknown score prompt version {version!r}")
     v2 = version == "v2"
+    location = getattr(profile, "score_location_rubric", "") or DEFAULT_LOCATION_RUBRIC
     system = (
         (_score_scaffold_v2() if v2 else _SCORE_SCAFFOLD)
+        .replace("{location_rubric}", location if not v2 else "")
+        .replace("{low_fit_extra}", _low_fit_extra(profile))
         .replace("{profile_block}", render_profile_block(profile, with_location=not v2))
         .replace("{calibration_block}",
                  _build_calibration_block_v2(profile) if v2 else _build_calibration_block(profile))
@@ -1011,6 +998,9 @@ _GENDER_RULES = {
 }
 
 
+_GENDER_MARK = {"female": "(female) ", "male": "(male) "}
+
+
 def _gender_rule(gender: str) -> str:
     return _GENDER_RULES.get((gender or "").lower(), _GENDER_RULES["unspecified"])
 
@@ -1043,14 +1033,14 @@ _DRAFT_SCAFFOLD = (
     "something they are only learning, frame it honestly ('интересно / хочу "
     "развиваться в' / 'interested in / building toward'), not as completed "
     "work.\n\n"
-    "TERM LANGUAGE (when writing in Russian — natural RF-developer style, NOT a "
+    "TERM LANGUAGE (when writing in Russian — natural Russian developer style, NOT a "
     "Latin-script salad): write common tech terms in CYRILLIC transliteration "
     "the way Russian developers actually write them — промпты, воркфлоу, эвалы, "
     "фреймворки, кеширование, роутинг, пайплайны, эмбеддинги. Do NOT scatter "
     "Latin words like 'workflow', 'quality', 'evaluation', 'active human eval', "
     "'area' through Russian text. A SHORT allowlist of terms stays Latin "
     "because that IS the Russian-dev norm: RAG, LLM, Docker, API, Python, "
-    "Qdrant, FastAPI — use these as-is, but do not overload the message with "
+    "FastAPI — use these as-is, but do not overload the message with "
     "Latin. "
     "GOOD (do this): «строю RAG-пайплайны, пишу промпты и гоняю эвалы». "
     "BAD (do NOT do this): «building RAG workflow with active human eval in "
@@ -1126,6 +1116,7 @@ def build_draft_prompt(
     extracted: ExtractResult,
     raw_text: str,
     research: Optional[Dict[str, Any]] = None,
+    gender: str = "unspecified",
 ) -> str:
     payload: Dict[str, Any] = {
         "title": extracted.title,
@@ -1149,7 +1140,7 @@ def build_draft_prompt(
         else "LANGUAGE (MANDATORY): write the message in RUSSIAN.\n"
     )
     return (
-        "Write the application message for our (female) candidate.\n"
+        f"Write the application message for our {_GENDER_MARK.get((gender or '').lower(), '')}candidate.\n"
         + lang_instruction
         + company_line
         + json.dumps(payload, ensure_ascii=False)
@@ -1269,7 +1260,8 @@ def llm_draft(
     system = build_draft_system(profile) if profile is not None else DRAFT_SYSTEM
     return client.complete(
         system,
-        build_draft_prompt(extracted, raw_text, research),
+        build_draft_prompt(extracted, raw_text, research,
+                           gender=(profile.gender if profile is not None else "unspecified")),
         max_tokens=DRAFT_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(system, model),
