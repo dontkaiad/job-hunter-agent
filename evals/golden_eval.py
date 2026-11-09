@@ -533,7 +533,7 @@ def run_report(exclude_urls: Optional[str]) -> Dict[str, Any]:
                                     if k in ("precision", "recall")} for eps in (0.0, 0.05, 0.10, 0.15)}
     # calibration by CURRENT score band (unweighted share among decided; label counts, not a population claim)
     cal = collections.OrderedDict()
-    for b in BAND_NAMES:
+    for b in golden.BAND_NAMES:
         grp = [r for r in rows if golden.band_of(r["score"]) == b]
         dec = [r for r in grp if r["cls"] in ("relevant", "irrelevant")]
         k = sum(1 for r in dec if r["cls"] == "relevant")
