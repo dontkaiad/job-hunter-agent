@@ -101,8 +101,10 @@ def write_heartbeat(path: str) -> None:
     through clock.now_utc.
     """
     try:
-        with open(path, "w", encoding="ascii") as f:
+        tmp = f"{path}.tmp"            # atomic: a reader never sees a truncated, empty file
+        with open(tmp, "w", encoding="ascii") as f:
             f.write(str(int(time.time())))
+        os.replace(tmp, path)
     except Exception:
         # Liveness file only; a failed write must not take down the loop.
         pass
