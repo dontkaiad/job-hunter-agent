@@ -572,3 +572,23 @@ def test_heartbeat_task_is_done_after_amain_completes(pg_dsn, tmp_path, monkeypa
     task = captured_task.get("task")
     assert task is not None, "heartbeat_loop task was never started"
     assert task.done(), "heartbeat task must be done (cancelled) after _amain exits — no orphaned tasks"
+
+
+def test_heartbeat_thread_ticks_while_the_event_loop_is_blocked(tmp_path):
+    """A harvest blocks the loop with synchronous calls; the file must still be refreshed."""
+    import time
+    path = str(tmp_path / "hb_thread")
+
+    async def main():
+        _t, stop = serve.start_heartbeat_thread(path, interval=0.05)
+        for _ in range(100):                # the thread writes its first tick asynchronously
+            if os.path.exists(path) and open(path).read().isdigit():
+                break
+            time.sleep(0.01)
+        first = open(path).read()
+        time.sleep(1.3)                     # blocks the loop, like a synchronous scoring run
+        stop.set()
+        return first, open(path).read()
+
+    first, last = asyncio.run(main())
+    assert first.isdigit() and int(last) > int(first)

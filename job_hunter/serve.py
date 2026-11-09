@@ -121,6 +121,27 @@ async def heartbeat_loop(path: str, interval: float = HEARTBEAT_INTERVAL_S) -> N
         write_heartbeat(path)
 
 
+def start_heartbeat_thread(path: str, interval: float = HEARTBEAT_INTERVAL_S):
+    """Write the heartbeat from a DAEMON THREAD, independent of the event loop.
+
+    The harvest scores vacancies with a synchronous API client on the event loop, so for its
+    ~10-15 minutes the loop-based heartbeat cannot tick and the healthcheck (stale > 90 s) goes
+    unhealthy although the process is working. The thread keeps the file fresh while the process
+    lives; a dead process still goes stale. Returns (thread, stop_event)."""
+    import threading
+
+    stop = threading.Event()
+
+    def _run() -> None:
+        write_heartbeat(path)
+        while not stop.wait(interval):
+            write_heartbeat(path)
+
+    t = threading.Thread(target=_run, name="heartbeat", daemon=True)
+    t.start()
+    return t, stop
+
+
 def resolve_schedule_tz(name: str | None):
     """Resolve the scheduler timezone from an env value. PURE given ``name``.
 
@@ -323,6 +344,7 @@ async def _amain(cfg: Config | None = None) -> None:
     # runs concurrently under the SAME asyncio.run; cancelled in the finally.
     hb_path = heartbeat_path()
     hb_task = asyncio.create_task(heartbeat_loop(hb_path))
+    hb_thread, hb_stop = start_heartbeat_thread(hb_path)   # keeps ticking while a harvest blocks the loop
 
     # Observability hooks: promote silent Python warnings (notably the
     # "coroutine '...' was never awaited" RuntimeWarning) and unhandled
@@ -343,6 +365,7 @@ async def _amain(cfg: Config | None = None) -> None:
     finally:
         # Stop the heartbeat task first (cancel + await its CancelledError) so it
         # is fully torn down alongside the scheduler/bot — no orphaned task.
+        hb_stop.set()
         hb_task.cancel()
         try:
             await hb_task
