@@ -143,6 +143,44 @@ def resolve_schedule_tz(name: str | None):
     return datetime.now().astimezone().tzinfo
 
 
+# A cron slot may fire up to this late and still run (APScheduler misfire grace).
+MISFIRE_GRACE_S = 2 * 3600
+# A slot lost to a restart is caught up only if it is younger than this; older gaps wait for the
+# next regular slot (a harvest at 22:00 for a 10:00 slot is still useful, one two days later is not).
+CATCHUP_MAX_AGE_H = 12
+CATCHUP_DELAY_S = 30
+
+
+def catchup_run_date(last_harvest_at, now, tz, *, paused: bool = False):
+    """PURE: when to run ONE catch-up harvest after a start, or None.
+
+    The scheduler's job store is in memory, so a restart across the 10:00 slot forgets it. If the
+    latest slot passed without a completed harvest (obs.missed_harvest_slot) and is younger than
+    CATCHUP_MAX_AGE_H, run once CATCHUP_DELAY_S after start. Paused harvest never catches up."""
+    from datetime import timedelta
+
+    if paused:
+        return None
+    slot = obs.missed_harvest_slot(last_harvest_at, now, HARVEST_HOUR, HARVEST_MINUTE, tz)
+    if slot is None or now.astimezone(tz) - slot > timedelta(hours=CATCHUP_MAX_AGE_H):
+        return None
+    return now + timedelta(seconds=CATCHUP_DELAY_S)
+
+
+def schedule_catchup(scheduler, harvest_coro_func, conn, tz, now=None) -> bool:
+    """Add the one-off catch-up job when a scheduled harvest was lost to the restart."""
+    from .clock import now_utc
+
+    paused, _ = store.get_pipeline_pause_state(conn)
+    run_at = catchup_run_date(store.get_last_harvest_at(conn), now or now_utc(), tz, paused=paused)
+    if run_at is None:
+        return False
+    scheduler.add_job(harvest_coro_func, trigger="date", run_date=run_at, id="catchup_harvest",
+                      name="catchup_harvest", max_instances=1, replace_existing=True)
+    print(f"[serve] scheduled harvest was missed; catch-up run at {run_at.isoformat()}", flush=True)
+    return True
+
+
 def build_scheduler(harvest_coro_func, tz):
     """Build an ``AsyncIOScheduler`` with EXACTLY one daily harvest job.
 
@@ -181,6 +219,9 @@ def build_scheduler(harvest_coro_func, tz):
         name="daily_harvest",
         # Don't pile up missed runs if the box was asleep; just take the latest.
         coalesce=True,
+        # A slot that fires late (loop busy, short stall) still runs: up to 2 h late. A slot lost
+        # to a RESTART is not seen by the in-memory job store at all: see schedule_catchup.
+        misfire_grace_time=MISFIRE_GRACE_S,
         max_instances=1,
         replace_existing=True,
     )
@@ -268,6 +309,10 @@ async def _amain(cfg: Config | None = None) -> None:
     tz = resolve_schedule_tz(os.environ.get("SCHEDULE_TZ"))
     scheduler = build_scheduler(_scheduled_harvest, tz)
     add_staleness_job(scheduler, _scheduled_staleness_check, tz)
+    try:
+        schedule_catchup(scheduler, _scheduled_harvest, conn, tz)
+    except Exception as exc:  # noqa: BLE001 - catch-up is best effort, never blocks startup
+        print(f"[serve] catch-up check failed (ignored): {exc!r}", flush=True)
 
     print(
         f"[serve] long-polling started (db={redact_secrets(cfg.database_url)}); "

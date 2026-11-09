@@ -1019,3 +1019,33 @@ def test_asyncio_run_on_sync_lambda_is_NOT_equivalent_to_apscheduler_execution()
     # Key: iscoroutinefunction distinguishes them.
     assert asyncio.iscoroutinefunction(old_sync_job_func) is False
     assert asyncio.iscoroutinefunction(new_async_job_func) is True
+
+
+# --- catch-up of a slot lost to a restart ------------------------------------
+
+def _utc(day, h, m=0):
+    from datetime import datetime, timezone
+    return datetime(2026, 11, day, h, m, tzinfo=timezone.utc)
+
+
+def test_cron_job_has_misfire_grace_and_coalesce():
+    from job_hunter import serve
+    job = serve.build_scheduler(_noop_coro, serve.resolve_schedule_tz("UTC")).get_job("daily_harvest")
+    assert job.coalesce is True and job.misfire_grace_time == serve.MISFIRE_GRACE_S >= 3600
+
+
+def test_catchup_runs_once_when_the_slot_was_lost_to_a_restart():
+    from datetime import timezone, timedelta
+    from job_hunter import serve
+    tz = timezone.utc
+    now = _utc(9, 10, 5)                                   # restarted at 10:05
+    assert serve.catchup_run_date(_utc(8, 10, 5), now, tz) == now + timedelta(seconds=serve.CATCHUP_DELAY_S)
+    assert serve.catchup_run_date(_utc(9, 10, 1), now, tz) is None          # today's harvest ran
+    assert serve.catchup_run_date(_utc(8, 10, 5), _utc(9, 9, 0), tz) is None  # before today's slot
+    assert serve.catchup_run_date(_utc(8, 10, 5), _utc(9, 23, 0), tz) is None  # slot older than 12 h
+    assert serve.catchup_run_date(None, now, tz) is None                      # no baseline
+    assert serve.catchup_run_date(_utc(8, 10, 5), now, tz, paused=True) is None
+
+
+async def _noop_coro():  # pragma: no cover
+    return None
