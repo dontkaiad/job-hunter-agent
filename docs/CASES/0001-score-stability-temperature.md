@@ -6,6 +6,8 @@
   `AnthropicClient.complete` / `complete_tool`), `evals/score_stability_eval.py`
 - **Baseline:** [`evals/results/score_stability_2026-11-01.json`](../../evals/results/score_stability_2026-11-01.json)
 
+> **As of 2026-11-01.** The surface threshold was 60 and the judge corridor 50–70 when this was measured; since 2026-11-09 they are 50 and 40–60 (see Case 0006). The temperature finding is unaffected.**
+
 ## Summary
 
 Scoring never set a temperature, so it ran at the API default (1.0). Repeating the
@@ -114,6 +116,10 @@ correct.
 **Next step:** an accuracy eval of scoring against the operator's real decisions
 (vacancies they approved / sent vs skipped, as recorded in the DB states), to
 measure relevance rather than repeatability.
+
+## Cost
+
+The live runs of Cases 0001–0004 predate the per-call usage tagging (`llm_usage.step = 'eval:…'`, introduced 2026-11-08), so their cost was not measured separately. A ceiling of about **$0.40** was agreed for the live runs; none of them is re-run in CI (`python -m evals offline` makes no API call).
 
 ## Reproduce
 

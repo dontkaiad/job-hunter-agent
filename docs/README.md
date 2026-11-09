@@ -1,13 +1,8 @@
-# docs/ — screenshots & static assets
+# docs/
 
-This directory holds images referenced by the top-level docs. Drop the files
-here with these exact names so the existing Markdown links render:
+- [`CASES/`](CASES/README.md) — evals and a postmortem, one write-up per case (summary, methodology, n,
+  results, limitations, cost, reproduction), with committed baselines in [`../evals/results/`](../evals/results/).
+- [`EVALS.md`](EVALS.md) — what an eval is and the scoring-routing study.
 
-- **`dashboard.png`** — a screenshot of the dashboard, referenced by `README.md`.
-  Use a **de-identified** capture: the generic "Кандидат" profile (or your real
-  deploy is fine for a private screenshot, but for the public repo keep it
-  generic — no real name, photo, location, or personal profile data, consistent
-  with the rest of the repo).
-- **`cost.png`** — the daily-cost chart, referenced by `COST.md`.
-
-These images are intentionally not committed yet; add them when ready.
+The repository ships no screenshots: any image added here must be a de-identified capture (no real
+name, photo, location or personal profile data).

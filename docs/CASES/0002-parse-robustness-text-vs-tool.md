@@ -94,6 +94,10 @@ three attempts, and nine vacancies were at 2/3 — one more harvest from `score_
 **Next step:** an accuracy eval against the operator's recorded approve / skip
 decisions (see Case 0001), which would also let us audit `insufficient_content`.
 
+## Cost
+
+The live runs of Cases 0001–0004 predate the per-call usage tagging (`llm_usage.step = 'eval:…'`, introduced 2026-11-08), so their cost was not measured separately. A ceiling of about **$0.40** was agreed for the live runs; none of them is re-run in CI (`python -m evals offline` makes no API call).
+
 ## Reproduce
 
 Offline (synthetic break types, saved refusals, tool-path parking; runs in CI):

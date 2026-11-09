@@ -3,7 +3,9 @@
 Each case = a reproducible script in [`evals/`](../../evals/), a committed aggregate
 baseline in [`evals/results/`](../../evals/results/), and a write-up here with the
 same sections: **summary → methodology (what, how, n) → results → limitations →
-reproduce**.
+cost → reproduce** (checked by `tests/test_docs_cases.py`; a postmortem keeps its own structure and
+adds the mandatory ones). Cases dated before 2026-11-09 carry an *As of* note where the threshold or
+corridor they quote has since changed.
 
 | # | Case | Type | Script |
 |---|---|---|---|
@@ -20,9 +22,9 @@ For the general method (what an eval is, how to choose a metric) see
 ## What these evals do not measure
 
 **Scoring relevance** is measured only in 0006 (one labeller, n = 115). 0001–0004 measure repeatability,
-parseability and text recovery — not whether a 72 is the right score. The planned
-next eval compares the score against the operator's real approve / skip decisions
-recorded in the DB.
+parseability and text recovery — not whether a 72 is the right score. Since 2026-11-09 the operator's
+dashboard approve / reject decisions are also captured as labels (`eval_decision_labels`, see 0006);
+they cover surfaced cards only (precision of what was shown, never recall).
 
 ## Running
 

@@ -4,9 +4,6 @@ This project is built to be cheap to run. This document shows the real per-step
 costs, the daily and per-approval math, and the four design levers that keep it
 low.
 
-![Daily cost](docs/cost.png)
-<!-- Drop the daily-cost chart screenshot at docs/cost.png (see docs/README.md). -->
-
 ## Status (checked 2026-11-01)
 
 **Prices are current; the cost model below it is partly superseded.**
@@ -20,8 +17,8 @@ low.
 - The sections **"Per-step model + token map"**, **"Cost of one normal daily harvest"**
   and **"Cost of one approval"** are the 2026-06 model and are **no longer accurate for
   scoring**: scoring is now a Haiku first pass on every posting plus a Sonnet judge
-  only when the Haiku score falls in the 50–70 corridor (the Sonnet "refine" pass was
-  removed), through a forced tool call, at `temperature=0`, with a much larger system
+  only when the Haiku score falls in the judge corridor (50–70 when this was written, 40–60 since
+  2026-11-09; the Sonnet "refine" pass was removed), through a forced tool call, at `temperature=0`, with a much larger system
   prompt. Sonnet is therefore **not** "⅔ of the daily bill" any more, and the
   $0.13/day and $4.8/month figures should not be quoted. They are kept as history.
 - **Measured replacement:** see "Measured per-call cost" below. A new daily total is
@@ -42,7 +39,7 @@ prices as in the table below.
 | score, corridor judge | Sonnet 4.6 | **$0.0132** | 1,108 | 2,707 / 677 | 435 |
 
 So one ordinary posting costs about **$0.0097** (extract + Haiku score) and about
-**$0.0229** when the Haiku score lands in the 50–70 corridor and the Sonnet judge runs.
+**$0.0229** when the Haiku score lands in the judge corridor (then 50–70, now 40–60) and the Sonnet judge runs.
 Caveats: n = 5 postings, one run; the Sonnet figure includes whatever cache state the
 run happened to have (per-call range $0.0098–$0.0218, the highest being the first call
 of the run); the share of postings that reach the corridor is **not measured here**;

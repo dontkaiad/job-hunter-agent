@@ -2,6 +2,8 @@
 
 > Reproducible evals, committed baselines and write-ups live in [`evals/`](../evals/) and
 > [`docs/CASES/`](CASES/README.md). This page is the general method plus the first case study.
+>
+> **As of 2026-11-09:** the surface threshold is **50** and the judge corridor **[40, 60]** (they were 60 and [50, 70] when the first case study below was measured; the study's numbers are historical). See [Case 0006](CASES/0006-golden-set-and-geo-guard.md).
 
 ## What an eval is
 
@@ -49,7 +51,7 @@ numbers look close.
 ### Context
 
 Each job vacancy is scored 0–100 for relevance to the candidate profile. The
-score drives a binary surface/reject decision at threshold 60. Originally every
+score drives a binary surface/reject decision at the surface threshold (60 when this study was run, 50 since 2026-11-09). Originally every
 vacancy went through Sonnet (expensive). The goal: replace with Haiku (cheap,
 ~20× cheaper) without losing decision quality where it matters.
 
@@ -91,7 +93,7 @@ one?"*
 |---|---|
 | **Signed bias** `mean(haiku − sonnet)` | Systematic over/under-scoring; positive = Haiku over-scores |
 | **Distribution** (higher / lower / equal count) | Whether errors are symmetric noise or a directional shift |
-| **Corridor analysis** `[50, 70]` | Separate metrics for vacancies near the threshold, where errors are costly |
+| **Corridor analysis** (the judge corridor) | Separate metrics for vacancies near the threshold, where errors are costly |
 | **Agreement rate** | Fraction of vacancies where both models make the same surface/reject call |
 | **Confusion matrix** | false-reject (good vacancy missed), false-surface (junk surfaced) |
 
@@ -106,7 +108,7 @@ this, MAE doesn't.
 ### Sampling strategy
 
 The first eval sampled the 30 most recent vacancies. Most were confidently
-rejected (score < 40). The threshold corridor [50–70] was barely represented,
+rejected (score < 40). The threshold corridor (then [50–70]) was barely represented,
 so the eval never tested the decision boundary it was supposed to protect.
 
 Fixed with stratified sampling: up to 8 vacancies per score band
@@ -138,14 +140,13 @@ weaker model's uncertainty.
 Fix: **route by confidence**, not by surface/reject outcome.
 
 ```
-haiku_score < 50    →  confident reject  →  Haiku score final, no second call
-haiku_score 50–70   →  uncertainty zone  →  judge re-scores; judge's score FINAL
-haiku_score > 70    →  confident surface →  Haiku score final; judge refines
-                                            Обоснование text only (quality)
+haiku_score < 40    →  confident reject  →  Haiku score final, no second call
+haiku_score 40–60   →  uncertainty zone  →  judge re-scores; judge's score FINAL
+haiku_score > 60    →  confident surface →  Haiku score final, no second call
 ```
 
-The corridor `[50, 70]` is intentionally wider than the threshold `60` in both
-directions — it catches vacancies Haiku might mis-score on either side of the
+The corridor `[40, 60]` is intentionally wider than the threshold `50` in both
+directions (as of 2026-11-09; it was `[50, 70]` around `60`) — it catches vacancies Haiku might mis-score on either side of the
 decision boundary.
 
 Fallback: if the judge call fails inside the corridor, Haiku's score is used.
@@ -177,8 +178,8 @@ Plan: run the same eval script with DeepSeek as the cheap model, comparing
 against the stored Sonnet baseline. Pass criteria: `|bias| < 8`,
 `corridor false-reject = 0`, `corridor false-surface = 0`.
 
-See [GitHub issue #TBD](https://github.com/dontkaiad/job-hunter-agent/issues)
-for migration steps and gotchas.
+See [GitHub issue #24](https://github.com/dontkaiad/job-hunter-agent/issues/24)
+(scoring cost: Batch, Haiku cache, model choice) for the cost side of this decision.
 
 ---
 

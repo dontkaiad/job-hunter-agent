@@ -14,9 +14,6 @@ human-readable rationale. Only for the roles the operator *approves* does it run
 source-grounded company research and draft an application. Nothing is ever sent
 automatically: a human approves at the surface gate and again before send.
 
-![Dashboard](docs/dashboard.png)
-<!-- Drop a de-identified dashboard screenshot at docs/dashboard.png (see docs/README.md). -->
-
 ## Features
 
 - **Explainable AI scoring** — a rubric-driven Claude Sonnet judge returns a
@@ -70,7 +67,13 @@ token math, and the four cost-aware design levers are in [COST.md](COST.md).
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design, state machine, data model, security, observability, scope choices
 - [DECISIONS.md](DECISIONS.md) — ADR-style record of the key AI-integration decisions
 - [COST.md](COST.md) — real cost numbers and the cost-aware design
-- [docs/CASES/](docs/CASES/) — evals and a postmortem: score stability (temperature 0), parse robustness (forced tool use), the 2026-10 credit-outage postmortem, link-only fetch. Reproduce offline with `python -m evals offline`
+- [docs/CASES/](docs/CASES/README.md) — evals and a postmortem, each with methodology, n, results, limitations, reproduction and cost. Reproduce offline with `python -m evals offline`:
+  - [0001](docs/CASES/0001-score-stability-temperature.md) score stability (temperature 0)
+  - [0002](docs/CASES/0002-parse-robustness-text-vs-tool.md) parse robustness (forced tool use)
+  - [0003](docs/CASES/0003-postmortem-2026-10-credit-outage.md) the 2026-10 credit-outage postmortem
+  - [0004](docs/CASES/0004-link-only-fetch.md) link-only fetch
+  - [0005](docs/CASES/0005-heuristic-vs-model-extract.md) heuristic vs model extract
+  - [0006](docs/CASES/0006-golden-set-and-geo-guard.md) golden set (precision / recall of the score) and the geo guard
 - `DESIGN.md` / `SCORING.md` — the authoritative low-level spec
 
 ## Quick start

@@ -8,6 +8,8 @@
   `scripts/oneoff/reextract_fallback.py`
 - **Baseline:** [`evals/results/extract_shadow_check_2026-11-08.json`](../../evals/results/extract_shadow_check_2026-11-08.json)
 
+> **As of 2026-11-08.** Thresholds quoted below (< 25 delete / 25–59 keep / ≥ 60 surface) and the corridor 50–70 are those of 2026-11-08; since 2026-11-09 the surface threshold is 50 and the corridor 40–60 (Case 0006).**
+
 ## Summary
 
 From 2026-11-02 to 11-05 the account had no API credits. Scoring was already safe in
@@ -97,6 +99,10 @@ New scores, sorted: 8 ×11, 12, 15, 18 ×6, 28 ×2.
 
 The topic gate stays enforced. Whether it cuts real AI roles is now measurable from the
 new shadow kind; that is the next data to read.
+
+## Cost
+
+Measured from API usage (`llm_usage`, step `eval:reextract_shadow_check`): the shadow check, 21 extractions + 21 scorings on Haiku, **$0.188** (the pre-run estimate was $0.25). The repair itself (`reextract-unscored`, 75 Haiku extractions, `eval:reextract_unscored`) cost **$0.217**. Nothing else was spent.
 
 ## Reproduce
 

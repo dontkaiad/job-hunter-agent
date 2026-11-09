@@ -77,6 +77,10 @@ derived from it).
   the report's 57 returned, a difference of 3 that is not explained (the report's 5
   "already in DB" may account for part of it).
 
+## Methodology
+
+A blameless reconstruction from four sources: the code at the time, the commit message of the fix (`0e14afd`), log extracts and database counts on the server (re-checked on 2026-11-01), and the phase-5 recovery report. Facts reported by the operator and numbers that are estimates rather than counts are marked where they appear. **n:** the vacancy and URL counts quoted in "Impact" (each states how it was obtained; deleted rows are gone with their audit trail, so some figures are estimates with stated error).
+
 ## Timeline
 
 | When | Event |
@@ -134,6 +138,16 @@ not reconstructed.
   like a quiet day.
 - The alert has had one real-world firing since (Case 0002); its thresholds
   (> 20 %) are unvalidated beyond that.
+
+## Limitations
+
+- Vacancies deleted during the outage are not recoverable from the database; the loss is counted from logs and URLs, and where only an estimate exists it is labelled as one.
+- Some recovery figures come from the phase-5 report and were only partly re-checked against the DB.
+- One incident, one account: the follow-ups are hypotheses about prevention, not measured effects.
+
+## Cost
+
+The analysis was read-only (database queries and log reading): no API spend. The recovery re-fetched the lost Telegram posts and passed them through the normal pipeline, so its model cost is part of the ordinary scoring spend of those harvests and was not measured separately. The cost of the outage itself was the lost vacancies, not money.
 
 ## Reproduce
 

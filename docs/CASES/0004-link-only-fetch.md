@@ -7,6 +7,8 @@
   `evals/link_fetch_eval.py`, `scripts/oneoff/fetch_link_only_stubs.py`
 - **Baseline:** [`evals/results/link_fetch_2026-11-01.json`](../../evals/results/link_fetch_2026-11-01.json)
 
+> **As of 2026-11-01.** The threshold was 60 ("nothing would surface" below means < 60); since 2026-11-09 it is 50 (Case 0006). The fetch / recovery results are unaffected.**
+
 ## Summary
 
 Many Telegram posts are just a label and a link to the real vacancy (a teletype page,
@@ -80,6 +82,10 @@ What this does and does not say:
 **Next step:** score-accuracy eval against the operator's real approve / skip
 decisions, to check whether low scores on recovered pages agree with a human
 (Case 0001).
+
+## Cost
+
+The live runs of Cases 0001–0004 predate the per-call usage tagging (`llm_usage.step = 'eval:…'`, introduced 2026-11-08), so their cost was not measured separately. A ceiling of about **$0.40** was agreed for the live runs; none of them is re-run in CI (`python -m evals offline` makes no API call).
 
 ## Reproduce
 
