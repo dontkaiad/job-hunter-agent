@@ -169,21 +169,85 @@ def paired_metrics(rows: List[Dict[str, Any]], threshold: float) -> Dict[str, An
     return out
 
 
-def run_report() -> Dict[str, Any]:
+def confusion(rows: List[Dict[str, Any]], key: str, threshold: float) -> Dict[str, Any]:
+    """Unweighted decided-card confusion at `threshold` for score `key` ('before' | 'after'). PURE."""
+    tp = sum(1 for r in rows if r["cls"] == "relevant" and r[key] >= threshold)
+    fn = sum(1 for r in rows if r["cls"] == "relevant" and r[key] < threshold)
+    fp = sum(1 for r in rows if r["cls"] == "irrelevant" and r[key] >= threshold)
+    tn = sum(1 for r in rows if r["cls"] == "irrelevant" and r[key] < threshold)
+    return {"relevant_above": tp, "relevant_below": fn, "irrelevant_above": fp, "irrelevant_below": tn,
+            "precision": round(tp / (tp + fp), 3) if tp + fp else None,
+            "recall": round(tp / (tp + fn), 3) if tp + fn else None}
+
+
+def movements(rows: List[Dict[str, Any]], threshold: float) -> Dict[str, Any]:
+    """How the cards moved across the threshold, by class. PURE."""
+    out: Dict[str, Any] = {}
+    for cls in ("relevant", "irrelevant", "excluded"):
+        g = [r for r in rows if r["cls"] == cls]
+        out[cls] = {
+            "n": len(g),
+            "below_before": sum(1 for r in g if r["before"] < threshold),
+            "rose_above": sum(1 for r in g if r["before"] < threshold <= r["after"]),
+            "above_before": sum(1 for r in g if r["before"] >= threshold),
+            "fell_below": sum(1 for r in g if r["after"] < threshold <= r["before"]),
+        }
+    return out
+
+
+def calibration(rows: List[Dict[str, Any]], key: str) -> Dict[str, Any]:
+    out = {}
+    for b in golden.BAND_NAMES:
+        dec = [r for r in rows if golden.band_of(r[key]) == b and r["cls"] in ("relevant", "irrelevant")]
+        k = sum(1 for r in dec if r["cls"] == "relevant")
+        out[b] = {"decided": len(dec), "relevant": k}
+    return out
+
+
+def run_report(exclude_urls: Optional[str] = None) -> Dict[str, Any]:
+    from evals.golden_eval import _frame_with_scores
+
     cfg, conn = db_ctx()
-    items = {r["item_id"]: r for r in dev_items(conn)}
+    T = cfg.surface_threshold
+    devs = {r["item_id"]: r for r in dev_items(conn)}
+    meta = {r["item_id"]: r for r in conn.execute(
+        "SELECT DISTINCT ON (s.item_id) s.item_id, s.band, s.stratum, l.label, l.chips FROM eval_sample s "
+        "JOIN eval_labels l ON l.sample_id = s.id WHERE NOT s.is_control ORDER BY s.item_id, s.wave").fetchall()}
     sc = collections.defaultdict(dict)
     for r in conn.execute("SELECT item_id, version, status, score FROM eval_prompt_scores").fetchall():
-        if r["item_id"] in items and r["status"] == "scored":
+        if r["item_id"] in devs and r["status"] == "scored":
             sc[r["item_id"]][r["version"]] = r["score"]
-    # "before" = the stored v1 score from the same corridor (eval_frame) unless v1 was re-run here
     for r in conn.execute("SELECT item_id, status, current_score FROM eval_frame").fetchall():
-        if r["item_id"] in items and r["status"] == "scored":
+        if r["item_id"] in devs and r["status"] == "scored":
             sc[r["item_id"]].setdefault("v1", r["current_score"])
-    rows = [{"label": items[i]["label"], "before": v["v1"], "after": v["v2"]} for i, v in sc.items()
-            if "v1" in v and "v2" in v]
-    out = {"dev_vacancies": len(items), "paired": len(rows), "threshold": cfg.surface_threshold}
-    out["all_labels"] = paired_metrics(rows, cfg.surface_threshold)
+    rows = []
+    for i, v in sc.items():
+        if "v1" in v and "v2" in v and meta[i]["stratum"] == "core":
+            chips = [c for c in (meta[i]["chips"] or "").split(",") if c]
+            rows.append({"item_id": i, "label": meta[i]["label"], "cls": golden.classify(meta[i]["label"], chips),
+                         "before": v["v1"], "after": v["v2"], "stratum_band": meta[i]["band"]})
+    out: Dict[str, Any] = {"dev_vacancies": len(devs), "paired_core": len(rows), "threshold": T,
+                           "not_paired": len(devs) - len(rows),
+                           "paired_all_labels": paired_metrics(rows, T)}
+    out["confusion_unweighted"] = {"v1": confusion(rows, "before", T), "v2": confusion(rows, "after", T)}
+    out["movements_across_threshold"] = movements(rows, T)
+    out["calibration_by_score_band"] = {"v1": calibration(rows, "before"), "v2": calibration(rows, "after")}
+    # design-weighted precision / recall: frame sizes scaled by the dev share of each band's cards
+    _c, _sel, frame = _frame_with_scores(cfg, exclude_urls)
+    sizes = collections.Counter(f["band"] for f in frame)
+    allcore = collections.Counter(m["band"] for m in meta.values() if m["stratum"] == "core")
+    devcore = collections.Counter(r["stratum_band"] for r in rows)
+    scaled = {b: sizes.get(b, 0) * devcore.get(b, 0) / allcore[b] for b in allcore if allcore[b]}
+    w = {}
+    for ver, key in (("v1", "before"), ("v2", "after")):
+        rr = [{**r, "score": r[key]} for r in rows]
+        e = golden.design_estimate(rr, scaled, T)
+        iv = golden.design_interval(rr, scaled, T, reps=1500)
+        w[ver] = {"precision": None if e["precision"] is None else round(e["precision"], 3),
+                  "precision_95": [round(x, 3) if x is not None else None for x in iv["precision"]],
+                  "recall": None if e["recall"] is None else round(e["recall"], 3),
+                  "recall_95": [round(x, 3) if x is not None else None for x in iv["recall"]]}
+    out["design_weighted_at_T"] = {**w, "note": "frame sizes scaled to the dev share of each band: approximate; dev only"}
     return out
 
 
@@ -196,7 +260,8 @@ def main(argv=None) -> int:
     r.add_argument("--versions", default="v2")
     r.add_argument("--judge-share", type=float, default=0.30)
     add_budget_args(r)
-    sub.add_parser("report")
+    rp = sub.add_parser("report")
+    rp.add_argument("--exclude-urls", default=None)
     a = ap.parse_args(argv)
     if a.cmd == "diff":
         print(prompt_diff())
@@ -205,7 +270,7 @@ def main(argv=None) -> int:
     elif a.cmd == "run":
         report("score prompt: paired dev run", run_score(a.versions.split(","), a.max_usd, a.confirm, a.judge_share))
     else:
-        report("score prompt: paired v1 -> v2 (no API)", run_report())
+        report("score prompt: paired v1 -> v2 (no API)", run_report(a.exclude_urls))
     return 0
 
 

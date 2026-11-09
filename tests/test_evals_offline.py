@@ -146,3 +146,17 @@ def test_restore_candidates_selects_only_recent_system_rejects_in_band(conn):
     mk(2, 45); mk(3, 65); mk(4, 55, days_old=40); mk(5, 55, state="surfaced")
     mk(6, 55, reason="hard reject: salary below floor"); mk(7, 55, actor="user")
     assert restore_candidates(conn, 30) == [ok]
+
+
+def test_score_prompt_confusion_and_movements():
+    from evals import score_prompt_eval as sp
+
+    rows = [{"cls": "relevant", "before": 45, "after": 55}, {"cls": "relevant", "before": 70, "after": 40},
+            {"cls": "irrelevant", "before": 30, "after": 52}, {"cls": "irrelevant", "before": 60, "after": 61},
+            {"cls": "excluded", "before": 55, "after": 40}]
+    c1, c2 = sp.confusion(rows, "before", 50), sp.confusion(rows, "after", 50)
+    assert (c1["relevant_above"], c1["irrelevant_above"]) == (1, 1) and c1["precision"] == 0.5
+    assert (c2["relevant_above"], c2["irrelevant_above"]) == (1, 2)
+    m = sp.movements(rows, 50)
+    assert m["relevant"]["rose_above"] == 1 and m["relevant"]["fell_below"] == 1
+    assert m["irrelevant"]["rose_above"] == 1 and m["excluded"]["fell_below"] == 1
