@@ -203,20 +203,15 @@ def _load_extracted(item: WorkItem) -> Optional[ExtractResult]:
 
 
 def _salary_max_rub(extracted: ExtractResult, deps: Deps) -> Optional[float]:
-    """Convert the top of the salary range to RUB, if possible."""
-    if extracted.salary_max is None and extracted.salary_min is None:
-        return None
-    top = extracted.salary_max if extracted.salary_max is not None else extracted.salary_min
-    if extracted.currency is None:
-        return None
-    if extracted.currency.upper() == "RUB":
-        return float(top)
-    if deps is None or deps.fx is None:
-        return None
-    try:
-        return deps.fx.convert(top, extracted.currency)
-    except Exception:
-        return None
+    """The top of the salary range as a plausible MONTHLY amount in RUB; None = unknown.
+
+    Goes through the same HEURISTIC period/plausibility rules as the market benchmark
+    (market_worth.monthly_top_rub): a yearly figure is divided by 12, while hourly or daily rates,
+    extraction slips and garbage are "unknown". The hard salary guard never rejects on unknown."""
+    from .market_worth import monthly_top_rub
+
+    convert = deps.fx.convert if deps is not None and deps.fx is not None else None
+    return monthly_top_rub(extracted.salary_min, extracted.salary_max, extracted.currency, convert)
 
 
 def _salary_floor_rub(deps: Deps) -> Optional[float]:

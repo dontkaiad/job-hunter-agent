@@ -141,6 +141,38 @@ def normalize_monthly(
     return None, "intl", "implausible_high"
 
 
+def monthly_top_rub(salary_min, salary_max, currency, convert=None) -> Optional[float]:
+    """The TOP of a salary range as a plausible MONTHLY amount in RUB, or None = unknown. PURE.
+
+    The salary hard-reject guard uses this so it only ever compares real monthly figures against the
+    monthly floor. Same HEURISTIC thresholds as ``normalize_monthly``: a yearly figure is divided by
+    12; hourly / daily rates, extraction slips and absurd values come back as None, and the guard
+    treats None as "unknown", never a reject. ``convert(amount, currency) -> RUB`` (an
+    ``fx.FxRates.convert``) is needed for every currency but RUB; without it, or when it fails,
+    the answer is None."""
+    top = salary_max if salary_max is not None else salary_min
+    cur = (currency or "").upper().strip()
+    if top is None or not cur:
+        return None
+    top = float(top)
+    if cur == "RUB":
+        if top < RU_MONTH_MIN or top > RU_ANNUAL_MAX:
+            return None
+        return top if top <= RU_ANNUAL_MIN else top / 12.0
+    if convert is None:
+        return None
+    try:
+        top_rub, eur_rub = convert(top, cur), convert(1.0, "EUR")
+    except Exception:  # noqa: BLE001 - a rate failure is "unknown", never a reject
+        return None
+    if not top_rub or not eur_rub:
+        return None
+    top_eur = top_rub / eur_rub
+    if top_eur < INTL_MONTH_MIN_EUR or top_eur > INTL_ANNUAL_MAX_EUR:
+        return None
+    return top_rub if top_eur < INTL_ANNUAL_MIN_EUR else top_rub / 12.0
+
+
 def _grade(seniority) -> Optional[str]:
     """Single grade from the extracted seniority text; 'middle+' counts as middle; mixed values -> None."""
     t = (seniority or "").lower().strip()
