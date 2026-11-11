@@ -314,7 +314,7 @@ def render_surfaced(item: store.WorkItem, salary_rub: Optional[float] = None) ->
 
 
 # Empty-band reply for /borderline (exact one-line string, Russian).
-BORDERLINE_EMPTY = "нет пограничных вакансий (50-59)"
+BORDERLINE_EMPTY = "нет пограничных вакансий (40-49)"
 # Keep the /borderline reply safely under Telegram's 4096-char message limit;
 # beyond this the renderer stops and notes the remainder ("…и ещё N").
 _BORDERLINE_CHAR_BUDGET = 3900

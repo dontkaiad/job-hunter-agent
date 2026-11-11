@@ -1096,7 +1096,7 @@ def test_render_borderline_inline_bullets_parsed():
 
 
 def test_render_borderline_empty_one_liner():
-    assert bot.render_borderline([]) == "нет пограничных вакансий (50-59)"
+    assert bot.render_borderline([]) == "нет пограничных вакансий (40-49)"
     assert bot.render_borderline([]) == bot.BORDERLINE_EMPTY
 
 
@@ -1142,7 +1142,7 @@ def test_handle_borderline_empty_band_one_liner(conn, deps):
     b = bot.JobHunterBot(_cfg(), conn, deps)
     msg = FakeAnswerMessage()
     asyncio.run(b.handle_borderline(msg))
-    assert msg.replies[0]["text"] == "нет пограничных вакансий (50-59)"
+    assert msg.replies[0]["text"] == "нет пограничных вакансий (40-49)"
 
 
 def test_handle_borderline_is_read_only(conn, deps, monkeypatch):
