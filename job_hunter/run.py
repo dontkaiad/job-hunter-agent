@@ -73,6 +73,25 @@ def _drive_items_own_connection(cfg, item_ids: List[int], deps) -> List[int]:
         conn.close()
 
 
+# How many EXTRACTED items one harvest looks at. EXTRACTED holds the parked vacancies (`insufficient` /
+# `link_only`): they are not re-scored until their input changes, and a fetch of the real page is what
+# changes it. The old limit of 100 (oldest `updated_at` first; parking does not touch `updated_at`) kept
+# picking the same 100 and starved the rest, which never got their fetch. Parked items cost no model
+# call, so a generous cap is cheap. The other states keep the default limit.
+EXTRACTED_BACKLOG_LIMIT = 1000
+
+
+def items_to_process(conn, new_ids) -> set:
+    """Ids a harvest drives to its gate: this run's new items + the standing backlog in the working states.
+    The SURFACED backlog is deliberately NOT here (no re-notification)."""
+    ids = set(new_ids)
+    for st in ("discovered", "extracted", "scored", "approved", "researched"):
+        limit = EXTRACTED_BACKLOG_LIMIT if st == "extracted" else 100
+        for item in store.list_by_state(conn, st, limit=limit, include_score_failed=False):
+            ids.add(item.id)
+    return ids
+
+
 async def process_items(cfg, conn, item_ids: List[int], deps) -> List[int]:
     """Score / gate the harvest's items WITHOUT blocking the event loop.
 
@@ -275,10 +294,7 @@ async def harvest(cfg: Config, conn, bot: JobHunterBot, deps) -> List[int]:
     # bug). They remain in SURFACED in the DB (visible to the bot/dashboard);
     # advance() remains the sole state writer. "Newly surfaced this run" is
     # derived from these results, NOT persisted.
-    to_process = set(new_ids)
-    for st in ("discovered", "extracted", "scored", "approved", "researched"):
-        for item in store.list_by_state(conn, st, include_score_failed=False):
-            to_process.add(item.id)
+    to_process = items_to_process(conn, new_ids)
     # Fresh per-run scoring counters; halt_on_fatal stops scoring on the first
     # credits/auth error (every further call would fail too).
     run_stats = pipeline.ScoreRunStats(halt_on_fatal=True)
