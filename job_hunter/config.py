@@ -54,6 +54,9 @@ class Config:
     score_prompt_version: str = "v2"
     # Geo guard (geo.py): on when the private profile has `eligibility` constraints.
     geo_guard: bool = True
+    # Hard salary-floor guard (pipeline.py, scoring.salary_guard_reject). On by default; SALARY_GUARD_ENABLED=0
+    # (or false/no/off) skips ONLY the reject: salary_floor_eur and the prompts that quote it are untouched.
+    salary_guard: bool = True
 
     # Ingestion mode: "web" (default, public t.me/s/ over HTTP, NO auth) or
     # "telethon" (optional userbot fallback, requires api_id/hash/session).
@@ -280,6 +283,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         surface_threshold=surface_threshold,
         score_prompt_version=score_prompt_version,
         geo_guard=(get("GEO_GUARD") or "1").lower() not in ("0", "false", "no", "off"),
+        salary_guard=(get("SALARY_GUARD_ENABLED") or "1").lower() not in ("0", "false", "no", "off"),
         ingest_mode=(get("INGEST_MODE") or "web").lower(),
         telegram_api_id=_int_or_none(get("TELEGRAM_API_ID")),
         telegram_api_hash=get("TELEGRAM_API_HASH") or None,

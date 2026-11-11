@@ -144,6 +144,9 @@ class Deps:
     # Geo guard: on only when explicitly enabled AND the private profile carries eligibility
     # constraints (profile.eligibility). Off by default so tests / the public example are inert.
     geo_guard: bool = False
+    # Hard salary-floor reject (scoring.salary_guard_reject). On by default so a bare Deps() keeps the
+    # guard; build_deps passes cfg.salary_guard (env SALARY_GUARD_ENABLED). Off skips only the reject.
+    salary_guard: bool = True
     # Candidate profile (loaded from config/profile.*.yaml). Drives the rubric
     # profile block, the draft gender/honesty/signature, and the salary floor.
     # Defaults to the GENERIC example profile so deterministic-only / test runs
@@ -785,7 +788,7 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
 
     salary_rub = _salary_max_rub(extracted, deps)
     floor_rub = _salary_floor_rub(deps)
-    if scoring.salary_guard_reject(salary_rub, floor_rub):
+    if (deps is None or deps.salary_guard) and scoring.salary_guard_reject(salary_rub, floor_rub):
         store.update_state(
             conn, item.id, REJECTED,
             from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,
