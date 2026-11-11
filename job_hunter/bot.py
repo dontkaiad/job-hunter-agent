@@ -473,7 +473,7 @@ def _borderline_reason(item: store.WorkItem) -> str:
 def render_borderline(items: List[store.WorkItem]) -> str:
     """Render the COMPACT /borderline list. PURE.
 
-    READ-ONLY browse view of cards scoring in [50, 60). Multi-line card block:
+    READ-ONLY browse view of cards scoring in [40, 50). Multi-line card block:
 
         52 — Bell Integrator · AI/LLM Инженер
            ⚠️ senior-грейд · обязательный диплом
@@ -895,7 +895,7 @@ class JobHunterBot:
             disable_web_page_preview=True,
         )
 
-    # Half-open borderline band [BORDERLINE_MIN, BORDERLINE_MAX): 50..59.
+    # Half-open borderline band [BORDERLINE_MIN, BORDERLINE_MAX): 40..49.
     @property
     def BORDERLINE_MAX(self) -> float:  # noqa: N802 - exclusive: T itself is surfaced
         return float(self.cfg.surface_threshold)
@@ -905,10 +905,10 @@ class JobHunterBot:
         return float(self.cfg.surface_threshold) - 10.0
 
     async def handle_borderline(self, message) -> None:  # noqa: ANN001
-        """READ-ONLY /borderline: list cards scoring [50, 60), highest-first.
+        """READ-ONLY /borderline: list cards scoring [40, 50), highest-first.
 
         Queries ``work_items`` for relevance_score in the half-open band
-        [50, 60) REGARDLESS of state (borderline cards usually sit in
+        [40, 50) REGARDLESS of state (borderline cards usually sit in
         'rejected'), renders the COMPACT list, and replies to the requesting
         chat with link previews disabled. It NEVER advances, updates state,
         surfaces, drafts, or sends a card — it only SELECTs and answers text.
@@ -981,9 +981,9 @@ class JobHunterBot:
         """Route a freshly-added item to the operator by score band, REUSING the
         existing renderers (no parallel card renderer):
 
-          - SURFACED (score >= 60): the full card + Approve/Backlog/Skip buttons
+          - SURFACED (score >= 50): the full card + Approve/Backlog/Skip buttons
             via ``notify_surfaced`` — byte-identical to a harvested surfaced card.
-          - borderline [50, 60): the COMPACT ``render_borderline`` block (the same
+          - borderline [40, 50): the COMPACT ``render_borderline`` block (the same
             renderer the /borderline list uses), no action buttons.
           - rejected (score < 50, incl. salary-guard hard rejects): a single
             "отклонено: score N · <reason>" line. The item sits in 'rejected'
