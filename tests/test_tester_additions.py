@@ -299,14 +299,14 @@ def test_salary_max_rub_uses_salary_min_when_max_absent():
 
     class StaticFx:
         def convert(self, amount, currency):
-            return float(amount) * 90.0 if currency == "USD" else None
+            return float(amount) * {"USD": 90.0, "EUR": 100.0}.get(currency, float("nan"))
 
     deps = Deps(fx=StaticFx())
     ex = ExtractResult(title="t", source_channel="@c",
-                       salary_min=1000.0, salary_max=None, currency="USD")
+                       salary_min=2000.0, salary_max=None, currency="USD")
     result = _salary_max_rub(ex, deps)
-    # salary_min 1000 USD * 90 = 90000 RUB
-    assert result == pytest.approx(90000.0)
+    # salary_min 2000 USD * 90 = 180000 RUB (a plausible monthly figure: 1 800 EUR-equivalent)
+    assert result == pytest.approx(180000.0)
 
 
 # ---------------------------------------------------------------------------
