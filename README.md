@@ -27,11 +27,23 @@ automatically: a human approves at the surface gate and again before send.
 - **Human-in-the-loop pipeline** — a Telegram bot (inline Approve / Backlog /
   Skip) and a read/act React dashboard drive the *same* state machine. The agent
   proposes; the human disposes.
-- **Borderline band** — postings scoring 50–59 are surfaced in a dedicated
-  review view so near-misses are examined, not silently dropped.
-- **Cost-aware model routing** — Haiku for the high-volume steps, Sonnet
-  reserved for the single judgment step, prompt caching where it actually
-  engages. Steady-state ≈ **$0.13 per daily harvest** (see [COST.md](COST.md)).
+- **Borderline band** — postings scoring 40–49, just below the surface
+  threshold (T = 50), are listed in a dedicated review view so near-misses are
+  examined, not silently dropped.
+- **Pluggable sources** — one `Source` interface behind several feeds: public
+  Telegram channels (a plain web reader, or Telethon as an option), the Jobicy
+  API, We Work Remotely RSS, Habr Career, the monthly Hacker News "Who is
+  hiring" thread, and add-by-URL for any single vacancy. Each non-Telegram
+  source is opt-in through the environment (see `.env.example`).
+- **Market analysis** — a dashboard page built from the collected pool: salary
+  benchmark (currencies converted, pay period guessed by a labelled
+  heuristic), stack, grade and benefits frequencies.
+- **Competencies** — a hand-curated skill inventory with code-level evidence
+  per skill, crossed with how often the market asks for each skill.
+- **Cost-aware model routing** — Haiku for the high-volume steps and the first
+  scoring pass; Sonnet only as the judge when the Haiku score falls in the
+  40–60 corridor; prompt caching where it actually engages. Measured cost per
+  call is in [COST.md](COST.md).
 
 ## Tech stack
 
@@ -43,9 +55,10 @@ automatically: a human approves at the surface gate and again before send.
 - **Infra:** Docker Compose on a single VPS, Caddy reverse proxy + TLS
 - **External:** live, no-key FX (open.er-api.com, with frankfurter as the fallback) for salary normalization
 
-> **Roadmap (not yet built):** the Competencies view (currently a stub), the
-> Market analysis view (currently a stub), and support for additional job
-> sources beyond the current channels.
+> **Roadmap (not yet built):** further job sources beyond the ones listed
+> above; the cost model in [COST.md](COST.md) still lacks a measured daily
+> total (it needs real ingest volume and the share of postings that reach the
+> judge corridor).
 
 ## Architecture in brief
 
@@ -58,9 +71,14 @@ security model, and scope choices are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Cost
 
-Steady-state ≈ **$0.13 per daily harvest** (~13 postings, extract + score) and
-≈ **$0.01 per approved vacancy** (research + draft). The full method, per-step
-token math, and the four cost-aware design levers are in [COST.md](COST.md).
+Measured from real API responses (`python -m evals.cost_probe`, 2026-11-01): one
+ordinary posting costs about **$0.0097** for extract + the Haiku first pass
+(≈ 2.1k + 4.5k input tokens, ≈ 0.6k output), and about **$0.0229** when the
+Sonnet judge also runs. The daily bill is the ingest volume times that mix; no
+daily total is claimed, because the corridor share is not recorded. The older
+modelled figures (including a per-day figure) are superseded and kept in
+[COST.md](COST.md) only as history, together with the per-step token math and
+the cost-aware design levers.
 
 ## Documentation
 
