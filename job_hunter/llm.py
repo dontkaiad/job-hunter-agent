@@ -527,17 +527,6 @@ def _render_bullets(items: List[str]) -> str:
     return "\n".join(f"  - {line}" for line in items) if items else "  - (none)"
 
 
-def _never_claim_block(profile: Profile) -> str:
-    """'Never claim' lines for the SCORING profile block; empty when the profile has none. PURE."""
-    if not profile.never_claim:
-        return ""
-    return (
-        "- Never claimed (the candidate does NOT do these; they are NOT experience, "
-        "do not count them as a match):\n"
-        f"{_render_bullets(profile.never_claim)}\n"
-    )
-
-
 def render_profile_block(profile: Profile, with_location: bool = True) -> str:
     """Render the candidate-SPECIFIC CANDIDATE PROFILE block from the loaded
     profile DATA. PURE.
@@ -558,7 +547,6 @@ def render_profile_block(profile: Profile, with_location: bool = True) -> str:
         f"- In development (NOT hands-on yet — being learned, do not count as "
         f"done experience):\n"
         f"{_render_bullets(profile.in_development)}\n"
-        f"{_never_claim_block(profile)}"
         f"- Stack:\n{_render_bullets(profile.stack)}\n"
         f"- Languages: {profile.languages}"
         + (
