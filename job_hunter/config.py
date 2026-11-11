@@ -57,6 +57,8 @@ class Config:
     # Hard salary-floor guard (pipeline.py, scoring.salary_guard_reject). On by default; SALARY_GUARD_ENABLED=0
     # (or false/no/off) skips ONLY the reject: salary_floor_eur and the prompts that quote it are untouched.
     salary_guard: bool = True
+    # Токен для своего MCP-сервера (Claude): только GET /api/mcp/*. Пусто или короче 32 → выключено.
+    mcp_read_token: str = ""
 
     # Ingestion mode: "web" (default, public t.me/s/ over HTTP, NO auth) or
     # "telethon" (optional userbot fallback, requires api_id/hash/session).
@@ -284,6 +286,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         score_prompt_version=score_prompt_version,
         geo_guard=(get("GEO_GUARD") or "1").lower() not in ("0", "false", "no", "off"),
         salary_guard=(get("SALARY_GUARD_ENABLED") or "1").lower() not in ("0", "false", "no", "off"),
+        mcp_read_token=(get("MCP_READ_TOKEN") or "").strip(),
         ingest_mode=(get("INGEST_MODE") or "web").lower(),
         telegram_api_id=_int_or_none(get("TELEGRAM_API_ID")),
         telegram_api_hash=get("TELEGRAM_API_HASH") or None,
