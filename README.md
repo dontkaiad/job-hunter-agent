@@ -41,7 +41,7 @@ automatically: a human approves at the surface gate and again before send.
 - **AI:** Anthropic API — Claude **Haiku 4.5** (extract / research / draft) and
   Claude **Sonnet 4.6** (the scoring judge)
 - **Infra:** Docker Compose on a single VPS, Caddy reverse proxy + TLS
-- **External:** live, no-key FX (frankfurter.app / open.er-api.com) for salary normalization
+- **External:** live, no-key FX (open.er-api.com, with frankfurter as the fallback) for salary normalization
 
 > **Roadmap (not yet built):** the Competencies view (currently a stub), the
 > Market analysis view (currently a stub), and support for additional job

@@ -3,7 +3,9 @@ import os
 import re
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "src")
-FORBIDDEN = [r"не ниже", r"целиться", r"метить\s", r"\b200\s?000\b", r"\b300\s?000\b", r"4\s?500\s?[–-]\s?8\s?000"]
+FORBIDDEN = [r"не ниже", r"целиться", r"метить\s",              # advice wording
+             r"\d[\d\s]{3,}\s*[–-]\s*\d[\d\s]{2,}\s*₽",         # a hard-coded ruble range
+             r"[$€]\s?\d[\d\s.,]*\s*[–-]\s*[$€]?\s?\d"]          # a hard-coded dollar/euro range
 
 
 def test_market_page_has_no_hardcoded_benchmark_figures_or_advice():

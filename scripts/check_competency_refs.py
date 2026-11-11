@@ -14,7 +14,7 @@ Line numbers drift after refactors; this script finds out where each pointer sta
 
 Repo roots come from the environment, one variable per project name in the YAML:
 ``COMPETENCY_REPO_<PROJECT>`` with the project name upper-cased and ``-`` -> ``_``
-(e.g. ``COMPETENCY_REPO_HEYLARK_CATS=/path/to/heylark_cats``). When a variable is unset the
+(e.g. ``COMPETENCY_REPO_MY_PROJECT=/path/to/my-project``). When a variable is unset the
 project is looked up as a sibling directory of this repo (``<parent>/<project>``).
 
     python scripts/check_competency_refs.py [--file config/competencies.local.yaml] [--strict]

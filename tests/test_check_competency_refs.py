@@ -60,7 +60,7 @@ def test_missing_repo_is_a_missing_file_row(tmp_path):
 
 def test_repo_root_env_variable_naming():
     assert chk.repo_root("nexus-arcana", {"COMPETENCY_REPO_NEXUS_ARCANA": "/x"}) == "/x"
-    assert chk.repo_root("heylark_cats", {}).endswith("/heylark_cats")
+    assert chk.repo_root("my_project", {}).endswith("/my_project")
 
 
 def test_report_only_never_modifies_the_file(tmp_path):

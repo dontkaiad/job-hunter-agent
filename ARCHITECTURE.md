@@ -63,7 +63,9 @@ discovered → extracted → scored ──► surfaced ──► approved ──
 - **score** — a rubric-driven Claude Sonnet judge returns `relevance_score`
   (0–100) plus a human-readable rationale. A deterministic salary-floor guard
   then converts the posting's salary to a common currency via live FX and can
-  reject below the candidate's floor — independent of the model. Surface
+  reject below the candidate's floor — independent of the model. Only a plausible
+  MONTHLY figure is compared (a heuristic on magnitude: yearly figures are divided
+  by 12, hourly/daily rates and garbage count as unknown, never a reject). Surface
   threshold T is 50 (`SURFACE_THRESHOLD`); the 40–49 **borderline** band (T-10..T) is kept for review.
 - **surface gate** — the bot/dashboard present the card; the human chooses
   Approve, Backlog, or Skip.
