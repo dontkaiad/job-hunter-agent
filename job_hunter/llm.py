@@ -527,6 +527,17 @@ def _render_bullets(items: List[str]) -> str:
     return "\n".join(f"  - {line}" for line in items) if items else "  - (none)"
 
 
+def _never_claim_block(profile: Profile) -> str:
+    """'Never claim' lines for the SCORING profile block; empty when the profile has none. PURE."""
+    if not profile.never_claim:
+        return ""
+    return (
+        "- Never claimed (the candidate does NOT do these; they are NOT experience, "
+        "do not count them as a match):\n"
+        f"{_render_bullets(profile.never_claim)}\n"
+    )
+
+
 def render_profile_block(profile: Profile, with_location: bool = True) -> str:
     """Render the candidate-SPECIFIC CANDIDATE PROFILE block from the loaded
     profile DATA. PURE.
@@ -547,6 +558,7 @@ def render_profile_block(profile: Profile, with_location: bool = True) -> str:
         f"- In development (NOT hands-on yet — being learned, do not count as "
         f"done experience):\n"
         f"{_render_bullets(profile.in_development)}\n"
+        f"{_never_claim_block(profile)}"
         f"- Stack:\n{_render_bullets(profile.stack)}\n"
         f"- Languages: {profile.languages}"
         + (
@@ -1026,6 +1038,7 @@ _DRAFT_SCAFFOLD = (
     "- HANDS-ON (may claim as real experience):\n{hands_on}\n"
     "- IN DEVELOPMENT, NOT hands-on (do NOT present as done experience):\n"
     "{in_development}\n"
+    "{never_claim_rule}"
     "- Python note: when the profile says the candidate reads / reviews / "
     "architects Python rather than writing it from scratch, never claim they "
     "write production Python from scratch.\n"
@@ -1083,6 +1096,17 @@ _DRAFT_SCAFFOLD = (
 )
 
 
+def _never_claim_draft_rule(profile: Profile) -> str:
+    """The NEVER-CLAIM bullet for the draft prompt; empty when the profile lists none. PURE."""
+    if not profile.never_claim:
+        return ""
+    return (
+        "- NEVER CLAIM, not even as 'learning' or 'familiar with' (the candidate does NOT do "
+        "these; if the job needs them, say nothing about them rather than imply experience):\n"
+        f"{_render_bullets(profile.never_claim)}\n"
+    )
+
+
 def build_draft_system(profile: Profile) -> str:
     """Render the full DRAFT system prompt from the loaded profile. PURE.
 
@@ -1095,6 +1119,7 @@ def build_draft_system(profile: Profile) -> str:
         .replace("{gender_rule}", _gender_rule(profile.gender))
         .replace("{hands_on}", _render_bullets(profile.hands_on))
         .replace("{in_development}", _render_bullets(profile.in_development))
+        .replace("{never_claim_rule}", _never_claim_draft_rule(profile))
         .replace("{github}", profile.draft_signature.github)
     )
 

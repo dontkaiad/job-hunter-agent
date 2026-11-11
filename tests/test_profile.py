@@ -251,3 +251,33 @@ def test_market_benchmarks_parse_and_default_empty():
     assert example_profile().market_benchmarks == []
     p = parse_profile({"market_benchmarks": [{"label": "a", "value": "1–2"}, {"label": "no value"}, "junk"]})
     assert p.market_benchmarks == [{"label": "a", "value": "1–2"}]
+
+
+# ---------------------------------------------------------------------------
+# never_claim: injected into BOTH the scoring block and the draft prompt
+# ---------------------------------------------------------------------------
+
+
+def test_parse_profile_never_claim_defaults_to_empty():
+    assert parse_profile({}).never_claim == []
+    assert parse_profile({"never_claim": ["a", " b "]}).never_claim == ["a", "b"]
+
+
+def test_never_claim_rendered_in_score_and_draft_prompts():
+    p = Profile(never_claim=["NEVER_MARKER_ONE", "NEVER_MARKER_TWO"])
+    score = llm.build_score_system(p)
+    draft = llm.build_draft_system(p)
+    for marker in ("NEVER_MARKER_ONE", "NEVER_MARKER_TWO"):
+        assert marker in score
+        assert marker in draft
+    assert "NEVER CLAIM" in draft
+
+
+def test_empty_never_claim_adds_nothing_to_prompts():
+    p = Profile()
+    assert "NEVER CLAIM" not in llm.build_draft_system(p)
+    assert "Never claimed" not in llm.build_score_system(p)
+
+
+def test_example_profile_has_empty_never_claim():
+    assert example_profile().never_claim == []

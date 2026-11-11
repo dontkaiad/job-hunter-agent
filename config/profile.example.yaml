@@ -44,6 +44,11 @@ hands_on:
 in_development:
   - example in-progress skill (being learned, not yet hands-on)
 
+# NEVER-CLAIM items — things the candidate does NOT do. Injected into the scoring
+# profile block and the draft prompt so they are never presented as experience.
+# Empty by default; set your own in profile.local.yaml.
+never_claim: []
+
 # Tech stack. Plain list of tools the candidate uses.
 stack:
   - Python

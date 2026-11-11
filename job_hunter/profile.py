@@ -59,6 +59,8 @@ class Profile:
     experience_note: str = ""
     hands_on: List[str] = field(default_factory=list)
     in_development: List[str] = field(default_factory=list)
+    # Things the candidate does NOT do and must never be presented as experience (private; empty by default).
+    never_claim: List[str] = field(default_factory=list)
     stack: List[str] = field(default_factory=list)
     languages: str = ""
     location_priority: List[str] = field(default_factory=list)
@@ -149,6 +151,7 @@ def parse_profile(data: Mapping[str, Any], source_path: Optional[str] = None) ->
         experience_note=_as_str(data.get("experience_note")),
         hands_on=_as_list(data.get("hands_on")),
         in_development=_as_list(data.get("in_development")),
+        never_claim=_as_list(data.get("never_claim")),
         stack=_as_list(data.get("stack")),
         languages=_as_str(data.get("languages")),
         location_priority=_as_list(data.get("location_priority")),
