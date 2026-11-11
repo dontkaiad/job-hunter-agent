@@ -1085,7 +1085,7 @@ def get_market_worth(
 ) -> dict:
     """Compute and return a salary benchmark + stack analytics from the pipeline.
 
-    Aggregates salary data from work_items with score 50–100 and tech stack
+    Aggregates salary data from work_items with score 25–100 and tech stack
     frequencies from score 25–100. No LLM call.
     """
     from dataclasses import asdict

@@ -93,9 +93,19 @@ class FxRates:
         return dict(rates)
 
     def _fetch(self) -> Dict[str, float]:
-        if self.provider == "erapi":
-            return self._fetch_erapi()
-        return self._fetch_frankfurter()
+        """The configured provider first; if it fails, the other one.
+
+        frankfurter.app has no RUB base any more (the ECB dropped it: the old URL answers 301 and then
+        404 for ``from=RUB``), so without this fallback every conversion failed silently and the salary
+        guard could not fire for foreign-currency postings."""
+        primary, secondary = (
+            (self._fetch_erapi, self._fetch_frankfurter) if self.provider == "erapi"
+            else (self._fetch_frankfurter, self._fetch_erapi)
+        )
+        try:
+            return primary()
+        except Exception:  # noqa: BLE001
+            return secondary()
 
     def _fetch_frankfurter(self) -> Dict[str, float]:
         """frankfurter.app: base=RUB gives RUB->X. We invert to X->RUB."""

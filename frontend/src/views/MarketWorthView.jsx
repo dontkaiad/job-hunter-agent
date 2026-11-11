@@ -43,7 +43,7 @@ function fmtShort(n, currency) {
 // Salary scale bar — always renders the track; fills only when data present
 // ---------------------------------------------------------------------------
 
-function SalaryScale({ p25, p75, currency, sampleSize, total, minSample }) {
+function SalaryScale({ p25, p75, median, currency, sampleSize, total, minSample }) {
   const hasData = p25 != null;
   const scaleMax = SCALE_MAX[currency] ?? 600000;
   const p75real = p75 ?? p25;
@@ -67,7 +67,7 @@ function SalaryScale({ p25, p75, currency, sampleSize, total, minSample }) {
       </div>
       <div className={`mw-salary-caption${hasData ? "" : " mw-salary-caption--acc"}`}>
         {hasData
-          ? `P25 ${fmtShort(p25, currency)}${shortSym} · P75 ${fmtShort(p75real, currency)}${shortSym} · ${sampleSize} из ${total} с зарплатой`
+          ? `P25 ${fmtShort(p25, currency)}${shortSym}${median != null ? ` · мед. ${fmtShort(median, currency)}${shortSym}` : ""} · P75 ${fmtShort(p75real, currency)}${shortSym} · ${sampleSize} из ${total} с зарплатой`
           : `копится… (${sampleSize} / ${minSample})`}
       </div>
     </div>
@@ -108,6 +108,7 @@ function TopBlock({ data, card }) {
             <SalaryScale
               p25={hasRu ? data.ru_min : null}
               p75={hasRu ? data.ru_max : null}
+              median={hasRu ? data.ru_median : null}
               currency={data.ru_currency ?? "RUB"}
               sampleSize={data.ru_sample_size}
               total={data.total_relevant_vacancies}
@@ -126,6 +127,7 @@ function TopBlock({ data, card }) {
             <SalaryScale
               p25={hasIntl ? data.intl_min : null}
               p75={hasIntl ? data.intl_max : null}
+              median={hasIntl ? data.intl_median : null}
               currency={data.intl_currency ?? "USD"}
               sampleSize={data.intl_sample_size}
               total={data.total_relevant_vacancies}
@@ -133,6 +135,7 @@ function TopBlock({ data, card }) {
             />
           </div>
         </div>
+        {data.heuristic_note && <div className="mw-bench-note" title={data.heuristic_note}>эвристика: период по порогам, gross/net не нормализован</div>}
       </div>
 
       {/* ── Right: benchmark — private figures come from the profile (GET /api/profile-card); hidden without them ── */}

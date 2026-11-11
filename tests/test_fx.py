@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from job_hunter import fx as fx_mod
 from job_hunter.fx import FxRates, convert_to_rub, format_rub
 
@@ -74,3 +76,27 @@ def test_cache_expiry_refetches(monkeypatch):
     fx.get_rates_per_rub()
     fx.get_rates_per_rub()
     assert calls["n"] == 2  # ttl=0 -> never fresh
+
+
+def test_failing_primary_provider_falls_back_to_the_other():
+    """frankfurter has no RUB base (301 -> 404): the configured provider failing must not kill FX."""
+    import httpx
+
+    def fake_get(url):
+        if "frankfurter" in url:
+            return httpx.Response(404, json={"message": "not found"}, request=httpx.Request("GET", url))
+        return httpx.Response(200, json={"rates": {"USD": 0.0125, "EUR": 0.0108}}, request=httpx.Request("GET", url))
+
+    fx = FxRates(provider="frankfurter", cache_ttl=86400, http_get=fake_get)
+    rates = fx.get_rates_per_rub()
+    assert rates["USD"] == pytest.approx(80.0) and rates["EUR"] == pytest.approx(1 / 0.0108)
+
+
+def test_both_providers_failing_still_raises():
+    import httpx
+
+    def fake_get(url):
+        return httpx.Response(500, request=httpx.Request("GET", url))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        FxRates(provider="erapi", cache_ttl=86400, http_get=fake_get).get_rates_per_rub()

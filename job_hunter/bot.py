@@ -538,7 +538,9 @@ def _render_worth(result) -> str:
         "",
         f"🇷🇺 Россия:       {ru}  <i>(n={result.ru_sample_size})</i>",
         f"🌍 Международный: {intl}  <i>(n={result.intl_sample_size})</i>",
-        f"📋 Всего вакансий со скором 50–100: {result.total_relevant_vacancies}",
+        f"📈 Медиана: РФ {result.ru_median if result.ru_median is not None else '—'} ₽ · "
+        f"международный {result.intl_median if result.intl_median is not None else '—'} €",
+        f"📋 Всего вакансий со скором 25–100: {result.total_relevant_vacancies}",
         "",
         result.reasoning_short,
     ]
