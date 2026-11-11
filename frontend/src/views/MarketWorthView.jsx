@@ -78,12 +78,9 @@ function SalaryScale({ p25, p75, currency, sampleSize, total, minSample }) {
 // Top block: salary (left) + divider + benchmark (right)
 // ---------------------------------------------------------------------------
 
-const BENCH_SOURCES = [
-  "enigmai.ru", "vc.ru/ai", "hirehi.ru",
-  "ayautomate.com", "kore1.com", "remotelytalents.com", "lemon.io",
-];
-
-function TopBlock({ data }) {
+function TopBlock({ data, card }) {
+  const benchmarks = Array.isArray(card?.benchmarks) ? card.benchmarks : [];
+  const sources = Array.isArray(card?.sources) ? card.sources : [];
   const minSample = data.min_sample ?? 3;
   const hasRu = data.ru_sample_size >= minSample && data.ru_min != null;
   const hasIntl = data.intl_sample_size >= minSample && data.intl_min != null;
@@ -138,45 +135,34 @@ function TopBlock({ data }) {
         </div>
       </div>
 
-      <div className="mw-vdivider" />
+      {/* ── Right: benchmark — private figures come from the profile (GET /api/profile-card); hidden without them ── */}
+      {benchmarks.length > 0 && (
+        <>
+          <div className="mw-vdivider" />
+          <div className="mw-benchmark-col">
+            <div className="mw-section-label">Ориентир по рынку</div>
+            {card.subtitle && <div className="mw-bench-subtitle">{card.subtitle}</div>}
 
-      {/* ── Right: benchmark ── */}
-      <div className="mw-benchmark-col">
-        <div className="mw-section-label">Ориентир по рынку</div>
-        <div className="mw-bench-subtitle">applied AI / LLM · middle · 06.2026</div>
+            {benchmarks.map((b, i) => (
+              <div key={i} className="mw-bench-row">
+                <span className="mw-bench-flag">{b.label}</span>
+                <div>
+                  <div className="mw-bench-range">{b.value}</div>
+                  {b.note && <div className="mw-bench-note">{b.note}</div>}
+                </div>
+              </div>
+            ))}
 
-        <div className="mw-bench-row">
-          <span className="mw-bench-flag">🇷🇺</span>
-          <div>
-            <div className="mw-bench-range">200 000 – 300 000 ₽</div>
-            <div className="mw-bench-note">не ниже 200к · целиться 250–300к</div>
+            {sources.length > 0 && (
+              <div className="mw-bench-chips">
+                {sources.map((s) => (
+                  <span key={s} className="mw-bench-chip">{s}</span>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-
-        <div className="mw-bench-row">
-          <span className="mw-bench-flag">🌍</span>
-          <div>
-            <div className="mw-bench-range">$4 500 – 8 000</div>
-            <div className="mw-bench-note">не ниже $4.5k · метить $5–7k</div>
-          </div>
-        </div>
-
-        {/* Accent block: tech не нужен */}
-        <div className="mw-bench-nope">
-          <span className="mw-bench-nope-tech">fine-tuning / PyTorch</span>
-          <span className="mw-bench-nope-verdict">не нужен</span>
-        </div>
-
-        {/* Chip grid: sources */}
-        <div className="mw-bench-chips">
-          {BENCH_SOURCES.map((s) => (
-            <span key={s} className="mw-bench-chip">{s}</span>
-          ))}
-        </div>
-
-        <div className="mw-bench-update">↻ обновлять раз в 2–3 мес</div>
-        <div className="mw-bench-date">26.06.2026</div>
-      </div>
+        </>
+      )}
 
     </div>
   );
@@ -265,6 +251,16 @@ export default function MarketWorthView() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Private benchmark figures come from the profile; a failed or empty card just hides the block.
+  const [card, setCard] = useState({ benchmarks: [], subtitle: "", sources: [] });
+  useEffect(() => {
+    let cancelled = false;
+    api.getProfileCard()
+      .then((c) => { if (!cancelled && c) setCard(c); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const stackItems = data?.stack_analytics?.top_tech
     ?.map((t) => ({ name: t.tech, pct: t.pct })) ?? [];
 
@@ -302,7 +298,7 @@ export default function MarketWorthView() {
 
         {data && (
           <>
-            <TopBlock data={data} />
+            <TopBlock data={data} card={card} />
 
             <div className="mw-bottom-grid">
               <FreqTileBlock

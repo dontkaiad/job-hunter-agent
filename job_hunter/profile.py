@@ -77,6 +77,9 @@ class Profile:
     calibration_anchors_v2: List[str] = field(default_factory=list)
     # Market benchmark chips for the dashboard sidebar: [{"label": "...", "value": "..."}]. Private; empty by default.
     market_benchmarks: List[Dict[str, str]] = field(default_factory=list)
+    # Optional caption and source list for the "Ориентир по рынку" block of the market page (private; empty by default).
+    market_benchmark_subtitle: str = ""
+    market_benchmark_sources: List[str] = field(default_factory=list)
     # The path the profile was loaded from (None when built directly).
     source_path: Optional[str] = None
 
@@ -88,11 +91,14 @@ def _as_str(value: Any) -> str:
 
 
 def _as_benchmarks(value: Any) -> List[Dict[str, str]]:
-    """[{label, value}] chips; anything malformed is dropped. PURE."""
+    """[{label, value, note}] chips; anything malformed (no value) is dropped. ``note`` is kept only when non-empty. PURE."""
     out: List[Dict[str, str]] = []
     for item in value if isinstance(value, (list, tuple)) else []:
         if isinstance(item, Mapping) and _as_str(item.get("value")):
-            out.append({"label": _as_str(item.get("label")), "value": _as_str(item.get("value"))})
+            chip = {"label": _as_str(item.get("label")), "value": _as_str(item.get("value"))}
+            if _as_str(item.get("note")):
+                chip["note"] = _as_str(item.get("note"))
+            out.append(chip)
     return out
 
 
@@ -164,6 +170,8 @@ def parse_profile(data: Mapping[str, Any], source_path: Optional[str] = None) ->
         calibration_anchors=_as_raw_list(data.get("calibration_anchors")),
         calibration_anchors_v2=_as_raw_list(data.get("calibration_anchors_v2")),
         market_benchmarks=_as_benchmarks(data.get("market_benchmarks")),
+        market_benchmark_subtitle=_as_str(data.get("market_benchmark_subtitle")),
+        market_benchmark_sources=_as_list(data.get("market_benchmark_sources")),
         source_path=source_path,
     )
 

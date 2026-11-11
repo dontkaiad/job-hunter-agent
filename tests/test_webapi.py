@@ -943,7 +943,11 @@ def test_profile_card_returns_configured_benchmarks_or_nothing(client, monkeypat
     from dataclasses import replace
     from job_hunter import profile as prof
 
-    assert client.get("/api/profile-card").json() == {"benchmarks": []}      # the public example has none
-    monkeypatch.setattr(prof, "load_profile",
-                        lambda *a, **k: replace(prof.example_profile(), market_benchmarks=[{"label": "x", "value": "1–2"}]))
-    assert client.get("/api/profile-card").json() == {"benchmarks": [{"label": "x", "value": "1–2"}]}
+    # Pin the PUBLIC example explicitly: load_profile() would otherwise pick up a local, real profile.
+    monkeypatch.setattr(prof, "load_profile", lambda *a, **k: prof.example_profile())
+    assert client.get("/api/profile-card").json() == {"benchmarks": [], "subtitle": "", "sources": []}
+    configured = replace(prof.example_profile(), market_benchmarks=[{"label": "x", "value": "1–2", "note": "n"}],
+                         market_benchmark_subtitle="cap", market_benchmark_sources=["src.example"])
+    monkeypatch.setattr(prof, "load_profile", lambda *a, **k: configured)
+    assert client.get("/api/profile-card").json() == {
+        "benchmarks": [{"label": "x", "value": "1–2", "note": "n"}], "subtitle": "cap", "sources": ["src.example"]}

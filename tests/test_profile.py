@@ -282,3 +282,24 @@ def test_empty_never_claim_adds_nothing_to_draft_prompt():
 
 def test_example_profile_has_empty_never_claim():
     assert example_profile().never_claim == []
+
+
+# ---------------------------------------------------------------------------
+# market_benchmarks: chips with an optional note, plus caption and sources for the market page
+# ---------------------------------------------------------------------------
+
+
+def test_market_benchmarks_keep_note_and_drop_malformed_rows():
+    p = parse_profile({
+        "market_benchmarks": [{"label": "a", "value": "1-2", "note": "n"}, {"label": "b", "value": "3"},
+                              {"label": "no value"}, "junk"],
+        "market_benchmark_subtitle": " cap ",
+        "market_benchmark_sources": ["s1", "", "s2"],
+    })
+    assert p.market_benchmarks == [{"label": "a", "value": "1-2", "note": "n"}, {"label": "b", "value": "3"}]
+    assert p.market_benchmark_subtitle == "cap" and p.market_benchmark_sources == ["s1", "s2"]
+
+
+def test_example_profile_has_no_market_benchmarks():
+    p = example_profile()
+    assert p.market_benchmarks == [] and p.market_benchmark_subtitle == "" and p.market_benchmark_sources == []

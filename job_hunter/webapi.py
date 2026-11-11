@@ -1178,10 +1178,13 @@ def get_competencies(
 
 @router.get("/profile-card")
 def get_profile_card() -> dict:
-    """Private sidebar data from the profile (market benchmark chips). Empty when none are configured."""
+    """Private data from the profile for the sidebar chips and the market page's benchmark block.
+    Everything is empty when the profile configures none (the public example does not)."""
     from .profile import load_profile
 
-    return {"benchmarks": load_profile().market_benchmarks}
+    prof = load_profile()
+    return {"benchmarks": prof.market_benchmarks, "subtitle": prof.market_benchmark_subtitle,
+            "sources": prof.market_benchmark_sources}
 
 
 # --- Pipeline pause switch ---------------------------------------------------
