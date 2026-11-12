@@ -507,6 +507,10 @@ def test_prompt_spells_the_russian_terms_the_way_developers_do():
     assert "«в продакшене» (never «в продакшне»)" in s and "«реранкинг»" in s and "never «тул-коллинг»" in s
 
 
+def test_prompt_writes_golden_set_as_a_labelled_set_in_russian():
+    s = llm.build_draft_system(example_profile())
+    assert "«размеченный набор»" in s and "never «золотой набор»" in s
+
 def test_prompt_forbids_choosing_a_level_or_track_and_frequency_claims():
     s = llm.build_draft_system(example_profile())
     assert "Never claim or choose a seniority level, a track or a role" in s and "«principal»" in s and "«tech lead»" in s
