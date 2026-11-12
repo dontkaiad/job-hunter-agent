@@ -401,6 +401,20 @@ def _strip_dates(text: str) -> str:
     return text
 
 
+def _range_amounts(raw_lo: str, raw_hi: str) -> Tuple[Optional[float], Optional[float]]:
+    """Parse the two ends of a range. A k/m suffix written only on the SECOND end applies to the first too:
+    "$150-230k" is 150 000-230 000, not (150, 230 000). Only when the first end is a bare number small enough
+    for that (lo * multiplier <= hi). PURE."""
+    lo, hi = _parse_amount(raw_lo), _parse_amount(raw_hi)
+    hi_low = (raw_hi or "").strip().lower().replace(" ", "")
+    lo_low = (raw_lo or "").strip().lower().replace(" ", "")
+    mult = 1_000.0 if hi_low.endswith(("k", "к")) else 1_000_000.0 if hi_low.endswith(("m", "м", "кк")) else 1.0
+    if (mult > 1.0 and lo is not None and hi is not None and not lo_low.endswith(("k", "к", "m", "м"))
+            and lo < 1000.0 and lo * mult <= hi):
+        lo *= mult
+    return lo, hi
+
+
 def _ordered(lo: Optional[float], hi: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
     if lo is not None and hi is not None and lo > hi:
         return hi, lo
@@ -434,17 +448,16 @@ def _detect_salary_span(text: str) -> Tuple[Optional[float], Optional[float], Op
     for rx in (_SALARY_RANGE_RE, _SALARY_RANGE_SYM_RE):
         m = rx.search(text)
         if m:
-            lo, hi = _ordered(_parse_amount(m.group(1)), _parse_amount(m.group(2)))
+            lo, hi = _ordered(*_range_amounts(m.group(1), m.group(2)))
             return lo, hi, _currency_near(text, m.start(), m.end())
 
     m = _SALARY_KEYWORD_RE.search(text)
     if m:
-        lo = _parse_amount(m.group(1))
-        hi = _parse_amount(m.group(2)) if m.group(2) else None
         cur = _currency_near(text, m.start(1), m.end())
-        if hi is None:
+        if not m.group(2):
+            lo = _parse_amount(m.group(1))
             return lo, lo, cur
-        lo, hi = _ordered(lo, hi)
+        lo, hi = _ordered(*_range_amounts(m.group(1), m.group(2)))
         return lo, hi, cur
 
     m = _SALARY_SYMBOL_RE.search(text)

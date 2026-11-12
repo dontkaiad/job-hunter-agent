@@ -352,3 +352,15 @@ def test_currency_next_to_the_amount_beats_a_word_that_looks_like_another():
 
 def test_no_amount_no_salary():
     assert _salary("Deadline: apply by 31 May") == (None, None, None)
+
+
+def test_k_suffix_on_the_second_end_applies_to_the_first():
+    assert _salary("Salary: $150-230k") == (150000.0, 230000.0, "USD")
+    assert _salary("€70 – 100k") == (70000.0, 100000.0, "EUR")
+    assert _salary("up to $100-200k USD") == (100000.0, 200000.0, "USD")
+
+
+def test_k_suffix_is_not_propagated_when_it_would_be_wrong():
+    assert _salary("$55 - $75 USD per hour") == (55.0, 75.0, "USD")          # no suffix: hourly stays hourly
+    assert _salary("$120k-$150k/yr") == (120000.0, 150000.0, "USD")         # both ends have it
+    assert _salary("€1,800–€2,500 NET/month") == (1800.0, 2500.0, "EUR")    # comma thousands, no suffix
