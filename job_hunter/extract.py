@@ -330,12 +330,12 @@ def _parse_amount(raw: str) -> Optional[float]:
     """Parse a numeric chunk like '150 000', '150k', '3.000', '290k' -> float."""
     raw = raw.strip().lower().replace(",", "").replace(" ", "").replace(" ", "")
     mult = 1.0
-    if raw.endswith("k"):
-        mult = 1_000.0
-        raw = raw[:-1]
-    elif raw.endswith("m") or raw.endswith("кк"):
+    if raw.endswith("m") or raw.endswith("кк"):          # million; checked first: "кк" also ends with "к"
         mult = 1_000_000.0
         raw = raw.rstrip("mкк")
+    elif raw.endswith("k") or raw.endswith("к"):         # thousand, Latin "k" or Cyrillic "к" ("200к")
+        mult = 1_000.0
+        raw = raw[:-1]
     # Drop any trailing currency letters/symbols.
     raw = re.sub(r"[^\d.]", "", raw)
     if not raw:
@@ -373,18 +373,18 @@ _AMOUNT = r"\d[\d\s.,]*\s*[kкmм]{0,2}"
 
 # Range with a currency/money anchor in the phrase.
 _SALARY_RANGE_RE = re.compile(
-    rf"({_AMOUNT})\s*(?:[-–—]|to)\s*({_AMOUNT})\s*(?:{_CCY_ANCHOR})",
+    rf"({_AMOUNT})\s*(?:[-–—]|to|до)\s*({_AMOUNT})\s*(?:{_CCY_ANCHOR})",
     re.I,
 )
 # Range with the currency SYMBOL before the amounts: "€70k – €100k", "€1,800–€2,500", "$4,000-6,000".
 _SALARY_RANGE_SYM_RE = re.compile(
-    rf"(?:₽|\$|€|£|₸)\s*({_AMOUNT})\s*(?:[-–—]|to)\s*(?:₽|\$|€|£|₸)?\s*({_AMOUNT})",
+    rf"(?:₽|\$|€|£|₸)\s*({_AMOUNT})\s*(?:[-–—]|to|до)\s*(?:₽|\$|€|£|₸)?\s*({_AMOUNT})",
     re.I,
 )
 # Money keyword/symbol introducing an amount (optionally a range).
 _SALARY_KEYWORD_RE = re.compile(
     rf"(?:зп|salary|зарплат\w*|оклад|вилка|компенсаци\w*|pay|💰|от|from|up to)\s*[:\-]?\s*"
-    rf"({_AMOUNT})(?:\s*[-–—to]+\s*({_AMOUNT}))?\s*(?:{_CCY_ANCHOR})?",
+    rf"({_AMOUNT})(?:\s*(?:[-–—]+|to|до)\s*({_AMOUNT}))?\s*(?:{_CCY_ANCHOR})?",
     re.I,
 )
 # Currency symbol/code directly attached to an amount: "€3000", "$4,000", "150000₽".

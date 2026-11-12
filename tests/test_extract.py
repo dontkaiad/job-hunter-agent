@@ -364,3 +364,22 @@ def test_k_suffix_is_not_propagated_when_it_would_be_wrong():
     assert _salary("$55 - $75 USD per hour") == (55.0, 75.0, "USD")          # no suffix: hourly stays hourly
     assert _salary("$120k-$150k/yr") == (120000.0, 150000.0, "USD")         # both ends have it
     assert _salary("€1,800–€2,500 NET/month") == (1800.0, 2500.0, "EUR")    # comma thousands, no suffix
+
+
+def test_russian_do_is_a_range_separator():
+    """"Зп: 2 200 до 2 750 €" kept only 2 200 (the max was lost) before."""
+    assert _salary("Формат работы: офис. Зп: 2 200 до 2 750 € + KPI") == (2200.0, 2750.0, "EUR")
+    assert _salary("Зарплата от 200 000 до 300 000 ₽") == (200000.0, 300000.0, "RUB")
+
+
+def test_open_ended_amounts_are_still_a_single_figure():
+    """A lower bound ("от 180 000 ₽") or a cap ("up to $5000") is read as one figure with its currency."""
+    assert _salary("ML Python Developer от 180 000 ₽ за месяц, на руки") == (180000.0, 180000.0, "RUB")
+    assert _salary("up to $5000") == (5000.0, 5000.0, "USD")
+
+
+def test_cyrillic_k_is_thousands():
+    assert extract("зп 100-200к", "ch").salary_min == 100000.0
+    assert extract("зп 100-200к", "ch").salary_max == 200000.0
+    assert extract("оплата 250к ₽", "ch").salary_min == 250000.0
+    assert extract("зарплата 1кк ₽", "ch").salary_min == 1000000.0        # "кк" is still a million
