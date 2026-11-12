@@ -54,7 +54,7 @@ class DraftSignature:
 @dataclass(frozen=True)
 class DraftIntro:
     """The sentence about the candidate that follows the application sentence in the fixed intro of every
-    draft ("I'm an AI engineer with almost three years of experience ..."). Written per language in the
+    draft ("I'm an engineer with N years of experience ..."). Written per language in the
     PRIVATE profile (the years live there, never in public code); generic placeholders by default."""
 
     ru: str = "Я инженер, работаю с ИИ."

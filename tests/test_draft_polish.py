@@ -225,25 +225,25 @@ def _ex(title):
 def _profile_with_intro():
     base = example_profile()
     return Profile(**{**base.__dict__, "draft_intro": DraftIntro(
-        ru="Я инженер, три года внедряю ИИ.", en="I'm an engineer with three years of AI work.")})
+        ru="Я инженер, семь лет внедряю ИИ.", en="I'm an engineer with seven years of AI work.")})
 
 
 def test_intro_russian_with_role_and_the_profile_sentence():
     intro = llm.draft_intro(_ex("LLM-инженер"), RU_POST, _profile_with_intro())
-    assert intro == "Откликаюсь на позицию «LLM-инженер». Я инженер, три года внедряю ИИ."
+    assert intro == "Откликаюсь на позицию «LLM-инженер». Я инженер, семь лет внедряю ИИ."
 
 
 def test_intro_english_with_role_and_the_profile_sentence():
     intro = llm.draft_intro(_ex("Applied AI Engineer"), EN_POST, _profile_with_intro())
-    assert intro == "I'm applying for the Applied AI Engineer position. I'm an engineer with three years of AI work."
+    assert intro == "I'm applying for the Applied AI Engineer position. I'm an engineer with seven years of AI work."
 
 
 @pytest.mark.parametrize("title", [None, "", "   ", "none", "https://example.test/jobs/1", "vacancy #project #city",
                                    "Company | Role | Remote", "AI Engineer / Python Developer | LLM Agents", "💬 ", "x" * 120])
 def test_intro_with_an_empty_or_garbage_role_uses_the_generic_sentence(title):
-    assert llm.draft_intro(_ex(title), RU_POST, _profile_with_intro()) == "Откликаюсь на вашу вакансию. Я инженер, три года внедряю ИИ."
+    assert llm.draft_intro(_ex(title), RU_POST, _profile_with_intro()) == "Откликаюсь на вашу вакансию. Я инженер, семь лет внедряю ИИ."
     assert llm.draft_intro(_ex(title), EN_POST, _profile_with_intro()) == (
-        "I'm applying for your open position. I'm an engineer with three years of AI work.")
+        "I'm applying for your open position. I'm an engineer with seven years of AI work.")
 
 
 def test_role_is_cleaned_not_just_accepted():
@@ -258,8 +258,8 @@ def test_the_years_come_from_the_profile_not_from_public_code():
     a = llm.draft_intro(_ex("Role X"), RU_POST, _profile_with_intro())
     other = Profile(**{**example_profile().__dict__, "draft_intro": DraftIntro(ru="Я разработчик.", en="I'm a developer.")})
     b = llm.draft_intro(_ex("Role X"), RU_POST, other)
-    assert "три года" in a and "три года" not in b and b.endswith("Я разработчик.")
-    assert "год" not in llm.draft_intro(_ex("Role X"), RU_POST, example_profile())       # the generic placeholder has none
+    assert "семь лет" in a and "семь лет" not in b and b.endswith("Я разработчик.")
+    assert "лет" not in llm.draft_intro(_ex("Role X"), RU_POST, example_profile())       # the generic placeholder has none
 
 
 def test_profile_reads_draft_intro_and_has_generic_defaults():
@@ -276,15 +276,15 @@ def test_composed_draft_is_greeting_then_intro_then_the_model_text():
     out = agents.draft(_FakeClient("Строю RAG — пайплайны и эвалы."), ex, RU_POST, None, profile=prof)
     lines = out.split("\n")
     assert lines[0] == "Добрый день!"
-    assert lines[1] == "Откликаюсь на позицию «LLM engineer». Я инженер, три года внедряю ИИ."
+    assert lines[1] == "Откликаюсь на позицию «LLM engineer». Я инженер, семь лет внедряю ИИ."
     assert lines[2] == "" and lines[3] == "Строю RAG, пайплайны и эвалы."
     en = agents.draft(_FakeClient("I build RAG pipelines."), _ex("Applied AI Engineer"), EN_POST, None, profile=prof)
-    assert en.split("\n")[:2] == ["Hello,", "I'm applying for the Applied AI Engineer position. I'm an engineer with three years of AI work."]
+    assert en.split("\n")[:2] == ["Hello,", "I'm applying for the Applied AI Engineer position. I'm an engineer with seven years of AI work."]
 
 
 def test_a_model_that_repeats_the_greeting_and_the_intro_is_cut_back_to_its_body():
     intro = "Откликаюсь на позицию «X». Я инженер."
-    for body in ("Здравствуйте! Откликаюсь на позицию «X». Я инженер, три года в ИИ. Строю RAG.",
+    for body in ("Здравствуйте! Откликаюсь на позицию «X». Я инженер, семь лет в ИИ. Строю RAG.",
                  "Добрый день!\nОткликаюсь на вашу вакансию. Строю RAG.",
                  "Я инженер, работаю с ИИ. Строю RAG."):
         out = agents.compose_draft(body, "ru", intro)
@@ -296,7 +296,7 @@ def test_a_model_that_repeats_the_greeting_and_the_intro_is_cut_back_to_its_body
 
 def test_empty_role_in_a_full_draft_gives_the_generic_application_sentence():
     out = agents.draft(_FakeClient("Строю RAG."), _ex(None), RU_POST, None, profile=_profile_with_intro())
-    assert out.split("\n")[1] == "Откликаюсь на вашу вакансию. Я инженер, три года внедряю ИИ."
+    assert out.split("\n")[1] == "Откликаюсь на вашу вакансию. Я инженер, семь лет внедряю ИИ."
 
 
 # --- the new prompt rules -----------------------------------------------------------------------------------
