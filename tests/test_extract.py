@@ -301,3 +301,54 @@ def test_hybrid_lossiness_known_limitation():
     # A fully-remote post has no "(гибрид)" tag (location stays None when no
     # hashtag location is present).
     assert fully_remote.location is None or "гибрид" not in (fully_remote.location or "")
+
+
+# ---------------------------------------------------------------------------
+# B1: "€70k – €100k", "€1,800–€2,500 NET/month" and the currency next to the amount
+# (production cases 2026-11-12: a Ruby/Frontend job quoted in euros was stored as 70 000 RUB; a range lost its max)
+# ---------------------------------------------------------------------------
+
+
+from job_hunter import extract as _extract_mod  # noqa: E402
+
+
+def _salary(text):
+    r = extract(text, "ch")
+    return r.salary_min, r.salary_max, r.currency
+
+
+def test_symbol_before_both_amounts_k_suffix_keeps_the_max():
+    assert _salary("Salary range: €70k – €100k") == (70000.0, 100000.0, "EUR")
+    assert _salary("Salary range: €70k – €120k") == (70000.0, 120000.0, "EUR")
+
+
+def test_symbol_before_both_amounts_with_thousand_comma_and_net_month_note():
+    assert _salary("📍 Limassol 💰 Salary: €1,800–€2,500 NET/month 📩 write us") == (1800.0, 2500.0, "EUR")
+
+
+def test_symbol_before_first_amount_only():
+    assert _salary("Salary: $4,000-6,000 per month") == (4000.0, 6000.0, "USD")
+    assert _salary("$120k-$150k/yr") == (120000.0, 150000.0, "USD")
+
+
+def test_existing_anchor_after_the_range_still_works():
+    assert _salary("💰 1800–2200 EUR 📍 office") == (1800.0, 2200.0, "EUR")
+    assert _salary("Зарплата 200 000 - 300 000 ₽") == (200000.0, 300000.0, "RUB")
+
+
+def test_currency_letters_inside_words_are_not_a_currency():
+    """'rub' in 'Ruby', 'eur' in 'Europe': not RUB / EUR."""
+    assert _salary("Senior Ruby Engineer in Europe")[2] is None
+    assert _extract_mod._detect_currency("ruby, scrubbing, rubric") is None
+    assert _extract_mod._detect_currency("remote in europe") is None
+    assert _extract_mod._detect_currency("pay 100 USD") == "USD"
+    assert _extract_mod._detect_currency("оплата 100 руб.") == "RUB"
+
+
+def test_currency_next_to_the_amount_beats_a_word_that_looks_like_another():
+    """A Ruby job quoted in euros: EUR (next to the amount), not RUB from 'Ruby'."""
+    assert _salary("Senior Ruby Engineer - Remote Europe. Salary range: €70k – €120k") == (70000.0, 120000.0, "EUR")
+
+
+def test_no_amount_no_salary():
+    assert _salary("Deadline: apply by 31 May") == (None, None, None)

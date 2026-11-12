@@ -310,10 +310,18 @@ def _detect_remote(text: str, hashtag_remote: bool = False) -> Tuple[Optional[bo
     return None, False
 
 
+# Alphabetic currency tokens only count as WHOLE words: a bare substring read "rub" in "Ruby" as RUB and
+# "eur" in "Europe" as EUR (a Ruby job quoted in euros was stored as 70 000 RUB). Symbols stay substrings.
+_CCY_TOKEN_RES = [
+    (re.compile(rf"(?<![^\W\d_]){re.escape(token)}" + (r"\w*" if token == "руб" else "") + r"(?![^\W\d_])"
+                if token[0].isalpha() else re.escape(token), re.I), code)
+    for token, code in _CURRENCY_MAP.items()
+]
+
+
 def _detect_currency(text: str) -> Optional[str]:
-    low = text.lower()
-    for token, code in _CURRENCY_MAP.items():
-        if token in low:
+    for rx, code in _CCY_TOKEN_RES:
+        if rx.search(text):
             return code
     return None
 
@@ -368,6 +376,11 @@ _SALARY_RANGE_RE = re.compile(
     rf"({_AMOUNT})\s*(?:[-–—]|to)\s*({_AMOUNT})\s*(?:{_CCY_ANCHOR})",
     re.I,
 )
+# Range with the currency SYMBOL before the amounts: "€70k – €100k", "€1,800–€2,500", "$4,000-6,000".
+_SALARY_RANGE_SYM_RE = re.compile(
+    rf"(?:₽|\$|€|£|₸)\s*({_AMOUNT})\s*(?:[-–—]|to)\s*(?:₽|\$|€|£|₸)?\s*({_AMOUNT})",
+    re.I,
+)
 # Money keyword/symbol introducing an amount (optionally a range).
 _SALARY_KEYWORD_RE = re.compile(
     rf"(?:зп|salary|зарплат\w*|оклад|вилка|компенсаци\w*|pay|💰|от|from|up to)\s*[:\-]?\s*"
@@ -394,32 +407,58 @@ def _ordered(lo: Optional[float], hi: Optional[float]) -> Tuple[Optional[float],
     return lo, hi
 
 
-def _detect_salary(text: str) -> Tuple[Optional[float], Optional[float]]:
-    """Extract a money range, anchored to currency context and ignoring dates.
+_CCY_NEAR_RE = re.compile(r"₽|руб\w*|(?<![^\W\d_])rub(?![^\W\d_])|\$|(?<![^\W\d_])usd(?![^\W\d_])|€|"
+                          r"(?<![^\W\d_])eur(?![^\W\d_])|£|(?<![^\W\d_])gbp(?![^\W\d_])|₸|"
+                          r"(?<![^\W\d_])kzt(?![^\W\d_])", re.I)
+_CCY_NEAR_CODE = {"₽": "RUB", "руб": "RUB", "rub": "RUB", "$": "USD", "usd": "USD", "€": "EUR", "eur": "EUR",
+                  "£": "GBP", "gbp": "GBP", "₸": "KZT", "kzt": "KZT"}
 
-    A bare number with no currency/money anchor (e.g. a deadline '31') is NOT
-    treated as salary.
+
+def _currency_near(text: str, start: int, end: int) -> Optional[str]:
+    """The currency written right next to the matched amount (a few characters either side), or None. PURE."""
+    window = text[max(0, start - 3): end + 8]
+    m = _CCY_NEAR_RE.search(window)
+    if not m:
+        return None
+    tok = m.group(0).lower()
+    return _CCY_NEAR_CODE.get(tok) or ("RUB" if tok.startswith("руб") else None)
+
+
+def _detect_salary_span(text: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """(min, max, currency written next to the amount | None). Anchored to currency context, ignores dates.
+
+    A bare number with no currency/money anchor (e.g. a deadline '31') is NOT treated as salary.
     """
     text = _strip_dates(text)
 
-    m = _SALARY_RANGE_RE.search(text)
-    if m:
-        return _ordered(_parse_amount(m.group(1)), _parse_amount(m.group(2)))
+    for rx in (_SALARY_RANGE_RE, _SALARY_RANGE_SYM_RE):
+        m = rx.search(text)
+        if m:
+            lo, hi = _ordered(_parse_amount(m.group(1)), _parse_amount(m.group(2)))
+            return lo, hi, _currency_near(text, m.start(), m.end())
 
     m = _SALARY_KEYWORD_RE.search(text)
     if m:
         lo = _parse_amount(m.group(1))
         hi = _parse_amount(m.group(2)) if m.group(2) else None
+        cur = _currency_near(text, m.start(1), m.end())
         if hi is None:
-            return lo, lo
-        return _ordered(lo, hi)
+            return lo, lo, cur
+        lo, hi = _ordered(lo, hi)
+        return lo, hi, cur
 
     m = _SALARY_SYMBOL_RE.search(text)
     if m:
         val = _parse_amount(m.group(1) or m.group(2))
-        return val, val
+        return val, val, _currency_near(text, m.start(), m.end())
 
-    return None, None
+    return None, None, None
+
+
+def _detect_salary(text: str) -> Tuple[Optional[float], Optional[float]]:
+    """Extract a money range (see ``_detect_salary_span``); the currency is dropped here."""
+    lo, hi, _ = _detect_salary_span(text)
+    return lo, hi
 
 
 def _norm_channel(value: Optional[str]) -> Optional[str]:
@@ -501,7 +540,7 @@ def extract(
     Pure and deterministic. Missing/unknown values are None (lists empty).
     """
     text = raw_text or ""
-    salary_min, salary_max = _detect_salary(text)
+    salary_min, salary_max, salary_ccy = _detect_salary_span(text)
     contact_type, contact = _detect_contact(text, source_channel, source_link)
 
     relocation: Optional[bool] = True if _RELOCATION_RE.search(text) else None
@@ -532,7 +571,8 @@ def extract(
         seniority=seniority,
         salary_min=salary_min,
         salary_max=salary_max,
-        currency=_detect_currency(text),
+        # the currency written next to the amount wins; the whole-text scan is only the fallback
+        currency=salary_ccy or _detect_currency(text),
         remote=remote,
         relocation=relocation,
         location=location,
