@@ -326,3 +326,34 @@ def test_middle_grade_slice_and_unknown_seniority():
     assert result.ru_middle_sample == 3 and result.ru_middle_median == 200_000
     thin = _aggregate_salaries(rows[:2] + rows[3:], 3)                         # only 2 middle -> too few
     assert thin.ru_middle_sample == 2 and thin.ru_middle_median is None
+
+
+# ---------------------------------------------------------------------------
+# B4: what the international pool is made of (shown as a caption under the figure)
+# ---------------------------------------------------------------------------
+
+
+def test_intl_pool_composition_counts_unchecked_usd_and_top_source():
+    def row(cur, src, geo=None):
+        return {"salary_min": 6_000, "salary_max": 8_000, "currency": cur, "source_channel": src, "geo_verdict": geo}
+
+    rows = [row("USD", "hn_hiring"), row("USD", "hn_hiring"), row("USD", "wwr"), row("EUR", "jobicy", "eligible"),
+            row("USD", "hn_hiring", "ineligible")]          # ineligible is skipped, not counted
+    r = _aggregate_salaries(rows, MIN, rates_per_rub={"RUB": 1.0, "EUR": 100.0, "USD": 90.0})
+    assert r.intl_sample_size == 4
+    assert r.intl_geo_unchecked == 3            # the eligible one is checked, ineligible is excluded
+    assert r.intl_usd_share == 0.75
+    assert r.intl_top_source == "hn_hiring" and r.intl_top_source_share == 0.5
+
+
+def test_intl_pool_composition_is_empty_without_intl_rows():
+    r = _aggregate_salaries([_ru(150_000, 250_000)], MIN)
+    assert r.intl_geo_unchecked == 0
+    assert r.intl_usd_share is None and r.intl_top_source is None and r.intl_top_source_share is None
+
+
+def test_composition_does_not_change_the_figures():
+    base = [_intl(3_000, 6_000), _intl(4_000, 7_000), _intl(5_000, 8_000)]
+    with_meta = [dict(r, source_channel="hn_hiring") for r in base]
+    a, b = _aggregate_salaries(base, MIN), _aggregate_salaries(with_meta, MIN)
+    assert (a.intl_min, a.intl_median, a.intl_max) == (b.intl_min, b.intl_median, b.intl_max)

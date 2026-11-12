@@ -78,6 +78,20 @@ function SalaryScale({ p25, p75, median, currency, sampleSize, total, minSample 
 // Top block: salary (left) + divider + benchmark (right)
 // ---------------------------------------------------------------------------
 
+// What the international figure is made of: the geo guard never judged most of these vacancies, so the pool
+// includes country-restricted ones. Says so under the number instead of leaving it to be read as "available".
+const SOURCE_LABELS = { hn_hiring: "HN Hiring", wwr: "WeWorkRemotely", jobicy: "Jobicy" };
+
+export function poolCaption(data) {
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const parts = [`Международный пул: ${data.intl_sample_size} вакансий`];
+  if (data.intl_usd_share != null) parts.push(`${pct(data.intl_usd_share)} в USD`);
+  if (data.intl_top_source) {
+    parts.push(`${SOURCE_LABELS[data.intl_top_source] ?? data.intl_top_source} ${pct(data.intl_top_source_share ?? 0)}`);
+  }
+  return `${parts.join(" · ")} · гео-доступность не проверена у ${data.intl_geo_unchecked}: включены вакансии с ограничением по стране, цифра отражает рынок, а не доступные вам вакансии`;
+}
+
 function TopBlock({ data, card }) {
   const benchmarks = Array.isArray(card?.benchmarks) ? card.benchmarks : [];
   const sources = Array.isArray(card?.sources) ? card.sources : [];
@@ -135,6 +149,11 @@ function TopBlock({ data, card }) {
             />
           </div>
         </div>
+        {data.intl_sample_size > 0 && data.intl_geo_unchecked > 0 && (
+          <div className="mw-bench-note" data-testid="mw-intl-pool">
+            {poolCaption(data)}
+          </div>
+        )}
         {data.heuristic_note && <div className="mw-bench-note" title={data.heuristic_note}>эвристика: период по порогам, gross/net не нормализован</div>}
       </div>
 

@@ -85,6 +85,11 @@ class MarketWorthResult:
     annual_converted: Dict[str, int] = field(default_factory=dict)   # {"ru": n, "intl": n}
     dropped: Dict[str, int] = field(default_factory=dict)            # reason -> n
     geo_excluded: int = 0           # skipped because the geo guard judged them ineligible
+    # what the INTERNATIONAL pool is made of (so the page can say what the figure is and is not)
+    intl_geo_unchecked: int = 0     # pool vacancies the geo guard never judged (empty verdict): may be country-restricted
+    intl_usd_share: Optional[float] = None         # 0..1, share of the pool quoted in USD
+    intl_top_source: Optional[str] = None          # the source channel contributing the most pool vacancies
+    intl_top_source_share: Optional[float] = None  # 0..1
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +216,9 @@ def _aggregate_salaries(
     annual = {"ru": 0, "intl": 0}
     dropped: Dict[str, int] = {}
     geo_excluded = 0
+    intl_geo_unchecked = 0
+    intl_usd = 0
+    intl_sources: Dict[str, int] = {}
 
     for row in salary_rows:
         if (row.get("geo_verdict") or "").lower() == "ineligible":
@@ -224,12 +232,21 @@ def _aggregate_salaries(
                 dropped[how] = dropped.get(how, 0) + 1
             continue
         (ru if market == "ru" else intl).append(value)
+        if market == "intl":
+            if not (row.get("geo_verdict") or "").strip():
+                intl_geo_unchecked += 1
+            if (row.get("currency") or "").upper().strip() == "USD":
+                intl_usd += 1
+            src = (row.get("source_channel") or "").strip()
+            if src:
+                intl_sources[src] = intl_sources.get(src, 0) + 1
         if how == "annual":
             annual[market] += 1
         if _grade(row.get("seniority")) == "middle":
             (ru_mid if market == "ru" else intl_mid).append(value)
 
     ru_sample, intl_sample = len(ru), len(intl)
+    top_src = max(intl_sources.items(), key=lambda kv: kv[1]) if intl_sources else None
     ru_min, ru_median, ru_max = _stats(ru, min_sample)
     intl_min, intl_median, intl_max = _stats(intl, min_sample)
     if ru_min is not None and ru_min == ru_max:
@@ -284,6 +301,10 @@ def _aggregate_salaries(
         annual_converted=annual,
         dropped=dropped,
         geo_excluded=geo_excluded,
+        intl_geo_unchecked=intl_geo_unchecked,
+        intl_usd_share=round(intl_usd / intl_sample, 3) if intl_sample else None,
+        intl_top_source=top_src[0] if top_src else None,
+        intl_top_source_share=round(top_src[1] / intl_sample, 3) if top_src and intl_sample else None,
     )
 
 
