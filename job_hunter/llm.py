@@ -1164,24 +1164,35 @@ def _detect_lang(text: str) -> str:
     return "en" if latin > cyrillic else "ru"
 
 
-_ROLE_PLACEHOLDERS = {"none", "null", "n/a", "na", "-", "вакансия", "vacancy", "job", "position", "позиция", "untitled"}
+_ROLE_PLACEHOLDERS = {
+    "none", "null", "n/a", "na", "-", "вакансия", "vacancy", "job", "position", "позиция", "untitled",
+    # work formats are not a role
+    "remote", "hybrid", "onsite", "on-site", "office", "full-time", "part-time", "fulltime", "parttime",
+    "удалённо", "удаленно", "удалёнка", "удаленка", "гибрид", "офис",
+}
 
 
 def clean_role(title: Optional[str]) -> str:
     """The card's role (``ExtractResult.title``) as it can stand inside «…» in the intro, or "" when it is empty
-    or garbage: a URL, a hashtag soup, a "Company | Role | Remote" line, something very long or without words. PURE."""
-    s = (title or "").strip()
-    s = re.sub(r"^[^\w(\[]+", "", s)                      # leading emoji / bullets
-    s = s.replace("«", "").replace("»", "").replace('"', "").strip(" .,;:-–—")
-    if not s or len(s) < 3 or len(s) > 80:
+    or garbage: a URL, a hashtag soup, a "Company | Role | Remote" line, something without words. Brackets are
+    dropped with their content and the tail is cut: everything after " - ", " – ", " — ", a slash with a space
+    beside it ("Prompt Engineer / инженер ..."), a colon, a comma or a semicolon. "AI/ML Engineer" and
+    "Python-разработчик" stay whole. PURE."""
+    raw = (title or "").strip()
+    if "|" in raw or "#" in raw or "@" in raw or "\n" in raw:
+        return ""
+    s = re.sub(r"^[^\w(\[]+", "", raw)                    # leading emoji / bullets
+    s = re.sub(r"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}", " ", s)   # brackets with their content
+    s = re.split(r"\s[-–—]\s|\s/|/\s|[:;,]", s)[0]        # the tail
+    s = s.replace("«", "").replace("»", "").replace('"', "")
+    s = re.sub(r"\s+", " ", s).strip(" .,;:-–—/")
+    if not s or len(s) < 3 or len(s) > 60:
         return ""
     low = s.lower()
     if low in _ROLE_PLACEHOLDERS or "http" in low or "://" in low or "www." in low:
         return ""
-    if any(ch in s for ch in ("|", "#", "@", "\n")):
-        return ""
     letters = sum(c.isalpha() for c in s)
-    if letters < 3 or letters < 0.5 * len(s) or len(s.split()) > 11:
+    if letters < 3 or letters < 0.5 * len(s) or len(s.split()) > 9:
         return ""
     return s
 

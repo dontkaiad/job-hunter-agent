@@ -247,10 +247,10 @@ def test_intro_with_an_empty_or_garbage_role_uses_the_generic_sentence(title):
 
 
 def test_role_is_cleaned_not_just_accepted():
-    assert llm.clean_role("💬 ИИ-разработчик / Вайбкодер") == "ИИ-разработчик / Вайбкодер"
+    assert llm.clean_role("💬 ИИ-разработчик / Вайбкодер") == "ИИ-разработчик"       # the first alternative
     assert llm.clean_role('Senior "Ruby" Engineer.') == "Senior Ruby Engineer"
     assert llm.clean_role("«Prompt Engineer»") == "Prompt Engineer"
-    assert llm.clean_role("AI Engineer (New Grads & Principal/Distinguished)").startswith("AI Engineer")
+    assert llm.clean_role("AI Engineer (New Grads & Principal/Distinguished)") == "AI Engineer"
 
 
 def test_the_years_come_from_the_profile_not_from_public_code():
@@ -368,3 +368,35 @@ def test_composed_draft_has_no_empty_tail_and_no_github_sentence():
 def test_prompt_no_longer_lets_the_model_mention_github_or_the_site():
     s = llm.build_draft_system(example_profile())
     assert "Do NOT mention GitHub, the site, a portfolio" in s and "refer to it in words" not in s
+
+
+
+@pytest.mark.parametrize("title, want", [
+    ("AI Engineer (New Grads & Principal/Distinguished)", "AI Engineer"),          # brackets go with their content
+    ("Full Stack Engineer [Hybrid] (AI)", "Full Stack Engineer"),
+    ("(Remote) Python Developer", "Python Developer"),
+    ("Разработчик python (ии-агенты)/Middle+", "Разработчик python"),               # a slash tail after a bracket
+    ("Prompt Engineer / инженер AI-решений", "Prompt Engineer"),                    # alternatives: the first one
+    ("ML Python Developer - Remote Europe", "ML Python Developer"),                 # a dash tail
+    ("Senior AI Engineer \u2013 2 000 \u2013 3 000 USD", "Senior AI Engineer"),
+    ("Software Engineer, AI Platform", "Software Engineer"),                         # a comma tail
+    ("AI Engineer: LLM agents & RAG", "AI Engineer"),                                # a colon tail
+    ("AI/ML Engineer", "AI/ML Engineer"),                                            # a slash inside a word stays
+    ("Python-разработчик", "Python-разработчик"),                                    # a hyphen inside a word stays
+    ("LLM-инженер", "LLM-инженер"),
+])
+def test_role_brackets_and_tails_are_cut(title, want):
+    assert llm.clean_role(title) == want
+
+
+@pytest.mark.parametrize("title", ["[Hybrid]", "(Remote)", " - Remote", "Role | Company", "a/b", "AI Engineer " + "word " * 12])
+def test_role_that_is_nothing_after_the_cut_falls_back(title):
+    cleaned = llm.clean_role(title)
+    assert cleaned == "" or len(cleaned) >= 3
+    if title in ("[Hybrid]", "(Remote)", " - Remote", "Role | Company"):
+        assert cleaned == ""
+
+
+def test_the_intro_uses_the_short_role():
+    intro = llm.draft_intro(_ex("AI Engineer (New Grads & Principal/Distinguished)"), EN_POST, _profile_with_intro())
+    assert intro.startswith("I'm applying for the AI Engineer position. ")
