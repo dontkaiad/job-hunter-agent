@@ -52,6 +52,16 @@ class DraftSignature:
 
 
 @dataclass(frozen=True)
+class DraftIntro:
+    """The sentence about the candidate that follows the application sentence in the fixed intro of every
+    draft ("I'm an AI engineer with almost three years of experience ..."). Written per language in the
+    PRIVATE profile (the years live there, never in public code); generic placeholders by default."""
+
+    ru: str = "Я инженер, работаю с ИИ."
+    en: str = "I'm an engineer working with AI."
+
+
+@dataclass(frozen=True)
 class Profile:
     """Loaded candidate profile. Pure data; injected into prompts + wiring."""
 
@@ -68,6 +78,7 @@ class Profile:
     gender: str = "unspecified"
     salary_floor_eur: float = 1000.0
     draft_signature: DraftSignature = field(default_factory=DraftSignature)
+    draft_intro: DraftIntro = field(default_factory=DraftIntro)
     # Candidate eligibility constraints (private; see job_hunter/geo.py). Empty by default.
     eligibility: Any = None
     # Candidate-specific scoring wording (private; see config/profile.example.yaml). Empty = the
@@ -144,6 +155,14 @@ def parse_profile(data: Mapping[str, Any], source_path: Optional[str] = None) ->
         resume=_as_str(sig_raw.get("resume")) or DraftSignature.resume,
     )
 
+    intro_raw = data.get("draft_intro") or {}
+    if not isinstance(intro_raw, Mapping):
+        intro_raw = {}
+    intro = DraftIntro(
+        ru=_as_str(intro_raw.get("ru")) or DraftIntro.ru,
+        en=_as_str(intro_raw.get("en")) or DraftIntro.en,
+    )
+
     floor_raw = data.get("salary_floor_eur")
     try:
         floor = float(floor_raw) if floor_raw is not None else Profile.salary_floor_eur
@@ -165,6 +184,7 @@ def parse_profile(data: Mapping[str, Any], source_path: Optional[str] = None) ->
         gender=gender,
         salary_floor_eur=floor,
         draft_signature=sig,
+        draft_intro=intro,
         eligibility=_parse_eligibility(data.get("eligibility")),
         score_location_rubric=_as_raw(data.get("score_location_rubric")),
         score_low_fit_extra=_as_list(data.get("score_low_fit_extra")),

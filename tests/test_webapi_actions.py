@@ -185,7 +185,7 @@ def test_draft_from_approved_returns_draft_text(client, conn):
     body = resp.json()
     assert body["status"] == DRAFTED
     assert body["draft"]
-    assert body["draft"].startswith("Hello,\n\nI'd love to apply.")
+    assert body["draft"].startswith("Hello,\nI'm applying for") and "I'd love to apply." in body["draft"]
 
 
 def test_draft_idempotent_when_already_drafted(client, conn, monkeypatch):

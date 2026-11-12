@@ -110,7 +110,7 @@ def test_draft_returns_greeting_no_dashes_and_the_profile_signature_at_the_end()
     ex = ExtractResult(title="LLM engineer", source_channel="ch", company=None)
     client = _FakeClient("Здравствуйте! Строю RAG — пайплайны и эвалы — на Python.")
     out = agents.draft(client, ex, RU_POST, None, profile=_profile_with_site())
-    assert out.startswith("Добрый день!\n\n")
+    assert out.startswith("Добрый день!\nОткликаюсь на позицию «LLM engineer». ")
     assert not any(d in out for d in LONG_DASHES)
     assert out.endswith("GitHub: github.com/x\nСайт: example.test")
 
@@ -124,7 +124,7 @@ def test_signature_block_is_github_plus_the_profile_line():
 
 def test_prompt_carries_the_style_and_greeting_rules():
     s = llm.build_draft_system(example_profile())
-    assert "GREETING (MANDATORY)" in s and "«Добрый день!»" in s and "«Hello,»" in s
+    assert "GREETING AND INTRO" in s and "«Добрый день!»" in s and "«Hello,»" in s and "written by code" in s
     assert "NO long or medium dashes" in s and "never write — or –" in s
     for stock in ("рад(а) предложить свои навыки", "уверен(а), что смогу", "динамично развивающаяся"):
         assert stock in s
@@ -145,10 +145,12 @@ def test_honesty_and_never_claim_rules_are_unchanged():
     assert "Never invent experience the candidate does not have" in s
 
 
-def test_user_prompt_names_the_exact_greeting_per_language():
-    ex = ExtractResult(title="t", source_channel="ch", company=None)
-    assert "«Добрый день!»" in llm.build_draft_prompt(ex, RU_POST)
-    assert "«Hello,»" in llm.build_draft_prompt(ex, EN_POST)
+def test_user_prompt_tells_the_model_what_code_already_wrote_per_language():
+    ex = ExtractResult(title="LLM engineer", source_channel="ch", company=None)
+    ru = llm.build_draft_prompt(ex, RU_POST, intro=llm.draft_intro(ex, RU_POST))
+    en = llm.build_draft_prompt(ex, EN_POST, intro=llm.draft_intro(ex, EN_POST))
+    assert "ALREADY WRITTEN ABOVE YOUR TEXT" in ru and "Добрый день!\nОткликаюсь на позицию «LLM engineer»." in ru
+    assert "ALREADY WRITTEN ABOVE YOUR TEXT" in en and "Hello,\nI'm applying for the LLM engineer position." in en
 
 
 def test_a_cut_greeting_leaves_a_sentence_that_starts_with_a_capital():
@@ -209,3 +211,160 @@ def test_a_short_line_that_only_points_at_the_github_link_is_dropped_a_long_sent
     assert agents.strip_own_signature("Строю RAG.\n\nCode on GitHub at github.com/x.", prof) == "Строю RAG."
     long_line = "Строю пайплайны для поиска по документам, примеры лежат тут: github.com/x, там же проверки и тексты."
     assert agents.strip_own_signature(long_line, prof) == long_line
+
+
+# --- the fixed intro (built by code, from the card's role and the profile) -------------------------------------
+
+from job_hunter.profile import DraftIntro, parse_profile  # noqa: E402
+
+
+def _ex(title):
+    return ExtractResult(title=title, source_channel="ch", company=None)
+
+
+def _profile_with_intro():
+    base = example_profile()
+    return Profile(**{**base.__dict__, "draft_intro": DraftIntro(
+        ru="Я инженер, три года внедряю ИИ.", en="I'm an engineer with three years of AI work.")})
+
+
+def test_intro_russian_with_role_and_the_profile_sentence():
+    intro = llm.draft_intro(_ex("LLM-инженер"), RU_POST, _profile_with_intro())
+    assert intro == "Откликаюсь на позицию «LLM-инженер». Я инженер, три года внедряю ИИ."
+
+
+def test_intro_english_with_role_and_the_profile_sentence():
+    intro = llm.draft_intro(_ex("Applied AI Engineer"), EN_POST, _profile_with_intro())
+    assert intro == "I'm applying for the Applied AI Engineer position. I'm an engineer with three years of AI work."
+
+
+@pytest.mark.parametrize("title", [None, "", "   ", "none", "https://example.test/jobs/1", "vacancy #project #city",
+                                   "Company | Role | Remote", "AI Engineer / Python Developer | LLM Agents", "💬 ", "x" * 120])
+def test_intro_with_an_empty_or_garbage_role_uses_the_generic_sentence(title):
+    assert llm.draft_intro(_ex(title), RU_POST, _profile_with_intro()) == "Откликаюсь на вашу вакансию. Я инженер, три года внедряю ИИ."
+    assert llm.draft_intro(_ex(title), EN_POST, _profile_with_intro()) == (
+        "I'm applying for your open position. I'm an engineer with three years of AI work.")
+
+
+def test_role_is_cleaned_not_just_accepted():
+    assert llm.clean_role("💬 ИИ-разработчик / Вайбкодер") == "ИИ-разработчик / Вайбкодер"
+    assert llm.clean_role('Senior "Ruby" Engineer.') == "Senior Ruby Engineer"
+    assert llm.clean_role("«Prompt Engineer»") == "Prompt Engineer"
+    assert llm.clean_role("AI Engineer (New Grads & Principal/Distinguished)").startswith("AI Engineer")
+
+
+def test_the_years_come_from_the_profile_not_from_public_code():
+    """No years / numbers in the public code path: change the profile sentence and the intro follows."""
+    a = llm.draft_intro(_ex("Role X"), RU_POST, _profile_with_intro())
+    other = Profile(**{**example_profile().__dict__, "draft_intro": DraftIntro(ru="Я разработчик.", en="I'm a developer.")})
+    b = llm.draft_intro(_ex("Role X"), RU_POST, other)
+    assert "три года" in a and "три года" not in b and b.endswith("Я разработчик.")
+    assert "год" not in llm.draft_intro(_ex("Role X"), RU_POST, example_profile())       # the generic placeholder has none
+
+
+def test_profile_reads_draft_intro_and_has_generic_defaults():
+    p = parse_profile({"draft_intro": {"ru": "Я X.", "en": "I'm X."}})
+    assert (p.draft_intro.ru, p.draft_intro.en) == ("Я X.", "I'm X.")
+    d = parse_profile({})
+    assert d.draft_intro == DraftIntro()
+    assert parse_profile({"draft_intro": "not a mapping"}).draft_intro == DraftIntro()
+
+
+def test_composed_draft_is_greeting_then_intro_then_the_model_text():
+    prof = _profile_with_intro()
+    ex = _ex("LLM engineer")
+    out = agents.draft(_FakeClient("Строю RAG — пайплайны и эвалы."), ex, RU_POST, None, profile=prof)
+    lines = out.split("\n")
+    assert lines[0] == "Добрый день!"
+    assert lines[1] == "Откликаюсь на позицию «LLM engineer». Я инженер, три года внедряю ИИ."
+    assert lines[2] == "" and lines[3] == "Строю RAG, пайплайны и эвалы."
+    en = agents.draft(_FakeClient("I build RAG pipelines."), _ex("Applied AI Engineer"), EN_POST, None, profile=prof)
+    assert en.split("\n")[:2] == ["Hello,", "I'm applying for the Applied AI Engineer position. I'm an engineer with three years of AI work."]
+
+
+def test_a_model_that_repeats_the_greeting_and_the_intro_is_cut_back_to_its_body():
+    intro = "Откликаюсь на позицию «X». Я инженер."
+    for body in ("Здравствуйте! Откликаюсь на позицию «X». Я инженер, три года в ИИ. Строю RAG.",
+                 "Добрый день!\nОткликаюсь на вашу вакансию. Строю RAG.",
+                 "Я инженер, работаю с ИИ. Строю RAG."):
+        out = agents.compose_draft(body, "ru", intro)
+        assert out.startswith(f"Добрый день!\n{intro}\n\nСтрою RAG"), out
+    assert agents.compose_draft("", "ru", intro) == f"Добрый день!\n{intro}"
+    en = agents.compose_draft("I'm applying for the role. I'm an AI engineer. I build RAG.", "en", "I'm applying for the X position. I'm an engineer.")
+    assert en.endswith("\n\nI build RAG.")
+
+
+def test_empty_role_in_a_full_draft_gives_the_generic_application_sentence():
+    out = agents.draft(_FakeClient("Строю RAG."), _ex(None), RU_POST, None, profile=_profile_with_intro())
+    assert out.split("\n")[1] == "Откликаюсь на вашу вакансию. Я инженер, три года внедряю ИИ."
+
+
+# --- the new prompt rules -----------------------------------------------------------------------------------
+
+
+def test_prompt_length_rule_and_no_greeting_or_intro_for_the_model():
+    s = llm.build_draft_system(example_profile())
+    assert "2 to 4 sentences, up to about 90 words" in s and "4 to 6 sentences, about 120 words" in s
+    assert "do NOT greet" in s and "do NOT introduce yourself" in s and "do NOT repeat the intro" in s
+
+
+def test_prompt_bans_empty_tails_company_compliments_and_opinions():
+    s = llm.build_draft_system(example_profile())
+    assert "NO empty tails" in s and "Готова развиваться" in s and "Заинтересована в позиции" in s
+    assert "NO compliments to the company" in s and "not maintaining legacy code" in s and "the bar for craft" in s
+    assert "ONE concrete detail taken from the vacancy" in s and "no closing line at all" in s
+    assert "ONE short sentence of at most 15 words" in s and "NO statements of values or preferences" in s
+    assert "Each sentence is up to about 25 words" in s
+
+
+def test_in_development_items_may_only_be_learning_never_done():
+    base = example_profile()
+    prof = Profile(**{**base.__dict__, "in_development": ["local LLM inference"]})
+    s = llm.build_draft_system(prof)
+    assert "local LLM inference" in s
+    assert "ONLY as «учусь» / «экспериментирую»" in s and "NEVER as «делала», «запускала»" in s
+    assert "Never invent experience the candidate does not have" in s            # the older honesty rule is still there
+
+
+# --- empty closing sentences and GitHub mentions in the body -------------------------------------------------------
+
+
+@pytest.mark.parametrize("src, want", [
+    ("Строю RAG. Гоняю эвалы. Код на GitHub, готова обсудить детали.", "Строю RAG. Гоняю эвалы."),
+    ("Строю RAG. Гоняю эвалы. Готова к полностью удалённому формату.", "Строю RAG. Гоняю эвалы."),
+    ("Строю RAG. Мне важна архитектура решений, которые работают в боевых условиях.", "Строю RAG."),
+    ("I built RAG. The stack here lines up with what I've been doing, and I'd be interested in discussing it.", "I built RAG."),
+    ("I built RAG. I'm excited about this role.", "I built RAG."),
+    ("Строю RAG.\n\nЗаинтересована в позиции.", "Строю RAG."),
+])
+def test_empty_closing_sentences_are_cut(src, want):
+    assert agents.strip_empty_tail(src) == want
+
+
+def test_sentences_about_github_are_cut_anywhere_but_github_actions_stays():
+    src = "Строю RAG. На GitHub есть примеры промптов. Деплой через GitHub Actions."
+    assert agents.strip_empty_tail(src) == "Строю RAG. Деплой через GitHub Actions."
+
+
+def test_a_substantive_last_sentence_and_a_lone_sentence_are_kept():
+    keep = "Строю RAG-пайплайны. В Acme готова строить агентские воркфлоу."
+    assert agents.strip_empty_tail(keep) == keep                  # "в Acme готова ..." is not an empty tail
+    assert agents.strip_empty_tail("Готова обсудить.") == "Готова обсудить."          # never empties the text
+    assert agents.strip_empty_tail("") == ""
+
+
+def test_paragraph_structure_survives():
+    src = "Первый абзац. Ещё фраза.\n\nВторой абзац.\n\nГотова обсудить."
+    assert agents.strip_empty_tail(src) == "Первый абзац. Ещё фраза.\n\nВторой абзац."
+
+
+def test_composed_draft_has_no_empty_tail_and_no_github_sentence():
+    out = agents.draft(_FakeClient("Строю RAG. Код на GitHub. Готова обсудить детали."), _ex("Role X"), RU_POST, None,
+                       profile=_profile_with_intro())
+    assert "Готова обсудить" not in out and out.split("\n")[3] == "Строю RAG."
+    assert out.count("GitHub") == 1                                  # only the signature line
+
+
+def test_prompt_no_longer_lets_the_model_mention_github_or_the_site():
+    s = llm.build_draft_system(example_profile())
+    assert "Do NOT mention GitHub, the site, a portfolio" in s and "refer to it in words" not in s

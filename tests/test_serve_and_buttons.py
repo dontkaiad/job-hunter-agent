@@ -166,7 +166,7 @@ def test_button_approve_finalizes_card_and_drives_draft(conn, fake_llm, fake_fx)
     # Approve path drove the LLM pipeline all the way to DRAFTED.
     assert item.state == DRAFTED
     draft_text = json.loads(item.extracted_json)["draft"]
-    assert draft_text.startswith("Hello,\n\nI want to apply")
+    assert draft_text.startswith("Hello,\nI'm applying for") and "I want to apply" in draft_text
     assert "github.com/example" in draft_text and "[resume: link]" in draft_text
     # Draft was sent back for review.
     assert sent["id"] == item_id

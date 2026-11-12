@@ -572,7 +572,8 @@ def test_handle_callback_approve_drives_to_draft(conn, fake_llm, fake_fx):
     assert sent["id"] == item_id
     draft_text = json.loads(item.extracted_json)["draft"]
     # the model body is kept; the fixed greeting is the first line (an English vacancy -> "Hello,")
-    assert draft_text.startswith("Hello,\n\nI want to apply")
+    assert draft_text.startswith("Hello,\nI'm applying for")     # greeting, then the fixed intro line
+    assert "I want to apply" in draft_text
     # Deterministic signature appended (generic example-profile placeholders).
     assert "github.com/example" in draft_text
     assert "[resume: link]" in draft_text

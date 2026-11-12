@@ -1008,10 +1008,14 @@ def _gender_rule(gender: str) -> str:
 # DRAFT scaffold (no personal DATA). {gender_rule}, {hands_on}, {in_development}
 # are injected from the loaded profile.
 _DRAFT_SCAFFOLD = (
-    "You write a SHORT first-contact application message (отклик) for an "
-    "applied-LLM engineer. Keep it concise: aim for ~90-150 words, shorter is "
-    "fine. No markdown headers. Match the post's language (Russian or English). "
-    "Reference concrete stack overlap. Output ONLY the message text.\n\n"
+    "You write the BODY of a SHORT first-contact application message (отклик) for an "
+    "applied-LLM engineer. LENGTH (HARD): 2 to 4 sentences, up to about 90 words in total; "
+    "shorter is fine. Code adds the greeting and a fixed two-sentence intro above your text "
+    "(the whole letter is then 4 to 6 sentences, about 120 words), so start DIRECTLY with the "
+    "substance: do NOT greet, do NOT say you are applying, do NOT introduce yourself or state "
+    "your years of experience, do NOT repeat the intro. Each sentence is up to about 25 "
+    "words, with no long chains of commas. No markdown headers. Match the post's "
+    "language (Russian or English). Reference concrete stack overlap. Output ONLY the body text.\n\n"
     "AUDIENCE (CRITICAL): this отклик is read FIRST by a NON-TECHNICAL "
     "RECRUITER, not a tech lead. Write so a non-technical person understands "
     "it. LEAD with plain-language fit — what the candidate actually does and why "
@@ -1026,6 +1030,10 @@ _DRAFT_SCAFFOLD = (
     "- HANDS-ON (may claim as real experience):\n{hands_on}\n"
     "- IN DEVELOPMENT, NOT hands-on (do NOT present as done experience):\n"
     "{in_development}\n"
+    "  An IN-DEVELOPMENT item may be mentioned ONLY as «учусь» / «экспериментирую» / "
+    "«изучаю» (EN: «learning», «experimenting with»), NEVER as «делала», «запускала», "
+    "«развернула», «внедряла», «в production» or any other word that says it was done or "
+    "run for real.\n"
     "{never_claim_rule}"
     "- Python note: when the profile says the candidate reads / reviews / "
     "architects Python rather than writing it from scratch, never claim they "
@@ -1059,12 +1067,12 @@ _DRAFT_SCAFFOLD = (
     "recruiter cannot answer that. Any 'human eval' / metrics-internals question "
     "is a FORBIDDEN example. If your only question would be technical, ask "
     "nothing.\n\n"
-    "GREETING (MANDATORY): the FIRST line of the message is exactly «Добрый день!» "
-    "when you write in Russian and exactly «Hello,» when you write in English: nothing "
-    "else on that line. Then a blank line and the text. No other greeting («Здравствуйте», "
-    "«Привет», «Dear ...»), and do not address the company in the greeting line.\n\n"
+    "GREETING AND INTRO: the greeting («Добрый день!» / «Hello,») and the intro "
+    "(«Откликаюсь на позицию …» / «I'm applying for …» plus one sentence about the candidate) "
+    "are written by code. You write only what follows them.\n\n"
     "TONE / DE-SLOP (must NOT read as AI-generated): write like a competent person typing "
-    "a short, specific message to a recruiter: plain words, SHORT sentences, one idea each. "
+    "a short, specific, natural and concise message to a recruiter: plain words, SHORT "
+    "sentences, one idea each. "
     "HARD RULES:\n"
     "- NO long or medium dashes anywhere: never write — or –. Use a comma, a full stop or a "
     "new sentence instead. A plain hyphen is allowed only INSIDE a word (кто-то, "
@@ -1081,24 +1089,37 @@ _DRAFT_SCAFFOLD = (
     "questions, exclamation marks (except the greeting), excessive hedging.\n"
     "- NO invented numbers: do not state years of experience, counts or percentages "
     "that are not given in the HANDS-ON list above.\n"
+    "- NO empty tails: do not end with a sentence that only states interest or readiness "
+    "(«Готова развиваться в …», «Заинтересована в позиции …», «Готова к удалённому формату», "
+    "«I'm excited about …», «I'd love to discuss»).\n"
+    "- NO statements of values or preferences about yourself («мне важно …», «я ценю …», "
+    "«мне близок подход …», «I value …», «I care about …»).\n"
+    "- NO compliments to the company and NO opinions about other people's work or products "
+    "(«вы делаете крутой продукт», «I am drawn to Acme because you ship to millions», "
+    "«I like building things that work, not maintaining legacy code», «the bar for craft …»). "
+    "Say what the candidate did, not what they think of the employer.\n"
+    "- A closing sentence is allowed ONLY if it carries ONE concrete detail taken from the "
+    "vacancy (a named task, product or stack item) and is ONE short sentence of at most "
+    "15 words, without claims about what you will \"bring\" or about the employer's scale; "
+    "otherwise end on the last substantive sentence, with no closing line at all.\n"
     "- Write ONLY with Cyrillic and Latin letters: never any Chinese, Japanese or Korean "
     "characters, in any word.\n"
     "- Do NOT open with filler and do NOT end with a grand closing. AVOID the "
     "over-polished tri-paragraph 'intro / body / call-to-action' shape. State concrete "
     "things the candidate did, plainly and specifically.\n\n"
     "TARGET COMPANY: a ``company`` value may be provided in the JSON context "
-    "below. When it is a real name (not null), you MAY address the отклик to "
-    "that company so it reads as written FOR them (e.g. naming the company "
-    "naturally in the opening). When company is null / not provided, write a "
-    "neutral opening and do NOT write the literal word «None» / «null» / "
-    "«компания» as a placeholder — simply omit the company clause.\n\n"
+    "below. When it is a real name (not null), you MAY name the company ONCE, "
+    "neutrally and only if it helps the sentence (e.g. «в Acme …»), never with "
+    "flattery. When company is null / not provided, do NOT write the literal word "
+    "«None» / «null» / «компания» as a placeholder — simply omit the company clause.\n\n"
     "LINKS (do NOT fabricate URLs): a signature block is appended to the message "
     "AUTOMATICALLY after you write it: the candidate's GitHub ({github}) and one more "
     "reference line. The message ends with your last sentence: do NOT write a GitHub "
     "line, any link, a signature, contact lines or a sign-off yourself, and do NOT invent any other "
     "GitHub URL, portfolio URL, site, or a fake резюме/CV http link. Never output a "
-    "made-up http(s) link. If you mention GitHub in the body, refer to it in words "
-    "only (e.g. «код на GitHub») without inventing a URL."
+    "made-up http(s) link. Do NOT mention GitHub, the site, a portfolio or "
+    "\"examples of my work\" in the body at all: the signature covers them, and you "
+    "do not know what is in them."
 )
 
 
@@ -1143,11 +1164,47 @@ def _detect_lang(text: str) -> str:
     return "en" if latin > cyrillic else "ru"
 
 
+_ROLE_PLACEHOLDERS = {"none", "null", "n/a", "na", "-", "вакансия", "vacancy", "job", "position", "позиция", "untitled"}
+
+
+def clean_role(title: Optional[str]) -> str:
+    """The card's role (``ExtractResult.title``) as it can stand inside «…» in the intro, or "" when it is empty
+    or garbage: a URL, a hashtag soup, a "Company | Role | Remote" line, something very long or without words. PURE."""
+    s = (title or "").strip()
+    s = re.sub(r"^[^\w(\[]+", "", s)                      # leading emoji / bullets
+    s = s.replace("«", "").replace("»", "").replace('"', "").strip(" .,;:-–—")
+    if not s or len(s) < 3 or len(s) > 80:
+        return ""
+    low = s.lower()
+    if low in _ROLE_PLACEHOLDERS or "http" in low or "://" in low or "www." in low:
+        return ""
+    if any(ch in s for ch in ("|", "#", "@", "\n")):
+        return ""
+    letters = sum(c.isalpha() for c in s)
+    if letters < 3 or letters < 0.5 * len(s) or len(s.split()) > 11:
+        return ""
+    return s
+
+
+def draft_intro(extracted: ExtractResult, raw_text: str, profile: Optional[Profile] = None) -> str:
+    """The fixed intro of the draft, built by code (the model never writes it): the application sentence with the
+    card's role (or a generic one when the role is empty / garbage) plus the profile's sentence about the candidate.
+    Language by the same rule as the draft. PURE."""
+    about = (profile or example_profile()).draft_intro
+    role = clean_role(extracted.title)
+    if _detect_lang(raw_text) == "en":
+        first = f"I'm applying for the {role} position." if role else "I'm applying for your open position."
+        return f"{first} {about.en}".strip()
+    first = f"Откликаюсь на позицию «{role}»." if role else "Откликаюсь на вашу вакансию."
+    return f"{first} {about.ru}".strip()
+
+
 def build_draft_prompt(
     extracted: ExtractResult,
     raw_text: str,
     research: Optional[Dict[str, Any]] = None,
     gender: str = "unspecified",
+    intro: str = "",
 ) -> str:
     payload: Dict[str, Any] = {
         "title": extracted.title,
@@ -1166,12 +1223,16 @@ def build_draft_prompt(
     )
     lang = _detect_lang(raw_text)
     lang_instruction = (
-        "LANGUAGE (MANDATORY): write the message in ENGLISH — the vacancy is in English. "
-        "The first line is exactly «Hello,».\n"
+        "LANGUAGE (MANDATORY): write the body in ENGLISH — the vacancy is in English.\n"
         if lang == "en"
-        else "LANGUAGE (MANDATORY): write the message in RUSSIAN. The first line is exactly "
-        "«Добрый день!».\n"
+        else "LANGUAGE (MANDATORY): write the body in RUSSIAN.\n"
     )
+    if intro:
+        greeting = "Hello," if lang == "en" else "Добрый день!"
+        lang_instruction += (
+            "ALREADY WRITTEN ABOVE YOUR TEXT by code (do NOT repeat, rephrase or continue it):\n"
+            f"{greeting}\n{intro}\nYour text starts with the substance, as a new paragraph.\n"
+        )
     return (
         f"Write the application message for our {_GENDER_MARK.get((gender or '').lower(), '')}candidate.\n"
         + lang_instruction
@@ -1294,7 +1355,8 @@ def llm_draft(
     return client.complete(
         system,
         build_draft_prompt(extracted, raw_text, research,
-                           gender=(profile.gender if profile is not None else "unspecified")),
+                           gender=(profile.gender if profile is not None else "unspecified"),
+                           intro=draft_intro(extracted, raw_text, profile)),
         max_tokens=DRAFT_MAX_TOKENS,
         model=model,
         cache_system=should_cache_system(system, model),

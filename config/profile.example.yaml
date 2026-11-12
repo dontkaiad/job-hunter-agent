@@ -87,6 +87,13 @@ draft_signature:
   # resume reference (a literal PLACEHOLDER the operator swaps at send time). Never a fabricated real URL.
   resume: "[resume: link]"
 
+# The fixed intro of every draft is built by code, right under the greeting: "<application sentence> <this sentence>".
+# The application sentence is generic ("I'm applying for the <role> position."); this one says who the candidate is
+# (put the years of experience here, in the private profile only). One sentence per language.
+draft_intro:
+  ru: "Я инженер, работаю с ИИ."
+  en: "I'm an engineer working with AI."
+
 # --- Candidate-specific scoring wording (all OPTIONAL; generic defaults live in job_hunter/llm.py) ---
 # Keep your real wording in config/profile.local.yaml (gitignored). The public code carries none of it.
 #

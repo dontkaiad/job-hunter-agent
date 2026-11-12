@@ -165,9 +165,99 @@ def strip_foreign_script(text: str) -> str:
     return re.sub(r" {2,}", " ", _FOREIGN_SCRIPT_RE.sub("", text or ""))
 
 
-def polish_draft(text: str, raw_text: str) -> str:
-    """Greeting + no long dashes, in the language of the vacancy (the same rule the prompt uses). PURE."""
+def _strip_greeting(text: str) -> str:
+    """The body without a greeting the model may have written at the start. PURE."""
+    body = (text or "").lstrip()
+    first, _, rest = body.partition("\n")
+    if _GREETING_LINE_RE.match(first):
+        body = rest
+    else:
+        m = _GREETING_PREFIX_RE.match(first)
+        if m:
+            remainder = first[m.end():].strip()
+            remainder = remainder[:1].upper() + remainder[1:]
+            body = (remainder + ("\n" + rest if rest else "")) if remainder else rest
+    return body.lstrip("\n")
+
+
+# The intro is written by code; if the model repeats it anyway, its first sentences are cut. Only at the very start.
+_REPEATED_INTRO_RE = re.compile(
+    r"^[ \t]*(?:откликаюсь|пишу\s+(?:по\s+поводу|в\s+связи)|хочу\s+откликнуться|я\s+(?:ai[- ]?)?инженер\b|"
+    r"i['’]m\s+applying|i\s+am\s+applying|i['’]m\s+writing\s+to\s+apply|i['’]d\s+like\s+to\s+apply|"
+    r"i['’]m\s+an?\s+(?:ai\s+)?engineer\b|i\s+am\s+an?\s+(?:ai\s+)?engineer\b)[^.!?\n]*[.!?]+[ \t]*",
+    re.I,
+)
+
+
+def _strip_repeated_intro(text: str) -> str:
+    out = text.lstrip()
+    for _ in range(2):                                   # the application sentence and the "I'm an engineer" one
+        m = _REPEATED_INTRO_RE.match(out)
+        if not m:
+            break
+        out = out[m.end():].lstrip()
+    return out[:1].upper() + out[1:] if out else out
+
+
+# Final sentences that only state interest / readiness / a value or praise the stack: cut (the prompt forbids them,
+# the model still writes them now and then). Only trailing sentences; a sentence about GitHub (not GitHub Actions)
+# is cut anywhere, because the signature already carries the link and the model cannot know what the repo holds.
+_EMPTY_TAIL_RE = re.compile(
+    r"^\W*(?:готов(?:а)?\b|заинтересован(?:а)?\b|буду\s+рад|рад(?:а)?\b|с\s+радостью|хотел(?:а)?\s+бы\s+обсудить|"
+    r"мне\s+(?:важн|близк|интересн)|я\s+ценю|"
+    r"i['’]d\s+(?:be\s+(?:happy|glad|interested)|love)|i\s+would\s+(?:be\s+(?:happy|glad|interested)|love)|"
+    r"i['’]m\s+(?:excited|interested|keen|eager|ready|happy)|looking\s+forward|happy\s+to\s+(?:discuss|chat|talk)|"
+    r"feel\s+free|the\s+stack\s+(?:here\s+)?(?:lines\s+up|matches)|this\s+(?:role|position)\s+(?:is|looks|seems))",
+    re.I,
+)
+_GITHUB_MENTION_RE = re.compile(r"\bgit\s?hub\b(?!\s+actions)", re.I)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZА-ЯЁ«\"'(])")
+
+
+def strip_empty_tail(text: str) -> str:
+    """Cut closing sentences that say nothing ("Готова обсудить детали.", "I'd be interested in discussing ...") and
+    sentences that mention GitHub. Never empties the text: if everything would go, the text is returned as it was. PURE."""
+    if not (text or "").strip():
+        return text
+    paragraphs = [p for p in re.split(r"\n{2,}", text.strip())]
+    sentences = []
+    for pi, p in enumerate(paragraphs):
+        for s in _SENTENCE_SPLIT_RE.split(p.strip()):
+            if s.strip():
+                sentences.append((pi, s.strip()))
+    sentences = [(pi, s) for pi, s in sentences if not _GITHUB_MENTION_RE.search(s)]
+    for _ in range(3):                                      # trailing empty sentences, at most three in a row
+        if len(sentences) > 1 and _EMPTY_TAIL_RE.match(sentences[-1][1]):
+            sentences.pop()
+        else:
+            break
+    if not sentences:
+        return text
+    out, current = [], None
+    for pi, s in sentences:
+        if pi != current:
+            out.append(s)
+            current = pi
+        else:
+            out[-1] += " " + s
+    return "\n\n".join(out)
+
+
+def compose_draft(body: str, lang: str, intro: str) -> str:
+    """greeting (line 1), the fixed intro (line 2), a blank line, then the model's text. The model's own greeting and
+    any repeat of the intro are removed; no long dashes. PURE."""
+    greeting = GREETING_EN if lang == "en" else GREETING_RU
+    text = strip_empty_tail(_strip_repeated_intro(_strip_greeting(strip_long_dashes(body))))
+    head = f"{greeting}\n{intro}".rstrip()
+    return f"{head}\n\n{text}" if text.strip() else head
+
+
+def polish_draft(text: str, raw_text: str, intro: str = "") -> str:
+    """Greeting (+ the fixed intro when given) and no long dashes, in the language of the vacancy (the same rule the
+    prompt uses). PURE."""
     lang = llm._detect_lang(raw_text or "")
+    if intro:
+        return compose_draft(text, lang, intro)
     return ensure_greeting(strip_long_dashes(text), lang)
 
 
@@ -267,7 +357,8 @@ def draft(
         )
         if has_foreign_script(body):
             body = strip_foreign_script(body)
-    body = strip_own_signature(polish_draft(body, raw_text), profile)
+    intro = llm.draft_intro(extracted, raw_text, profile)
+    body = strip_own_signature(polish_draft(body, raw_text, intro), profile)
     return append_draft_signature(body, profile)
 
 

@@ -1200,7 +1200,7 @@ def test_agents_draft_appends_deterministic_signature(fake_llm):
     out = agents.draft(fake_llm, ex, "raw vacancy text")
 
     # the English vacancy gets the fixed greeting; the model's own greeting is replaced, its sentence kept
-    assert out.startswith("Hello,\n\nМне интересна позиция.")
+    assert out.startswith("Hello,\nI'm applying for") and "Мне интересна позиция." in out
     # Signature comes from the (example) profile -> generic placeholders.
     assert "github.com/example" in out
     assert "[resume: link]" in out
