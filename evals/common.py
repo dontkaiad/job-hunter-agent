@@ -63,6 +63,9 @@ PRICES_VERIFIED = "2026-11-01"
 PRICES = {
     "claude-haiku-4-5": {"input": 1.00, "cache_write_5m": 1.25, "cache_read": 0.10, "output": 5.00},
     "claude-sonnet-4-6": {"input": 3.00, "cache_write_5m": 3.75, "cache_read": 0.30, "output": 15.00},
+    # Candidate judge (Stage 2b, evals only; the pipeline does not use it). Input/output from COST.md
+    # (page checked 2026-11-01); the cache rows are the usual 1.25x / 0.1x of input, NOT separately verified.
+    "claude-sonnet-5-5": {"input": 2.00, "cache_write_5m": 2.50, "cache_read": 0.20, "output": 10.00},
 }
 
 
