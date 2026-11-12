@@ -83,8 +83,8 @@ salary_floor_eur: 1000
 draft_signature:
   # GitHub / portfolio URL shown as proof of skill (no scheme prefix).
   github: github.com/example
-  # Resume reference — a literal PLACEHOLDER the operator swaps at send time.
-  # Never a fabricated real URL.
+  # The second signature line, appended as is under the GitHub line: a personal site ("Site: example.test") or a
+  # resume reference (a literal PLACEHOLDER the operator swaps at send time). Never a fabricated real URL.
   resume: "[resume: link]"
 
 # --- Candidate-specific scoring wording (all OPTIONAL; generic defaults live in job_hunter/llm.py) ---

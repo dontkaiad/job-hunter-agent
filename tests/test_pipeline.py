@@ -101,7 +101,7 @@ def test_full_path_approve_research_draft_send_close(conn, deps, fake_llm):
     data = json.loads(item.extracted_json)
     # LLM body is preserved; the deterministic GitHub + резюме signature is
     # appended so the literal links are always present for the operator.
-    assert data["draft"].startswith("Hello, I'd love to apply.")
+    assert data["draft"].startswith("Hello,\n\nI'd love to apply.")   # fixed greeting line, then the model body
     assert "github.com/example" in data["draft"]
     assert "[resume: link]" in data["draft"]
     assert "research" in data

@@ -11,6 +11,7 @@ Results are stored back into the item's extracted_json under reserved keys
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, Optional
 
 from . import llm, research_fetch
@@ -66,6 +67,108 @@ def append_draft_signature(draft_text: str, profile: Optional[Profile] = None) -
     if not body:
         return block
     return f"{body}\n\n{block}"
+
+
+# --- Deterministic polish of the generated body (the prompt asks; the code guarantees) -------------------
+# The model is told never to write long / medium dashes and to open with a fixed greeting, but models drift,
+# so both are enforced here AFTER generation, before the signature is appended.
+
+_DASHES = "\u2014\u2013"                      # em dash and en dash
+_RANGE_DASH_RE = re.compile(rf"(?<=\d)\s*[{_DASHES}]\s*(?=\d)")        # 2022—2024, 10 – 15
+_LEADING_DASH_RE = re.compile(rf"(?m)^[ \t]*[{_DASHES}][ \t]*")           # a dash used as a list / dialogue marker
+_DASH_RE = re.compile(rf"[ \t]*[{_DASHES}][ \t]*")
+
+
+def strip_long_dashes(text: str) -> str:
+    """Replace em / en dashes: digit ranges become a plain hyphen without spaces ("2022-2024"), a leading
+    dash (list marker) is dropped, any other dash becomes a comma. A spaced hyphen is never produced. PURE."""
+    if not text or not any(d in text for d in _DASHES):
+        return text
+    out = _RANGE_DASH_RE.sub("-", text)
+    out = _LEADING_DASH_RE.sub("", out)
+    out = _DASH_RE.sub(", ", out)
+    # tidy what the substitution can leave behind: ", ," / ",." / ", !" / a comma at a line end or before a newline
+    out = re.sub(r",(\s*,)+", ",", out)
+    out = re.sub(r"\s+,", ",", out)
+    out = re.sub(r",\s*([.!?;:])", r"\1", out)
+    out = re.sub(r",[ \t]*(?=\n)", ".", out)
+    out = re.sub(r",[ \t]*$", ".", out)
+    return out
+
+
+GREETING_RU = "Добрый день!"
+GREETING_EN = "Hello,"
+_GREETING_WORDS = (r"(?:добрый\s+(?:день|вечер|утро)|доброго\s+времени\s+суток|здравствуйте|здравствуй|привет(?:ствую)?|"
+                   r"hello|hi|hey|dear|greetings|good\s+(?:morning|afternoon|evening))\b")
+# a line that IS a greeting (maybe with an address: "Добрый день, команда X!", "Dear Hiring Manager,")
+# (it ends with "!" or ",", or has no end mark and is very short; a line ending with a full stop is content)
+_GREETING_LINE_RE = re.compile(
+    rf"^[ \t]*{_GREETING_WORDS}(?:[^\n!.?]{{0,50}}[,!]|(?:[ \t]+\S+){{0,2}})[ \t]*$", re.I)
+# a greeting at the start of a line that goes on ("Здравствуйте! Меня заинтересовала ..."): only the greeting is cut
+# (the greeting word, plus up to two address words when a mark follows them: "Hello team," / "Здравствуйте,"; with
+# no mark only the greeting word itself goes, so "Hi I want to apply" keeps "I want to apply")
+_GREETING_PREFIX_RE = re.compile(
+    rf"^[ \t]*{_GREETING_WORDS}(?:(?:[ \t]+[^\s,!.]+){{0,2}}[,!.]+|[,!.]*)[ \t]*", re.I)
+
+
+def ensure_greeting(text: str, lang: str) -> str:
+    """The first line is exactly the greeting for ``lang`` ("Добрый день!" / "Hello,"), then a blank line.
+    A greeting line at the start (with or without an address) is replaced; a greeting that starts a longer line
+    is cut off and the rest of the line is kept; none present: the greeting is prepended. PURE."""
+    greeting = GREETING_EN if lang == "en" else GREETING_RU
+    body = (text or "").lstrip()
+    if not body:
+        return greeting
+    first, _, rest = body.partition("\n")
+    if _GREETING_LINE_RE.match(first):
+        body = rest
+    else:
+        m = _GREETING_PREFIX_RE.match(first)
+        if m:
+            remainder = first[m.end():].strip()
+            remainder = remainder[:1].upper() + remainder[1:]      # a sentence now starts the text
+            body = (remainder + ("\n" + rest if rest else "")) if remainder else rest
+    body = body.lstrip("\n")
+    return f"{greeting}\n\n{body}" if body.strip() else greeting
+
+
+# Lines the model writes itself although the signature block is appended by code ("GitHub: ...", "Сайт: ...",
+# a resume placeholder): dropped, so the block is not doubled.
+_OWN_SIGNATURE_RE = re.compile(
+    r"(?im)^[ \t]*(?:github|git\s*hub|сайт|site|website|резюме|resume|cv|портфолио|portfolio)[ \t]*:.*$|"
+    r"^[ \t]*\[(?:резюме|resume)[^\]\n]*\][ \t]*$"
+)
+
+
+def strip_own_signature(text: str, profile: Optional[Profile] = None) -> str:
+    """Drop signature-like lines the model wrote itself (and a bare line holding the profile's GitHub link). PURE."""
+    out = _OWN_SIGNATURE_RE.sub("", text or "")
+    gh = ((profile or example_profile()).draft_signature.github or "").strip()
+    if gh:
+        # a short line that only points at the GitHub link ("Code on GitHub at github.com/x."), not a real sentence
+        out = "\n".join(
+            ln for ln in out.split("\n") if not (gh.lower() in ln.lower() and len(ln.strip()) <= gh.__len__() + 40)
+        )
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+
+# Characters of scripts the draft must never contain (the model sometimes slips a Korean / Chinese word in).
+_FOREIGN_SCRIPT_RE = re.compile("[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\u0e00-\u0e7f\u0600-\u06ff]")
+
+
+def has_foreign_script(text: str) -> bool:
+    return bool(_FOREIGN_SCRIPT_RE.search(text or ""))
+
+
+def strip_foreign_script(text: str) -> str:
+    """Last resort when a regenerated draft still carries such characters: remove them. PURE."""
+    return re.sub(r" {2,}", " ", _FOREIGN_SCRIPT_RE.sub("", text or ""))
+
+
+def polish_draft(text: str, raw_text: str) -> str:
+    """Greeting + no long dashes, in the language of the vacancy (the same rule the prompt uses). PURE."""
+    lang = llm._detect_lang(raw_text or "")
+    return ensure_greeting(strip_long_dashes(text), lang)
 
 
 def research(
@@ -157,6 +260,14 @@ def draft(
     body = llm.llm_draft(
         client, extracted, raw_text, research_data, model=model, profile=profile
     )
+    if has_foreign_script(body):
+        # the model slipped Korean / Chinese characters into a word: one more try, then cut what is left
+        body = llm.llm_draft(
+            client, extracted, raw_text, research_data, model=model, profile=profile
+        )
+        if has_foreign_script(body):
+            body = strip_foreign_script(body)
+    body = strip_own_signature(polish_draft(body, raw_text), profile)
     return append_draft_signature(body, profile)
 
 

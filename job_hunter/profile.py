@@ -36,10 +36,11 @@ EXAMPLE_PROFILE_PATH = os.path.join(_CONFIG_DIR, "profile.example.yaml")
 
 @dataclass(frozen=True)
 class DraftSignature:
-    """GitHub + resume references appended verbatim to every draft.
+    """GitHub + one more reference line appended verbatim to every draft.
 
-    ``github`` is a literal URL (no scheme). ``resume`` is a literal PLACEHOLDER
-    the operator swaps for the real link at send time — never a fabricated URL.
+    ``github`` is a literal URL (no scheme). ``resume`` is the SECOND LINE of the signature, kept under its
+    historical name: a literal line such as a personal site ("Site: example.test") or a resume PLACEHOLDER the
+    operator swaps at send time. Never a fabricated URL.
     """
 
     github: str = "github.com/example"
