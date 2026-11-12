@@ -37,6 +37,7 @@ processed (разобрано / неразобрано) — JUDGMENT CALL (tweak
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from dataclasses import dataclass
@@ -1229,6 +1230,33 @@ def set_pipeline_status(
     )
 
 
+# --- MCP read-only gate (kai-mcp) --------------------------------------------
+#
+# A SEPARATE router with a Bearer check (MCP_READ_TOKEN) and exactly two GETs that reuse the
+# dashboard handlers above. The cookie-gated /api/* routes are unchanged; a Bearer token opens
+# nothing there, and writes are not exposed under /api/mcp at all.
+
+MCP_MIN_TOKEN_LEN = 32
+
+
+def require_mcp_read(request: Request, config: Config = Depends(get_config)) -> None:
+    """Bearer-шлюз для kai-mcp. Только этот роутер, только GET."""
+    expected = config.mcp_read_token or ""
+    scheme, _, token = (request.headers.get("authorization") or "").partition(" ")
+    ok = (
+        len(expected) >= MCP_MIN_TOKEN_LEN
+        and scheme.lower() == "bearer"
+        and hmac.compare_digest(token.strip().encode(), expected.encode())
+    )
+    if not ok:
+        raise HTTPException(status_code=401, detail="invalid token", headers={"WWW-Authenticate": "Bearer"})
+
+
+mcp_router = APIRouter(prefix="/api/mcp", tags=["mcp"], dependencies=[Depends(require_mcp_read)])
+mcp_router.add_api_route("/pipeline", get_pipeline, methods=["GET"], response_model=List[PipelineItem])
+mcp_router.add_api_route("/pipeline-status", get_pipeline_status, methods=["GET"], response_model=PipelineStatus)
+
+
 # --- Public auth routes (issue #5): NOT gated -------------------------------
 #
 # These three routes are the login flow and MUST be reachable without a session.
@@ -1399,6 +1427,7 @@ def create_app() -> FastAPI:
     app.include_router(router)  # read routes (issue #3), now gated
     app.include_router(writer_router)  # write/action routes (issue #4), now gated
     app.include_router(golden_router)  # blind labelling for the scoring eval, gated
+    app.include_router(mcp_router)  # kai-mcp: только чтение по MCP_READ_TOKEN
 
     # SPA static serving — registered LAST so /api + auth routes win the match.
     static_dir = _resolve_static_dir()
