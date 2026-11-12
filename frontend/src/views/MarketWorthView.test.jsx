@@ -49,3 +49,37 @@ describe("MarketWorthView benchmark block", () => {
     }
   });
 });
+
+describe("MarketWorthView international pool caption", () => {
+  const withIntl = (over) => ({
+    ...market, degraded: false, degraded_reason: null, intl_min: 7000, intl_median: 12000, intl_max: 15000,
+    intl_sample_size: 326, ...over,
+  });
+
+  it("says what the international figure is made of when the geo guard never judged the vacancies", async () => {
+    api.getProfileCard.mockResolvedValue({ benchmarks: [], subtitle: "", sources: [] });
+    api.getMarketWorth.mockResolvedValue(withIntl({
+      intl_geo_unchecked: 325, intl_usd_share: 0.834, intl_top_source: "hn_hiring", intl_top_source_share: 0.506,
+    }));
+    render(<MarketWorthView />);
+    const note = await screen.findByTestId("mw-intl-pool");
+    expect(note.textContent).toContain("326 вакансий");
+    expect(note.textContent).toContain("83% в USD");
+    expect(note.textContent).toContain("HN Hiring 51%");
+    expect(note.textContent).toContain("не проверена у 325");
+    expect(note.textContent).toContain("ограничением по стране");
+  });
+
+  it("shows no caption when every pool vacancy was geo-checked or the pool is empty", async () => {
+    api.getProfileCard.mockResolvedValue({ benchmarks: [], subtitle: "", sources: [] });
+    api.getMarketWorth.mockResolvedValue(withIntl({ intl_geo_unchecked: 0 }));
+    render(<MarketWorthView />);
+    await screen.findByText("Анализ рынка");
+    expect(screen.queryByTestId("mw-intl-pool")).toBeNull();
+    cleanup();
+    api.getMarketWorth.mockResolvedValue({ ...market });
+    render(<MarketWorthView />);
+    await screen.findByText("Анализ рынка");
+    expect(screen.queryByTestId("mw-intl-pool")).toBeNull();
+  });
+});
