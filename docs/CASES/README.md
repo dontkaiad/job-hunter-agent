@@ -15,6 +15,7 @@ corridor they quote has since changed.
 | [0004](0004-link-only-fetch.md) | Link-only stubs: fetching the linked page | eval | `evals/link_fetch_eval.py` |
 | [0005](0005-heuristic-vs-model-extract.md) | Heuristic vs model extract on the shadow sample (n = 21) | eval + fix | `scripts/oneoff/reextract_fallback.py` |
 | [0006](0006-golden-set-and-geo-guard.md) | Golden set: precision/recall of the score, calibration, geo guard | eval | `evals/golden_eval.py`, `evals/geo_facts_eval.py` |
+| [0007](0007-judge-model-sonnet-4-6-vs-5-5.md) | Score judge: Sonnet 4.6 vs 5.5 (a "not worse" check, n = 38) | eval | `evals/judge_model_eval.py` |
 
 For the general method (what an eval is, how to choose a metric) see
 [../EVALS.md](../EVALS.md).

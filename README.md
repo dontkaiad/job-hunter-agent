@@ -92,6 +92,7 @@ the cost-aware design levers.
   - [0004](docs/CASES/0004-link-only-fetch.md) link-only fetch
   - [0005](docs/CASES/0005-heuristic-vs-model-extract.md) heuristic vs model extract
   - [0006](docs/CASES/0006-golden-set-and-geo-guard.md) golden set (precision / recall of the score) and the geo guard
+  - [0007](docs/CASES/0007-judge-model-sonnet-4-6-vs-5-5.md) score judge: Sonnet 4.6 vs 5.5 (a "not worse" check; keep 4.6)
 - `DESIGN.md` / `SCORING.md` — the authoritative low-level spec
 
 ## Quick start

@@ -1,0 +1,41 @@
+{
+  "_note": "Aggregates only (Case 0007). No vacancy text, ids, labels per card or model replies are stored. 38 labelled vacancies (18 yes / 20 no) on which the judge was actually called in the earlier scoring run; single labeller; surface threshold 50; a non-ok outcome (insufficient / parse_error) counts as 'not surfaced'.",
+  "date": "2026-11-12",
+  "n": 38,
+  "labels": {"yes": 18, "no": 20},
+  "threshold": 50,
+  "prompt_version": "v2",
+  "arms": {
+    "claude-sonnet-4-6": {
+      "call": "production: forced tool call, temperature 0, system prompt cached",
+      "outcomes": {"ok": 36, "insufficient": 2, "parse_error": 0, "api_error": 0},
+      "confusion": {"tp": 15, "fp": 11, "fn": 3, "tn": 9},
+      "recall": 0.833, "precision": 0.577, "specificity": 0.450,
+      "tokens": {"input": 46086, "cache_write": 3127, "cache_read": 115699, "output": 16779},
+      "usd_total": 0.4364, "usd_per_call": 0.01148
+    },
+    "claude-sonnet-5-5": {
+      "call": "tool_choice auto, temperature not sent (the API refuses a forced tool_choice and temperature), no prompt cache",
+      "outcomes": {"ok": 37, "insufficient": 0, "parse_error": 1, "api_error": 0},
+      "parse_error_kind": {"truncated_at_max_tokens_800": 1},
+      "confusion": {"tp": 15, "fp": 14, "fn": 3, "tn": 6},
+      "recall": 0.833, "precision": 0.517, "specificity": 0.300,
+      "tokens": {"input": 210779, "cache_write": 0, "cache_read": 0, "output": 20081},
+      "usd_total": 0.6224, "usd_per_call": 0.01638
+    }
+  },
+  "difference_5_5_minus_4_6": {"recall_pp": 0.0, "precision_pp": -6.0, "specificity_pp": -15.0},
+  "both_arms_scored": {"n": 35, "yes": 16, "recall_4_6": 0.875, "recall_5_5": 0.875, "precision_4_6": 0.560, "precision_5_5": 0.519, "precision_diff_pp": -4.1},
+  "score_difference_both_ok": {"n": 35, "mean": 0.1, "median": 0.0, "mean_abs": 6.2, "pairs_ge_15_points": 4, "pairs_across_threshold_50": 2},
+  "wilson_95": {"recall_15_of_18": [0.61, 0.94], "precision_4_6_15_of_26": [0.39, 0.74], "precision_5_5_15_of_29": [0.34, 0.69], "specificity_4_6_9_of_20": [0.26, 0.66], "specificity_5_5_6_of_20": [0.15, 0.52]},
+  "earlier_refused_attempts": {"forced_tool_choice": {"cards": 12, "api_error_400": 12, "usd": 0.0}, "temperature_with_auto": {"cards": 12, "api_error_400": 12, "usd": 0.0}},
+  "slice_auto_no_temperature": {"cards": 12, "ok": 11, "insufficient": 1, "parse_error": 0, "api_error": 0, "usd": 0.2009},
+  "decision_rule": {
+    "written_before_results": true,
+    "1_barrier_parse_plus_api_error_over_5pct": {"value_pct": 2.6, "passed": true},
+    "2_not_worse_recall_and_precision_within_3pp": {"recall_pp": 0.0, "precision_pp": -6.0, "passed": false},
+    "3_cost_per_call_not_higher": {"usd_4_6": 0.01148, "usd_5_5": 0.01638, "passed": false},
+    "outcome": "keep 4.6"
+  },
+  "total_spend_usd": {"comparison": 1.0588, "with_the_12_card_slice": 1.2597}
+}

@@ -7,7 +7,7 @@ from the config) on the given vacancies with ``--model`` and records, per card, 
   parse_error   no valid tool_use / truncated / non-numeric score (a ValueError from the client or parser)
   api_error     the API refused the call (e.g. an unsupported parameter); NOT a parse error
 
-    python -m evals.judge_model_eval run --model claude-sonnet-5-5 --ids 309 314 ... --max-usd 0.25 [--confirm]
+    python -m evals.judge_model_eval run --model claude-sonnet-5-5 --ids <id> <id> ... --max-usd 0.25 [--confirm]
 
 Prints the estimate and stops unless --confirm; hard stop at --max-usd. The DB is read-only here; the vacancy
 texts and the operator's labels never leave the database. The per-card file goes to the GITIGNORED data/evals/
