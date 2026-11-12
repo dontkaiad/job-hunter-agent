@@ -54,6 +54,25 @@ def load_cards(conn, ids: List[int]) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows if r["extracted_json"]]
 
 
+def score_tool_auto(client, system, user, model, max_tokens=None, temperature=None):
+    """The judge call with tool_choice AUTO (Sonnet 5.5 refuses the forced {"type": "tool"}). EVAL ONLY: the
+    pipeline keeps the forced call. Same prompts, same tool; the model may answer in prose instead of calling the
+    tool, which then counts as a parse_error (no_tool_use). Returns the tool input dict, like complete_tool."""
+    kwargs = {"temperature": temperature} if temperature is not None else {}
+    resp = client._client.messages.create(
+        model=model, max_tokens=max_tokens or llm.SCORE_MAX_TOKENS,
+        system=llm.build_system_param(system, False),
+        messages=[{"role": "user", "content": user}],
+        tools=[llm.SCORE_TOOL], tool_choice={"type": "auto"}, **kwargs)
+    client._record_usage(resp, model)
+    for block in resp.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == llm.SCORE_TOOL["name"]:
+            if getattr(resp, "stop_reason", None) == "max_tokens":
+                raise ValueError("tool call truncated by max_tokens")
+            return dict(block.input)
+    raise ValueError(f"no tool_use block in response (stop_reason={getattr(resp, 'stop_reason', None)})")
+
+
 def cmd_run(a) -> int:
     cfg, profile, conn = live_ctx()
     version = getattr(cfg, "score_prompt_version", "v2")
@@ -62,15 +81,22 @@ def cmd_run(a) -> int:
         print(f"note: {len(a.ids) - len(cards)} requested id(s) have no extracted data and are skipped")
     est = sum(est_score_call_usd(a.model, profile, from_dict(json.loads(c["extracted_json"])), c["raw_text"],
                                  c["fetched_text"], version=version) for c in cards)
-    gate(f"judge {a.model} x{len(cards)}", est, a.max_usd, a.confirm, notes=f"prompt {version}")
+    gate(f"judge {a.model} x{len(cards)}", est, a.max_usd, a.confirm,
+         notes=f"prompt {version}, tool_choice {a.tool_choice}, temperature {'omitted' if a.omit_temperature else 0}")
     client = make_client(cfg, "judge_model", model=a.model)
     results: List[Dict[str, Any]] = []
     for c in cards:
         ex = from_dict(json.loads(c["extracted_json"]))
         rec: Dict[str, Any] = {"id": c["id"], "label": c["label"]}
         try:
-            out = llm.llm_score(client, ex, c["raw_text"], model=a.model, profile=profile,
-                                fetched_text=c["fetched_text"], prompt_version=version)
+            if a.tool_choice == "auto":
+                system = llm.build_score_system(profile, tool=True, version=version)
+                data = score_tool_auto(client, system, llm.build_score_prompt(ex, c["raw_text"], c["fetched_text"]),
+                                       a.model, temperature=None if a.omit_temperature else llm.SCORE_TEMPERATURE)
+                out = llm.parse_score_tool_input(data)
+            else:
+                out = llm.llm_score(client, ex, c["raw_text"], model=a.model, profile=profile,
+                                    fetched_text=c["fetched_text"], prompt_version=version)
             rec.update(outcome="ok", score=out["score"])
         except BudgetExceeded as exc:
             print(f"STOP: {exc}")
@@ -105,6 +131,10 @@ def main(argv=None) -> int:
     r.add_argument("--model", required=True)
     r.add_argument("--ids", type=int, nargs="+", required=True)
     r.add_argument("--save", default="")
+    r.add_argument("--omit-temperature", action="store_true",
+                   help="do not send `temperature` (Sonnet 5.5 refuses it as deprecated); the run is then NOT pinned to T=0")
+    r.add_argument("--tool-choice", choices=("forced", "auto"), default="forced",
+                   help="forced = the production call; auto = eval-only variant for models that refuse forced tool_choice")
     add_budget_args(r)
     r.set_defaults(fn=cmd_run)
     a = ap.parse_args(argv)
