@@ -131,6 +131,8 @@ class Deps:
     fx: Optional[FxRates] = None
     use_llm_extract: bool = True
     cheap_model: str = CHEAP_MODEL
+    # Model for the application draft; None / "" = cheap_model (the default).
+    draft_model: Optional[str] = None
     judge_model: str = JUDGE_MODEL
     # Confidence corridor bounds (default: [50, 70]).
     # Haiku scores in this range trigger a full judge re-score; judge's score
@@ -899,7 +901,7 @@ def _do_draft(conn: psycopg.Connection, item: WorkItem, deps: Deps) -> AdvanceRe
 
     draft_text = agents.draft(
         deps.llm_client, extracted, item.raw_text or "", research_data,
-        model=deps.cheap_model, profile=deps.profile,
+        model=deps.draft_model or deps.cheap_model, profile=deps.profile,
     )
     merged = agents.merge_aux(item.extracted_json, "draft", draft_text)
     store.update_state(

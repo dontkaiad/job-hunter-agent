@@ -41,6 +41,9 @@ class Config:
     # existing caller (AnthropicClient default) keeps working.
     cheap_model: str = "claude-haiku-4-5"
     judge_model: str = "claude-sonnet-4-6"
+    # Model for the application DRAFT (T11). Empty = the cheap model (the default, unchanged). Set DRAFT_MODEL to
+    # a model that accepts the plain messages call (e.g. claude-sonnet-4-6) to write drafts with it.
+    draft_model: str = ""
     anthropic_model: str = "claude-haiku-4-5"
     # Confidence corridor: Haiku scores in [score_corridor_lo, score_corridor_hi]
     # trigger a full judge re-score. Defaults match scoring.SCORE_CORRIDOR_LO/HI.
@@ -279,6 +282,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         anthropic_api_key=get("ANTHROPIC_API_KEY") or None,
         cheap_model=cheap_model,
         judge_model=judge_model,
+        draft_model=(get("DRAFT_MODEL") or "").strip(),
         anthropic_model=cheap_model,
         score_corridor_lo=score_corridor_lo,
         score_corridor_hi=score_corridor_hi,

@@ -400,3 +400,141 @@ def test_role_that_is_nothing_after_the_cut_falls_back(title):
 def test_the_intro_uses_the_short_role():
     intro = llm.draft_intro(_ex("AI Engineer (New Grads & Principal/Distinguished)"), EN_POST, _profile_with_intro())
     assert intro.startswith("I'm applying for the AI Engineer position. ")
+
+
+# --- the greeting and the intro never come twice -------------------------------------------------------------------
+
+_INTRO = "Откликаюсь на позицию «Prompt Engineer». Я инженер, семь лет внедряю ИИ."
+
+
+@pytest.mark.parametrize("body", [
+    f"Добрый день!\n{_INTRO}\n\nСтрою RAG.",                                       # exact repeat of the block
+    f"Добрый день!\n\n{_INTRO}\n\nСтрою RAG.",
+    "Добрый день!\nДобрый день!\nСтрою RAG.",                                      # the greeting twice
+    f"Добрый день!\n{_INTRO}\n\nДобрый день!\n{_INTRO}\n\nСтрою RAG.",             # the whole block twice
+    f"Строю RAG.\n\n{_INTRO}\n\nГоняю эвалы.",                                     # the intro in the middle
+    f"Здравствуйте! {_INTRO} Строю RAG.",
+    f"Добрый день!\nЗдравствуйте!\n{_INTRO}\n\nСтрою RAG.",                        # two different greetings
+])
+def test_greeting_and_intro_appear_exactly_once_whatever_the_model_repeats(body):
+    out = agents.compose_draft(body, "ru", _INTRO)
+    assert out.count("Добрый день!") == 1 and out.count("Откликаюсь на позицию") == 1 and out.count("Здравствуйте") == 0
+    assert out.startswith(f"Добрый день!\n{_INTRO}\n\n") and "Строю RAG" in out
+
+
+def test_english_block_repeated_is_also_collapsed():
+    intro = "I'm applying for the Role X position. I'm an engineer."
+    out = agents.compose_draft(f"Hello,\n{intro}\n\nHello,\n{intro}\n\nI build RAG.", "en", intro)
+    assert out.count("Hello,") == 1 and out.count("I'm applying for") == 1 and out.endswith("I build RAG.")
+
+
+def test_a_full_draft_with_a_model_that_echoes_the_block_has_one_greeting_one_intro_one_signature():
+    prof = _profile_with_intro()
+    ex = _ex("Prompt Engineer")
+    intro = llm.draft_intro(ex, RU_POST, prof)
+    sig = prof.draft_signature.github
+    echo = f"Добрый день!\n{intro}\n\nДобрый день!\n{intro}\n\nСтрою RAG.\n\nGitHub: {sig}"
+    out = agents.draft(_FakeClient(echo), ex, RU_POST, None, profile=prof)
+    assert out.count("Добрый день!") == 1 and out.count("Откликаюсь на позицию") == 1
+    assert out.count(f"GitHub: {sig}") == 1 and "Строю RAG." in out
+
+
+# --- company name as on the card, the draft model setting, the final prompt rules -----------------------------------
+
+
+def test_company_name_is_written_exactly_as_on_the_card():
+    assert agents.normalize_company("The stack Acme lists, and ACME again, acme.", "ACME") == "The stack ACME lists, and ACME again, ACME."
+    assert agents.normalize_company("В acme интересует задача.", "Acme") == "В Acme интересует задача."
+    assert agents.normalize_company("Acmeville is another company.", "ACME") == "Acmeville is another company."   # whole words only
+    assert agents.normalize_company("Text.", None) == "Text." and agents.normalize_company("", "ACME") == ""
+
+
+def test_draft_uses_the_company_spelling_of_the_card():
+    ex = ExtractResult(title="Role X", source_channel="ch", company="ACME")
+    out = agents.draft(_FakeClient("The stack Acme lists maps to mine."), ex, EN_POST, None, profile=_profile_with_intro())
+    assert "ACME" in out and "Acme" not in out
+
+
+def test_draft_model_setting_defaults_to_the_cheap_model_and_can_be_set():
+    from job_hunter.config import load_config
+    assert load_config({}).draft_model == ""
+    assert load_config({"DRAFT_MODEL": " claude-sonnet-4-6 "}).draft_model == "claude-sonnet-4-6"
+
+
+def test_pipeline_drafts_with_the_draft_model_when_set_else_the_cheap_model(conn, fake_llm, fake_fx):
+    from job_hunter import pipeline, store
+    from job_hunter.pipeline import Deps
+    from job_hunter.states import APPROVED
+    fake_llm.set_for("application message", "Строю RAG.")
+    fake_llm.set_for("research", '{"summary":"s","talking_points":[],"questions":[]}')
+    seen = {}
+    for label, dm, want in (("default", None, "claude-haiku-4-5"), ("sonnet", "claude-sonnet-4-6", "claude-sonnet-4-6")):
+        fake_llm.calls.clear()
+        item_id = store.insert_item(conn, raw_text="Ищем LLM-инженера. Python, RAG.", source_channel="ch", source_message_id=f"dm-{label}")
+        blob = '{"title": "LLM engineer", "source_channel": "ch", "company": null, "stack": ["python"], "reasons": [], "benefits": []}'
+        store.set_extracted(conn, item_id, blob)
+        store.update_state(conn, item_id, APPROVED, from_state="discovered", kind="deterministic", actor="system",
+                           reason="seed", extracted_json=blob, relevance_score=80.0)
+        kw = {} if dm is None else {"draft_model": dm}
+        deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, **kw)
+        pipeline.run_to_gate(conn, item_id, deps=deps)
+        draft_calls = [c for c in fake_llm.calls if "application message" in c["system"] or "BODY of a SHORT" in c["system"]]
+        seen[label] = [c["model"] for c in draft_calls]
+        assert seen[label] and all(m == want for m in seen[label]), (label, seen[label])
+
+
+def test_final_prompt_rules_claims_clients_openers_company():
+    s = llm.build_draft_system(example_profile())
+    assert "Claim ONLY what is in this HANDS-ON list, even when the vacancy asks for something else" in s
+    assert "«for clients, no public code»" in s and "«в клиентских проектах»" in s and "never as the candidate's own, personal or open" in s
+    assert "«fact of use only»" in s
+    assert "Занималась именно тем, что здесь описано" in s and "NO openers that echo the vacancy" in s
+    assert "EXACTLY as given there" in s and "at most ONCE" in s
+    assert "HONESTY (CRITICAL" in s and "Never invent experience the candidate does not have" in s       # older rules intact
+
+
+def test_closing_sentence_that_says_the_stack_matches_is_cut_in_both_languages():
+    en = "I built RAG. The stack here maps closely to my day-to-day: Claude, Postgres, React, Python."
+    assert agents.strip_empty_tail(en) == "I built RAG."
+    assert agents.strip_empty_tail("I built RAG. The stack you list aligns with mine.") == "I built RAG."
+    assert agents.strip_empty_tail("Строю RAG. Ваш стек совпадает с тем, с чем я работаю.") == "Строю RAG."
+    keep = "I built RAG. The stack was Python, FastAPI and Postgres."
+    assert agents.strip_empty_tail(keep) == keep                                   # a plain statement of what was used stays
+
+
+def test_prompt_spells_the_russian_terms_the_way_developers_do():
+    s = llm.build_draft_system(example_profile())
+    assert "«в продакшене» (never «в продакшне»)" in s and "«реранкинг»" in s and "never «тул-коллинг»" in s
+
+
+def test_prompt_forbids_choosing_a_level_or_track_and_frequency_claims():
+    s = llm.build_draft_system(example_profile())
+    assert "Never claim or choose a seniority level, a track or a role" in s and "«principal»" in s and "«tech lead»" in s
+    assert "«coordinated», never «led»" in s
+    assert "«ежедневно», «постоянно», «daily»" in s
+
+
+@pytest.mark.parametrize("src, want", [
+    ("I built RAG. The principal track fits what I've been doing: shipping products.", "I built RAG."),
+    ("I built RAG. I've led a team of four developers.", "I built RAG."),
+    ("I built RAG. I was the tech lead on the project.", "I built RAG."),
+    ("Строю RAG. Руководила командой из четырёх разработчиков.", "Строю RAG."),
+    ("Строю RAG. Мой уровень подходит под senior-трек.", "Строю RAG. Мой уровень подходит под senior-трек."),   # no pattern for this exact phrasing: kept
+])
+def test_level_and_lead_claims_are_cut(src, want):
+    assert agents.strip_empty_tail(src) == want
+
+
+def test_a_coordinated_developers_sentence_is_not_a_lead_claim():
+    keep = "I coordinate developers by writing specs and reviewing diffs."
+    assert agents.strip_empty_tail("I built RAG. " + keep) == "I built RAG. " + keep
+
+
+@pytest.mark.parametrize("src, want", [
+    ("Kafka использовала в проектах, Cursor применяю в повседневной работе.", "Kafka использовала в проектах, Cursor применяю."),
+    ("Cursor и Claude применяю ежедневно для разработки.", "Cursor и Claude применяю для разработки."),
+    ("I use Cursor every day to ship.", "I use Cursor to ship."),
+])
+def test_frequency_phrases_are_dropped_but_the_sentence_stays(src, want):
+    out = agents.compose_draft(src, "ru" if any("а" <= c <= "я" for c in src.lower()) else "en", "Откликаюсь на вашу вакансию.")
+    assert out.split("\n\n", 1)[1] == want

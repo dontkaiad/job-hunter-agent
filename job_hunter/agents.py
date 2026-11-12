@@ -207,7 +207,24 @@ _EMPTY_TAIL_RE = re.compile(
     r"мне\s+(?:важн|близк|интересн)|я\s+ценю|"
     r"i['’]d\s+(?:be\s+(?:happy|glad|interested)|love)|i\s+would\s+(?:be\s+(?:happy|glad|interested)|love)|"
     r"i['’]m\s+(?:excited|interested|keen|eager|ready|happy)|looking\s+forward|happy\s+to\s+(?:discuss|chat|talk)|"
-    r"feel\s+free|the\s+stack\s+(?:here\s+)?(?:lines\s+up|matches)|this\s+(?:role|position)\s+(?:is|looks|seems))",
+    r"feel\s+free|the\s+(?:tech\s+)?stack(?:\s+\w+){0,3}?\s+(?:lines\s+up|matches|maps|aligns|fits|overlaps)|"
+    r"(?:ваш\s+)?стек\s+(?:вакансии\s+)?(?:совпадает|пересекается|близок|подходит)|"
+    r"this\s+(?:role|position)\s+(?:is|looks|seems))",
+    re.I,
+)
+# A sentence in which the candidate picks a seniority level / track for themselves or claims to lead people. The prompt
+# forbids it, the model still does it now and then ("The principal track fits what I've been doing ...").
+_LEVEL_CLAIM_RE = re.compile(
+    r"\b(?:principal|staff|distinguished)\b|"
+    r"\b(?:track|level)\b[^.!?]*\b(?:fits?|match(?:es)?|suits?)\b|\b(?:fits?|match(?:es)?|suits?)\b[^.!?]*\b(?:track|level)\b|"
+    r"\btech\s*lead\b|\bteam\s*lead\b|\b(?:led|leading|lead)\s+(?:a\s+|the\s+|my\s+)?(?:team|developers|engineers)\b|"
+    r"тимлид|тех\.?\s*лид|руководил[аи]?\s+команд|возглавлял[аи]?|(?:трек|уровень)\s+(?:principal|senior|lead|сеньор|лид)",
+    re.I,
+)
+# Frequency / intensity phrases the candidate list does not support; only the phrase goes, the sentence stays.
+_FREQUENCY_RE = re.compile(
+    r",?\s*\b(?:ежедневно|постоянно|каждый\s+день|на\s+постоянной\s+основе|в\s+повседневной\s+работе|"
+    r"daily|every\s+day|constantly|on\s+a\s+daily\s+basis|day[- ]to[- ]day)\b",
     re.I,
 )
 _GITHUB_MENTION_RE = re.compile(r"\bgit\s?hub\b(?!\s+actions)", re.I)
@@ -225,7 +242,8 @@ def strip_empty_tail(text: str) -> str:
         for s in _SENTENCE_SPLIT_RE.split(p.strip()):
             if s.strip():
                 sentences.append((pi, s.strip()))
-    sentences = [(pi, s) for pi, s in sentences if not _GITHUB_MENTION_RE.search(s)]
+    sentences = [(pi, s) for pi, s in sentences
+                 if not _GITHUB_MENTION_RE.search(s) and not _LEVEL_CLAIM_RE.search(s)]
     for _ in range(3):                                      # trailing empty sentences, at most three in a row
         if len(sentences) > 1 and _EMPTY_TAIL_RE.match(sentences[-1][1]):
             sentences.pop()
@@ -243,11 +261,30 @@ def strip_empty_tail(text: str) -> str:
     return "\n\n".join(out)
 
 
+def normalize_company(text: str, company: Optional[str]) -> str:
+    """The company name spelled exactly as on the card wherever the model wrote it in another case ("Acme" for
+    "ACME"). Whole words only; nothing happens without a company. PURE."""
+    name = (company or "").strip()
+    if not text or len(name) < 2:
+        return text
+    return re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", name, text, flags=re.I)
+
+
 def compose_draft(body: str, lang: str, intro: str) -> str:
     """greeting (line 1), the fixed intro (line 2), a blank line, then the model's text. The model's own greeting and
     any repeat of the intro are removed; no long dashes. PURE."""
     greeting = GREETING_EN if lang == "en" else GREETING_RU
-    text = strip_empty_tail(_strip_repeated_intro(_strip_greeting(strip_long_dashes(body))))
+    text = strip_long_dashes(body)
+    for _ in range(4):                        # a model may repeat the greeting / the whole intro block more than once
+        cleaned = _strip_repeated_intro(_strip_greeting(text))
+        if cleaned == text:
+            break
+        text = cleaned
+    if intro:                                 # the exact intro or a lone greeting line anywhere else in the body
+        text = text.replace(intro, "")
+    text = re.sub(rf"(?m)^[ \t]*{re.escape(greeting)}[ \t]*$", "", text)
+    text = _FREQUENCY_RE.sub("", text)
+    text = strip_empty_tail(re.sub(r"\n{3,}", "\n\n", text).strip())
     head = f"{greeting}\n{intro}".rstrip()
     return f"{head}\n\n{text}" if text.strip() else head
 
@@ -358,6 +395,7 @@ def draft(
         if has_foreign_script(body):
             body = strip_foreign_script(body)
     intro = llm.draft_intro(extracted, raw_text, profile)
+    body = normalize_company(body, extracted.company)
     body = strip_own_signature(polish_draft(body, raw_text, intro), profile)
     return append_draft_signature(body, profile)
 
