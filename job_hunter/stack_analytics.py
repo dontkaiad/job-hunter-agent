@@ -61,12 +61,28 @@ _CANONICAL: Dict[str, str] = {
     "nginx": "Nginx",
     "linux": "Linux",
     "bash": "Bash",
+    # CI tool and two products common in client work (2c). Each spelling is written out and matched against the WHOLE
+    # tech token (lowercased, inner spaces collapsed), never as a substring: "1 с лишним", "1с/сек", "Jenkinsfile" or
+    # a surname are different keys, so they cannot match. 1C is listed with a Latin C and with a Cyrillic С (they
+    # look the same); the Cyrillic keys are written as \u escapes so the two can never be confused in the source.
+    "jenkins": "Jenkins",
+    "1c": "1C",                                   # Latin C
+    "1\u0441": "1C",                              # Cyrillic \u0441
+    "1c:enterprise": "1C",
+    "1\u0441:enterprise": "1C",
+    "1c enterprise": "1C",
+    "1c:\u043f\u0440\u0435\u0434\u043f\u0440\u0438\u044f\u0442\u0438\u0435": "1C",
+    "1\u0441:\u043f\u0440\u0435\u0434\u043f\u0440\u0438\u044f\u0442\u0438\u0435": "1C",
+    "bitrix24": "Bitrix24",
+    "bitrix 24": "Bitrix24",
+    "\u0431\u0438\u0442\u0440\u0438\u043a\u044124": "Bitrix24",
+    "\u0431\u0438\u0442\u0440\u0438\u043a\u0441 24": "Bitrix24",
 }
 
 
 def _normalize_key(tech: str) -> str:
-    """Return a deduplicated lookup key (lowercase, stripped)."""
-    return tech.lower().strip()
+    """Return a deduplicated lookup key (lowercase, stripped, inner whitespace collapsed to one space)."""
+    return " ".join(tech.lower().split())
 
 
 def _display_name(tech: str) -> str:
@@ -139,11 +155,10 @@ def _aggregate_stack(
         for tech in stack:
             if not isinstance(tech, str) or not tech.strip():
                 continue
-            key = _normalize_key(tech)
-            if key in seen_in_vacancy:
-                continue
-            seen_in_vacancy.add(key)
             display = _display_name(tech)
+            if display in seen_in_vacancy:           # by DISPLAY name: "1С" and "1C:Enterprise" are one mention
+                continue
+            seen_in_vacancy.add(display)
             freq[display] = freq.get(display, 0) + 1
 
     sorted_freq = sorted(freq.items(), key=lambda x: x[1], reverse=True)

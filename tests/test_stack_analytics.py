@@ -203,3 +203,54 @@ def test_tech_freq_is_dict():
     r = _result(stacks)
     assert isinstance(r.tech_freq, dict)
     assert r.tech_freq["Python"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 2c: Jenkins, 1C, Bitrix24 (invented texts only: the repository is public)
+# ---------------------------------------------------------------------------
+
+LAT_C = "1C"
+CYR_S = "1С"                       # "1С" with a CYRILLIC capital Es
+CYR_s = "1с"                       # "1с" with a cyrillic small es
+ENT_RU = "1С:Предприятие"            # 1С:Предприятие
+BITRIX_RU = "Битрикс24"                                       # Битрикс24
+BITRIX_RU_SP = "Битрикс 24"                                   # Битрикс 24
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Jenkins", "Jenkins"), ("jenkins", "Jenkins"), ("JENKINS", "Jenkins"), (" Jenkins ", "Jenkins"),
+    (LAT_C, "1C"), ("1c", "1C"), (CYR_S, "1C"), (CYR_s, "1C"),
+    ("1C:Enterprise", "1C"), ("1c:enterprise", "1C"), ("1C Enterprise", "1C"), (ENT_RU, "1C"),
+    ("1с:enterprise", "1C"),
+    ("Bitrix24", "Bitrix24"), ("bitrix24", "Bitrix24"), ("Bitrix 24", "Bitrix24"), ("Bitrix  24", "Bitrix24"),
+    (BITRIX_RU, "Bitrix24"), (BITRIX_RU_SP, "Bitrix24"), (BITRIX_RU.lower(), "Bitrix24"),
+])
+def test_new_terms_get_one_canonical_name(raw, expected):
+    assert _display_name(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "1 с лишним",          # "1 с лишним": a phrase, not the product
+    "1с/сек", "1c/sec", "1 c", "11C", "C1", "1СС",
+    "Jenkinsfile", "Jenkins Smith", "Jenkin", "Bitrix", "Bitrix2400", "Bitrix 240",
+    "Битрикс", "битриксы 24",
+])
+def test_lookalikes_are_not_mapped(raw):
+    assert _display_name(raw) == raw.strip()
+
+
+def test_spellings_of_one_term_merge_in_the_count():
+    rows = [["Jenkins"], ["jenkins"], [LAT_C], [CYR_S], [ENT_RU], ["Bitrix24"], [BITRIX_RU], ["Bitrix 24"]]
+    f = _freq(_result(rows))
+    assert f["Jenkins"] == 2 and f["1C"] == 3 and f["Bitrix24"] == 3
+    assert not any(k.lower() in ("jenkins", "1c", "1с") and k not in ("Jenkins", "1C") for k in f)
+
+
+def test_two_spellings_in_one_vacancy_count_once():
+    f = _freq(_result([[LAT_C, CYR_S, ENT_RU, "Jenkins", "jenkins"]]))
+    assert f == {"1C": 1, "Jenkins": 1}
+
+
+def test_other_terms_are_unchanged_by_the_new_entries():
+    f = _freq(_result([["Python", "redis", "KAFKA", "Jenkins"], ["python", "Redis"]]))
+    assert f["Python"] == 2 and f["Redis"] == 2 and f["Kafka"] == 1 and f["Jenkins"] == 1
