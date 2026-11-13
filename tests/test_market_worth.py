@@ -329,6 +329,95 @@ def test_middle_grade_slice_and_unknown_seniority():
 
 
 # ---------------------------------------------------------------------------
+# B2: the RU pool is built from LLM-extracted rows only (heuristic rows are left out)
+# ---------------------------------------------------------------------------
+
+
+def _mode(row, mode):
+    return dict(row, extract_mode=mode)
+
+
+HEURISTIC_MODES = ["heuristic:no-llm", "heuristic:prefilter", "heuristic:duplicate", "heuristic:topic",
+                   "heuristic:fallback", "heuristic"]
+
+
+@pytest.mark.parametrize("mode", HEURISTIC_MODES)
+def test_heuristic_ru_rows_are_not_in_the_pool(mode):
+    rows = [_mode(_ru(200_000, 200_000), "llm")] * 3 + [_mode(_ru(900_000, 900_000), mode)] * 4
+    result = _aggregate_salaries(rows, MIN)
+    assert result.ru_sample_size == 3 and result.ru_heuristic_excluded == 4
+    assert result.ru_median == 200_000 and result.ru_max is None            # the 900k heuristic rows moved nothing
+
+
+@pytest.mark.parametrize("mode", ["llm", None, "", "something-new"])
+def test_llm_null_and_unknown_modes_stay_in_the_pool(mode):
+    result = _aggregate_salaries([_mode(_ru(200_000, 200_000), mode)] * 3, MIN)
+    assert result.ru_sample_size == 3 and result.ru_heuristic_excluded == 0
+
+
+def test_a_row_without_the_extract_mode_key_stays_in_the_pool():
+    assert _aggregate_salaries([_ru(200_000, 200_000)] * 3, MIN).ru_sample_size == 3
+
+
+def test_median_and_percentiles_without_heuristic_rows_match_the_expected_figures():
+    llm = [_mode(_ru(v, v), "llm") for v in (100_000, 200_000, 300_000, 400_000, 500_000)]
+    noise = [_mode(_ru(v, v), "heuristic:no-llm") for v in (150_000, 160_000, 900_000)]
+    pure = _aggregate_salaries(llm, MIN)
+    mixed = _aggregate_salaries(llm + noise, MIN)
+    assert (pure.ru_min, pure.ru_median, pure.ru_max) == (200_000, 300_000, 400_000)
+    assert (mixed.ru_min, mixed.ru_median, mixed.ru_max) == (200_000, 300_000, 400_000)   # the same figures
+    assert mixed.ru_sample_size == 5 and mixed.ru_heuristic_excluded == 3
+
+
+def test_the_middle_grade_slice_also_skips_heuristic_rows():
+    rows = ([dict(_mode(_ru(200_000, 200_000), "llm"), seniority="middle")] * 3
+            + [dict(_mode(_ru(900_000, 900_000), "heuristic:no-llm"), seniority="middle")] * 5)
+    result = _aggregate_salaries(rows, MIN)
+    assert result.ru_middle_sample == 3 and result.ru_middle_median == 200_000
+
+
+def test_heuristic_rows_do_not_fill_the_minimum_sample():
+    """Only heuristic rows: the RU pool is empty and the result is degraded, not a figure made of regex reads."""
+    result = _aggregate_salaries([_mode(_ru(200_000, 200_000), "heuristic:no-llm")] * 6, MIN)
+    assert result.ru_sample_size == 0 and result.ru_median is None and result.degraded
+
+
+def test_the_international_pool_is_not_changed_by_the_ru_rule():
+    rows = [_mode(_intl(5_000, 5_000), "heuristic:no-llm")] * 3 + [_mode(_intl(5_000, 5_000), "llm")] * 3
+    result = _aggregate_salaries(rows, MIN, rates_per_rub=RATES)
+    assert result.intl_sample_size == 6 and result.ru_heuristic_excluded == 0
+
+
+def test_compute_from_pipeline_reads_the_mode_from_the_database(conn):
+    """The SQL carries extract_mode into the pool: 3 llm + 1 NULL rows count, 4 heuristic rows do not."""
+    import json
+    from types import SimpleNamespace
+
+    from job_hunter import store
+    from job_hunter.market_worth import compute_from_pipeline
+
+    class _Fx:
+        def get_rates_per_rub(self):
+            return RATES
+
+    def add(mid, mode, value):
+        item_id = store.insert_item(conn, raw_text="x", source_channel="@c", source_message_id=mid)
+        conn.execute("UPDATE work_items SET extracted_json = %s, extract_mode = %s, relevance_score = 80 WHERE id = %s",
+                     (json.dumps({"salary_min": value, "salary_max": value, "currency": "RUB"}), mode, item_id))
+        conn.commit()
+
+    for i in range(3):
+        add(f"l{i}", "llm", 200_000)
+    add("n0", None, 200_000)
+    for i, mode in enumerate(["heuristic:no-llm", "heuristic:topic", "heuristic:prefilter", "heuristic:fallback"]):
+        add(f"h{i}", mode, 900_000)
+
+    result = compute_from_pipeline(conn, SimpleNamespace(market_min_sample=3), fx=_Fx())
+    assert result.ru_sample_size == 4 and result.ru_heuristic_excluded == 4
+    assert result.ru_median == 200_000
+
+
+# ---------------------------------------------------------------------------
 # B4: what the international pool is made of (shown as a caption under the figure)
 # ---------------------------------------------------------------------------
 
