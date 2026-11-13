@@ -219,6 +219,16 @@ def _salary_max_rub(extracted: ExtractResult, deps: Deps) -> Optional[float]:
     return monthly_top_rub(extracted.salary_min, extracted.salary_max, extracted.currency, convert)
 
 
+def _salary_guard_applies(item: WorkItem) -> bool:
+    """B1: the HARD salary guard acts only on rows whose salary came from the LLM extraction.
+
+    A row extracted by the heuristics (``extract_mode`` starts with ``heuristic``: no-llm, prefilter, duplicate,
+    topic gate, legacy fallback) has its amount and currency read by regex. The Stage 7 dry run showed those
+    unreliable (a lost ``k`` suffix, a missing currency symbol, a dropped upper bound, ``Ruby`` read as RUB), so a
+    vacancy must never be hard-rejected on them. An unknown mode (NULL, an old row) is treated as before."""
+    return not (item.extract_mode or "").startswith("heuristic")
+
+
 def _salary_floor_rub(deps: Deps) -> Optional[float]:
     """Convert the candidate's EUR/month-gross salary floor to RUB via FX.
 
@@ -790,7 +800,8 @@ def _do_reject_or_surface(conn: psycopg.Connection, item: WorkItem, deps: Deps) 
 
     salary_rub = _salary_max_rub(extracted, deps)
     floor_rub = _salary_floor_rub(deps)
-    if (deps is None or deps.salary_guard) and scoring.salary_guard_reject(salary_rub, floor_rub):
+    if ((deps is None or deps.salary_guard) and _salary_guard_applies(item)
+            and scoring.salary_guard_reject(salary_rub, floor_rub)):
         store.update_state(
             conn, item.id, REJECTED,
             from_state=item.state, kind=KIND_DETERMINISTIC, actor=ACTOR_SYSTEM,

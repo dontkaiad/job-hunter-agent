@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from _llm_extract import llm_extracts_salary_of
 from _personal_needles import personal_needle, personal_needles
 from job_hunter import llm, pipeline, scoring, store
 from job_hunter.pipeline import Deps
@@ -48,10 +49,11 @@ def test_floor_default_is_generic_not_personal():
 
 def test_floor_reason_string_mentions_eur_floor(conn, fake_llm, fake_fx):
     """Hard-reject reason must reference the EUR/mo floor from the profile."""
-    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
     fake_llm.set_for("hiring-fit JUDGE",
                      '{"relevance_score": 95, "Обоснование": "great"}')
     # 50k RUB top < 100k floor (EUR 1000 * 100).
+    llm_extracts_salary_of(fake_llm, "Remote AI LLM engineer. Salary 50000 RUB. @hr")
     item_id = _insert(conn, "Remote AI LLM engineer. Salary 50000 RUB. @hr")
     pipeline.run_to_gate(conn, item_id, deps=deps)
     item = store.get_item(conn, item_id)
@@ -63,10 +65,11 @@ def test_floor_reason_string_mentions_eur_floor(conn, fake_llm, fake_fx):
 
 def test_below_floor_rejected_despite_high_score(conn, fake_llm, fake_fx):
     """RUB salary below the EUR-floor equivalent -> rejected even if Sonnet scores high."""
-    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
     fake_llm.set_for("hiring-fit JUDGE",
                      '{"relevance_score": 99, "Обоснование": "идеальная AI-роль"}')
     # 90k RUB < 100k floor (the EUR-1000 equivalent).
+    llm_extracts_salary_of(fake_llm, "Remote AI Prompt Engineer, RAG. Salary 90000 RUB. @hr")
     item_id = _insert(conn, "Remote AI Prompt Engineer, RAG. Salary 90000 RUB. @hr")
     pipeline.run_to_gate(conn, item_id, deps=deps)
     item = store.get_item(conn, item_id)
@@ -92,10 +95,11 @@ def test_floor_uses_fx_for_non_eur_currency_below(conn, fake_llm, fake_fx):
     2000 USD * 90 RUB/USD = 180_000 RUB, below the 250_000 RUB floor (EUR 2500 * 100).
     Must reject -> proves both sides went through FX.
     """
-    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, profile=_profile_with_floor(2500))
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True, profile=_profile_with_floor(2500))
     fake_llm.set_for("hiring-fit JUDGE",
                      '{"relevance_score": 90, "Обоснование": "good role"}')
     # 1500-2000 USD * 90 = 180_000 RUB < 250_000 (the EUR-2500 floor at 100 RUB/EUR).
+    llm_extracts_salary_of(fake_llm, "Remote AI LLM engineer. Salary 1500-2000 USD/mo. @hr")
     item_id = _insert(conn, "Remote AI LLM engineer. Salary 1500-2000 USD/mo. @hr",
                       mid="usd_low")
     pipeline.run_to_gate(conn, item_id, deps=deps)
@@ -117,9 +121,10 @@ def test_floor_uses_fx_for_non_eur_currency_above(conn, fake_llm, fake_fx):
 
 def test_floor_eur_posting_just_below(conn, fake_llm, fake_fx):
     """A EUR posting just below the floor (2200 vs 2500) -> rejected."""
-    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, profile=_profile_with_floor(2500))
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True, profile=_profile_with_floor(2500))
     fake_llm.set_for("hiring-fit JUDGE",
                      '{"relevance_score": 92, "Обоснование": "good role"}')
+    llm_extracts_salary_of(fake_llm, "Remote AI LLM engineer. Salary 1800-2200 EUR/mo. @hr")
     item_id = _insert(conn, "Remote AI LLM engineer. Salary 1800-2200 EUR/mo. @hr",
                       mid="eur_low")
     pipeline.run_to_gate(conn, item_id, deps=deps)
@@ -380,11 +385,14 @@ def test_hourly_dollar_rate_is_not_hard_rejected(conn, fake_llm, fake_fx):
 def test_yearly_figure_is_compared_per_month(conn, fake_llm, fake_fx):
     """24 000 USD a year is 2 000 USD a month = 180 000 RUB < the 250 000 floor: rejected, where the raw
     number (2.16 M RUB) used to sail through. 120 000 USD a year stays."""
-    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False, profile=_profile_with_floor(2500))
+    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True, profile=_profile_with_floor(2500))
     fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 85, "Обоснование": "AI-роль"}')
-    low = _insert(conn, "Remote AI LLM engineer. Salary 20000-24000 USD/year. @hr", mid="y_low")
-    high = _insert(conn, "Remote AI LLM engineer. Salary 100000-120000 USD/year. @hr", mid="y_high")
-    for i in (low, high):
+    low_text = "Remote AI LLM engineer. Salary 20000-24000 USD/year. @hr"
+    high_text = "Remote AI LLM engineer. Salary 100000-120000 USD/year. @hr"
+    low = _insert(conn, low_text, mid="y_low")
+    high = _insert(conn, high_text, mid="y_high")
+    for i, text in ((low, low_text), (high, high_text)):
+        llm_extracts_salary_of(fake_llm, text)
         pipeline.run_to_gate(conn, i, deps=deps)
     assert store.get_item(conn, low).state == REJECTED
     assert store.get_item(conn, high).state == SURFACED

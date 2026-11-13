@@ -26,6 +26,7 @@ import textwrap
 
 import pytest
 
+from _llm_extract import llm_extracts_salary_of
 from _personal_needles import personal_needle
 from job_hunter import llm, pipeline, store
 from job_hunter.pipeline import Deps
@@ -67,14 +68,19 @@ POST_150K_RUB = "Remote AI LLM Engineer. Salary 120000-150000 RUB. @hr"
 POST_110K_RUB = "Remote AI LLM Engineer. Salary 100000-110000 RUB. @hr"
 
 
-def _high_score_deps(fake_llm, fake_fx, profile=None):
+def _high_score_deps(fake_llm, fake_fx, profile=None, post=None):
+    """``post``: the vacancy text; its salary is handed to the fake LLM extraction, so the row is LLM-extracted
+    (the hard salary guard ignores heuristic rows since B1)."""
     fake_llm.set_for(
         "hiring-fit JUDGE",
         '{"relevance_score": 88, "Обоснование": "strong fit"}',
     )
+    if post is not None:
+        llm_extracts_salary_of(fake_llm, post)
+    use_llm = post is not None
     if profile is None:
-        return Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
-    return Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False,
+        return Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=use_llm)
+    return Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=use_llm,
                 profile=profile)
 
 
@@ -116,7 +122,7 @@ def test_example_only_load_returns_example_values(tmp_path):
 def test_example_only_pipeline_below_floor_rejected(conn, fake_llm, fake_fx):
     """With only the example profile (floor=1000 EUR), a salary below
     1000 EUR (=100k RUB at 100 RUB/EUR) is hard-rejected even at high score."""
-    deps = _high_score_deps(fake_llm, fake_fx)  # Deps defaults to example_profile()
+    deps = _high_score_deps(fake_llm, fake_fx, post=POST_90K_RUB)  # Deps defaults to example_profile()
     item_id = _insert(conn, POST_90K_RUB, mid="eo_below")
     pipeline.run_to_gate(conn, item_id, deps=deps)
     item = store.get_item(conn, item_id)
@@ -130,7 +136,7 @@ def test_example_only_pipeline_below_floor_rejected(conn, fake_llm, fake_fx):
 def test_example_only_pipeline_above_floor_surfaced(conn, fake_llm, fake_fx):
     """With only the example profile (floor=1000 EUR = 100k RUB), a salary
     above that (150k RUB) surfaces with a good score."""
-    deps = _high_score_deps(fake_llm, fake_fx)
+    deps = _high_score_deps(fake_llm, fake_fx, post=POST_150K_RUB)
     item_id = _insert(conn, POST_150K_RUB, mid="eo_above")
     pipeline.run_to_gate(conn, item_id, deps=deps)
     item = store.get_item(conn, item_id)
@@ -219,7 +225,7 @@ def test_local_profile_higher_floor_rejects_more_aggressively(conn, fake_llm, fa
         gender="unspecified",
         draft_signature=DraftSignature(github="github.com/temptest", resume="[cv]"),
     )
-    deps = _high_score_deps(fake_llm, fake_fx, profile=local_profile)
+    deps = _high_score_deps(fake_llm, fake_fx, profile=local_profile, post=POST_110K_RUB)
     # 110k RUB top < 120k floor (1200 EUR * 100 RUB/EUR) -> hard reject.
     item_id = _insert(conn, POST_110K_RUB, mid="lp_reject")
     pipeline.run_to_gate(conn, item_id, deps=deps)
