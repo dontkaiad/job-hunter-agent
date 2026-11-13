@@ -146,9 +146,9 @@ class Deps:
     # Geo guard: on only when explicitly enabled AND the private profile carries eligibility
     # constraints (profile.eligibility). Off by default so tests / the public example are inert.
     geo_guard: bool = False
-    # Hard salary-floor reject (scoring.salary_guard_reject). On by default so a bare Deps() keeps the
-    # guard; build_deps passes cfg.salary_guard (env SALARY_GUARD_ENABLED). Off skips only the reject.
-    salary_guard: bool = True
+    # Hard salary-floor reject (scoring.salary_guard_reject). OFF by default, like Config.salary_guard;
+    # build_deps passes cfg.salary_guard (env SALARY_GUARD_ENABLED=1 turns it on). Off skips only the reject.
+    salary_guard: bool = False
     # Candidate profile (loaded from config/profile.*.yaml). Drives the rubric
     # profile block, the draft gender/honesty/signature, and the salary floor.
     # Defaults to the GENERIC example profile so deterministic-only / test runs

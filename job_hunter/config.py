@@ -57,9 +57,10 @@ class Config:
     score_prompt_version: str = "v2"
     # Geo guard (geo.py): on when the private profile has `eligibility` constraints.
     geo_guard: bool = True
-    # Hard salary-floor guard (pipeline.py, scoring.salary_guard_reject). On by default; SALARY_GUARD_ENABLED=0
-    # (or false/no/off) skips ONLY the reject: salary_floor_eur and the prompts that quote it are untouched.
-    salary_guard: bool = True
+    # Hard salary-floor guard (pipeline.py, scoring.salary_guard_reject). OFF by default: only an explicit
+    # SALARY_GUARD_ENABLED=1 (or true/yes/on) turns it on, so a lost .env line cannot switch it on silently.
+    # Off skips ONLY the reject: salary_floor_eur and the prompts that quote it are untouched.
+    salary_guard: bool = False
     # Токен для своего MCP-сервера (Claude): только GET /api/mcp/*. Пусто или короче 32 → выключено.
     mcp_read_token: str = ""
 
@@ -289,7 +290,7 @@ def load_config(env: Optional[dict] = None) -> Config:
         surface_threshold=surface_threshold,
         score_prompt_version=score_prompt_version,
         geo_guard=(get("GEO_GUARD") or "1").lower() not in ("0", "false", "no", "off"),
-        salary_guard=(get("SALARY_GUARD_ENABLED") or "1").lower() not in ("0", "false", "no", "off"),
+        salary_guard=(get("SALARY_GUARD_ENABLED") or "0").lower() in ("1", "true", "yes", "on"),
         mcp_read_token=(get("MCP_READ_TOKEN") or "").strip(),
         ingest_mode=(get("INGEST_MODE") or "web").lower(),
         telegram_api_id=_int_or_none(get("TELEGRAM_API_ID")),

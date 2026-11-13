@@ -311,7 +311,7 @@ def test_score_corridor_judge_failure_fallback(conn, fake_llm, fake_fx):
 
 def test_salary_guard_overrides_high_llm_score(conn, fake_llm, fake_fx):
     """A high Sonnet score must NOT save an item whose pay is below the floor."""
-    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
+    deps = Deps(salary_guard=True, llm_client=fake_llm, fx=fake_fx, use_llm_extract=True)
     fake_llm.set_for("hiring-fit JUDGE", '{"relevance_score": 90, "Обоснование": "great"}')
     # 90k RUB top < 100k floor (example EUR 1000 * 100 RUB/EUR via fake_fx).
     llm_extracts_salary_of(fake_llm, "Remote Python LLM RAG engineer. Salary 80000-90000 RUB. @hr")

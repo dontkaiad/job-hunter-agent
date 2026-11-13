@@ -54,6 +54,7 @@ order is: shut the scheduler down, then ``bot.aclose()``, then ``conn.close()``
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from datetime import datetime
@@ -281,6 +282,21 @@ def add_staleness_job(scheduler, staleness_coro_func, tz):
     return scheduler
 
 
+_log = logging.getLogger(__name__)
+
+
+def warn_if_salary_guard_on(cfg: Config) -> bool:
+    """One conspicuous WARNING at startup when the hard salary guard is ON (log only, no Telegram alert).
+
+    The guard is off by default; it is on only with an explicit SALARY_GUARD_ENABLED=1. While the open-ended
+    ("from X") and non-salary amounts are not handled, a running guard can hide vacancies, so say so loudly."""
+    if not cfg.salary_guard:
+        return False
+    _log.warning("SALARY GUARD IS ON (SALARY_GUARD_ENABLED=1): vacancies whose salary top is below the floor "
+                 "are hard-rejected before you see them. Set SALARY_GUARD_ENABLED=0 or remove the line to turn it off.")
+    return True
+
+
 async def _amain(cfg: Config | None = None) -> None:
     """Open resources, start the scheduler, start long-polling, tear down.
 
@@ -298,6 +314,7 @@ async def _amain(cfg: Config | None = None) -> None:
     conn = store.connect(cfg.database_url)
     store.init_db(conn)
     deps = build_deps(cfg)
+    warn_if_salary_guard_on(cfg)
 
     bot = JobHunterBot(cfg, conn, deps)
 

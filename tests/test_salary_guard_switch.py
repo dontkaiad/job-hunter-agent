@@ -1,16 +1,19 @@
 """SALARY_GUARD_ENABLED: the env switch that skips ONLY the hard salary-floor reject.
 
-Default (unset): the guard works exactly as before. 0/false/no/off: a below-floor salary is not rejected, and
-nothing else changes (the profile floor and the prompts that quote it stay as they are).
+Default (unset): the guard is OFF (a lost .env line must not switch it on). 1/true/yes/on turns it on and the
+bot logs one WARNING at startup. Off: a below-floor salary is not rejected, and nothing else changes (the
+profile floor and the prompts that quote it stay as they are).
 """
 
 from __future__ import annotations
+
+import logging
 
 import pytest
 
 from _llm_extract import llm_extracts_salary_of
 from job_hunter import llm, pipeline, store
-from job_hunter.config import load_config
+from job_hunter.config import Config, load_config
 from job_hunter.pipeline import Deps
 from job_hunter.profile import example_profile
 from job_hunter.states import REJECTED, SURFACED
@@ -35,12 +38,13 @@ def _run(conn, deps, mid):
 # --- config parsing --------------------------------------------------------
 
 
-def test_config_default_is_guard_on():
-    assert load_config({}).salary_guard is True
-    assert load_config({"SALARY_GUARD_ENABLED": ""}).salary_guard is True
+def test_config_default_is_guard_off():
+    assert load_config({}).salary_guard is False
+    assert load_config({"SALARY_GUARD_ENABLED": ""}).salary_guard is False
+    assert Config().salary_guard is False
 
 
-@pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "off", "Off"])
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "off", "Off", "garbage"])
 def test_config_off_values(value):
     assert load_config({"SALARY_GUARD_ENABLED": value}).salary_guard is False
 
@@ -50,17 +54,42 @@ def test_config_on_values(value):
     assert load_config({"SALARY_GUARD_ENABLED": value}).salary_guard is True
 
 
-def test_deps_default_is_guard_on():
-    assert Deps().salary_guard is True
+def test_deps_default_is_guard_off():
+    assert Deps().salary_guard is False
+
+
+# --- startup WARNING when the guard is on ---------------------------------------------------------------
+
+
+def test_startup_warning_when_guard_on(caplog):
+    from job_hunter.serve import warn_if_salary_guard_on
+    with caplog.at_level(logging.WARNING):
+        assert warn_if_salary_guard_on(load_config({"SALARY_GUARD_ENABLED": "1"})) is True
+    recs = [r for r in caplog.records if "SALARY GUARD IS ON" in r.getMessage()]
+    assert len(recs) == 1 and recs[0].levelno == logging.WARNING
+
+
+@pytest.mark.parametrize("env", [{}, {"SALARY_GUARD_ENABLED": "0"}, {"SALARY_GUARD_ENABLED": ""}])
+def test_no_startup_warning_when_guard_off(caplog, env):
+    from job_hunter.serve import warn_if_salary_guard_on
+    with caplog.at_level(logging.WARNING):
+        assert warn_if_salary_guard_on(load_config(env)) is False
+    assert not [r for r in caplog.records if "SALARY GUARD" in r.getMessage()]
 
 
 # --- pipeline: both modes --------------------------------------------------
 
 
-def test_default_guard_rejects_below_floor(conn, fake_llm, fake_fx):
-    item, trans = _run(conn, _deps(fake_llm, fake_fx), "sg_default")
+def test_enabled_guard_rejects_below_floor(conn, fake_llm, fake_fx):
+    item, trans = _run(conn, _deps(fake_llm, fake_fx, salary_guard=True), "sg_on")
     assert item.state == REJECTED
     assert any("hard reject: salary" in (t["reason"] or "") for t in trans)
+
+
+def test_default_deps_does_not_reject_below_floor(conn, fake_llm, fake_fx):
+    item, trans = _run(conn, _deps(fake_llm, fake_fx), "sg_default")
+    assert item.state == SURFACED
+    assert not any("hard reject: salary" in (t["reason"] or "") for t in trans)
 
 
 def test_guard_off_does_not_reject_below_floor(conn, fake_llm, fake_fx):
@@ -98,7 +127,7 @@ def test_heuristic_row_with_a_below_floor_salary_is_not_rejected(conn, fake_llm,
 
 
 def test_llm_row_with_the_same_salary_is_still_rejected(conn, fake_llm, fake_fx):
-    item, trans = _run(conn, _deps(fake_llm, fake_fx), "sg_llm")
+    item, trans = _run(conn, _deps(fake_llm, fake_fx, salary_guard=True), "sg_llm")
     assert item.extract_mode == "llm"
     assert item.state == REJECTED
     assert any("hard reject: salary" in (t["reason"] or "") for t in trans)

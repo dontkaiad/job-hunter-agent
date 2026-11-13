@@ -266,6 +266,7 @@ def test_pipeline_salary_min_only_used_for_prefilter(conn, deps):
     We inject the extracted_json directly (bypassing heuristic extract) so
     the test is not sensitive to regex parse rules.
     """
+    deps.salary_guard = True                     # the hard guard is OFF by default; this test is about it
     item_id = _insert(conn, "some internship text", mid="so1")
     # Manually move to EXTRACTED with salary_min=130000, no salary_max
     ex_json = json.dumps({

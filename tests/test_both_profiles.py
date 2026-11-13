@@ -79,8 +79,8 @@ def _high_score_deps(fake_llm, fake_fx, profile=None, post=None):
         llm_extracts_salary_of(fake_llm, post)
     use_llm = post is not None
     if profile is None:
-        return Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=use_llm)
-    return Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=use_llm,
+        return Deps(salary_guard=True, llm_client=fake_llm, fx=fake_fx, use_llm_extract=use_llm)
+    return Deps(salary_guard=True, llm_client=fake_llm, fx=fake_fx, use_llm_extract=use_llm,
                 profile=profile)
 
 
@@ -152,7 +152,7 @@ def test_example_only_draft_signature_is_generic(conn, fake_llm, fake_fx):
     )
     fake_llm.set_for("research", '{"summary":"s","talking_points":[],"questions":[]}')
     fake_llm.set_for("application message", "Здравствуйте, мне интересна роль.")
-    deps = Deps(llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
+    deps = Deps(salary_guard=True, llm_client=fake_llm, fx=fake_fx, use_llm_extract=False)
     # deps.profile defaults to example_profile()
 
     item_id = _insert(conn, POST_150K_RUB, mid="eo_sig")
