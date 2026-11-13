@@ -8,8 +8,8 @@ What is normalised, and how (see ``normalize_monthly``): the extract schema carr
 ``salary_min / salary_max / currency`` — no period, no gross/net — so the pay PERIOD is
 a HEURISTIC on magnitude (thresholds chosen from the data, constants below); other currencies
 are converted to EUR with the FX rates; each vacancy contributes ONE value, the midpoint of its
-range; vacancies the pipeline already judged geo-ineligible are left out; RU rows whose salary came from the heuristic
-extractor (``extract_mode`` ``heuristic*``) are left out of the RU pool (B2). Gross/net is NOT
+range; vacancies the pipeline already judged geo-ineligible are left out; rows whose salary came from the heuristic
+extractor (``extract_mode`` ``heuristic*``) are left out of both pools (B2). Gross/net is NOT
 normalised (nothing reliable in the data to do it with); it is only counted in the diagnostics.
 
 Entry point: ``compute_from_pipeline(conn, cfg)``
@@ -86,7 +86,8 @@ class MarketWorthResult:
     annual_converted: Dict[str, int] = field(default_factory=dict)   # {"ru": n, "intl": n}
     dropped: Dict[str, int] = field(default_factory=dict)            # reason -> n
     geo_excluded: int = 0           # skipped because the geo guard judged them ineligible
-    ru_heuristic_excluded: int = 0  # RU vacancies with a salary left out because the heuristic extractor read it (B2)
+    ru_heuristic_excluded: int = 0    # RU vacancies with a salary left out because the heuristic extractor read it (B2)
+    intl_heuristic_excluded: int = 0  # the same for the international pool
     # what the INTERNATIONAL pool is made of (so the page can say what the figure is and is not)
     intl_geo_unchecked: int = 0     # pool vacancies the geo guard never judged (empty verdict): may be country-restricted
     intl_usd_share: Optional[float] = None         # 0..1, share of the pool quoted in USD
@@ -196,13 +197,14 @@ def _stats(vals: list, min_sample: int) -> Tuple[Optional[int], Optional[int], O
     return (int(round(_percentile(sv, 25))), int(round(_percentile(sv, 50))), int(round(_percentile(sv, 75))))
 
 
-def _ru_pool_excludes(row: dict) -> bool:
-    """B2: a row read by the heuristic extractor (``extract_mode`` starts with ``heuristic``) stays out of the RU pool.
+def _is_heuristic_row(row: dict) -> bool:
+    """B2: a row read by the heuristic extractor (``extract_mode`` starts with ``heuristic``) stays out of EVERY pool.
 
     Its amount and currency came from regex, which the Stage 7 dry run showed unreliable (lost ``k`` suffix, missing
-    currency symbol, dropped upper bound, ``Ruby`` read as RUB). ``llm``, an empty / NULL mode (old rows) and any
-    other value count as before. The single place that decides it: every RU figure (P25 / median / P75, the
-    middle-grade slice, the sample size) is built from the rows this lets through."""
+    currency symbol, dropped upper bound, ``Ruby`` read as RUB). ``llm``, an empty / NULL mode (old rows), a missing
+    key and any other value count as before. The single rule for the RU and the international pool alike: every
+    figure (P25 / median / P75, the middle-grade slices, the sample sizes, the composition diagnostics) is built
+    from the rows this lets through."""
     return (row.get("extract_mode") or "").startswith("heuristic")
 
 
@@ -216,7 +218,7 @@ def _aggregate_salaries(
     """Pure function: aggregate salary_rows into a MarketWorthResult.
 
     salary_rows: dicts with salary_min, salary_max, currency, source_channel and optionally
-    seniority, geo_verdict and extract_mode (a ``heuristic*`` row is left out of the RU pool only). ``rates_per_rub`` maps a currency to RUB per unit (FxRates shape);
+    seniority, geo_verdict and extract_mode (a ``heuristic*`` row is left out of both pools). ``rates_per_rub`` maps a currency to RUB per unit (FxRates shape);
     without it only EUR and RUB rows are usable. A row with geo_verdict "ineligible" is skipped.
     """
     from .clock import now_iso
@@ -228,7 +230,7 @@ def _aggregate_salaries(
     annual = {"ru": 0, "intl": 0}
     dropped: Dict[str, int] = {}
     geo_excluded = 0
-    ru_heuristic_excluded = 0
+    heuristic_excluded = {"ru": 0, "intl": 0}
     intl_geo_unchecked = 0
     intl_usd = 0
     intl_sources: Dict[str, int] = {}
@@ -244,8 +246,8 @@ def _aggregate_salaries(
             if how not in ("no_currency", "no_value"):
                 dropped[how] = dropped.get(how, 0) + 1
             continue
-        if market == "ru" and _ru_pool_excludes(row):
-            ru_heuristic_excluded += 1
+        if _is_heuristic_row(row):
+            heuristic_excluded[market] += 1
             continue
         (ru if market == "ru" else intl).append(value)
         if market == "intl":
@@ -317,7 +319,8 @@ def _aggregate_salaries(
         annual_converted=annual,
         dropped=dropped,
         geo_excluded=geo_excluded,
-        ru_heuristic_excluded=ru_heuristic_excluded,
+        ru_heuristic_excluded=heuristic_excluded["ru"],
+        intl_heuristic_excluded=heuristic_excluded["intl"],
         intl_geo_unchecked=intl_geo_unchecked,
         intl_usd_share=round(intl_usd / intl_sample, 3) if intl_sample else None,
         intl_top_source=top_src[0] if top_src else None,
