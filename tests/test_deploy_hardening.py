@@ -461,6 +461,38 @@ def test_serve_amain_starts_and_cancels_heartbeat(pg_dsn, tmp_path, monkeypatch)
         assert f.read().isdigit()
 
 
+@pytest.mark.parametrize("guard_on,expected", [(True, 1), (False, 0)])
+def test_serve_amain_logs_the_salary_guard_warning_only_when_on(pg_dsn, tmp_path, monkeypatch, caplog,
+                                                               guard_on, expected):
+    """serve._amain calls warn_if_salary_guard_on at startup: guard ON gives exactly one WARNING, OFF gives none."""
+    import logging
+
+    monkeypatch.setenv("HEARTBEAT_PATH", str(tmp_path / "hb"))
+    cfg = Config(
+        bot_token=VALID_TOKEN,
+        notify_chat_id=123,
+        allowed_user_ids={ALLOWED_UID},
+        database_url=pg_dsn,
+        salary_guard=guard_on,
+    )
+
+    async def fake_run(self):
+        pass
+
+    async def fake_aclose(self):
+        pass
+
+    monkeypatch.setattr(bot.JobHunterBot, "run", fake_run)
+    monkeypatch.setattr(bot.JobHunterBot, "aclose", fake_aclose)
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(serve._amain(cfg))
+
+    hits = [r for r in caplog.records if "SALARY GUARD IS ON" in r.getMessage()]
+    assert len(hits) == expected
+    assert all(r.levelno == logging.WARNING for r in hits)
+
+
 # ---------------------------------------------------------------------------
 # Tests added by the Tester validation pass (gaps not covered by Developer)
 # ---------------------------------------------------------------------------
