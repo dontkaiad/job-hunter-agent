@@ -1,6 +1,9 @@
 """Bot tokens and DB passwords must never reach logs or the ops chat."""
 import asyncio
 import logging
+import subprocess
+import sys
+from pathlib import Path
 
 import httpx
 
@@ -64,3 +67,21 @@ def test_send_log_masks_token_inside_message(monkeypatch):
     monkeypatch.setattr(tg_logger.httpx, "AsyncClient", Ok)
     asyncio.run(tg_logger.send_log(f"err https://api.telegram.org/bot{TOKEN}/x"))
     assert TOKEN not in sent["text"]
+
+
+def test_importing_tg_logger_mutes_httpx_and_httpcore_request_logging():
+    """httpx на INFO печатает URL запроса вместе с токеном бота: после импорта модуля уровень не ниже WARNING.
+
+    Отдельный процесс: чужие тесты не должны видеть сброшенные уровни логгеров, а мы не хотим перезагружать модуль."""
+    code = (
+        "import logging\n"
+        "for n in ('httpx', 'httpcore'):\n"
+        "    logging.getLogger(n).setLevel(logging.DEBUG)\n"       # заведомо шумный уровень до импорта
+        "import job_hunter.tg_logger\n"
+        "print([logging.getLogger(n).getEffectiveLevel() >= logging.WARNING for n in ('httpx', 'httpcore')])\n"
+    )
+    root = Path(__file__).resolve().parent.parent
+    out = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().splitlines()[-1] == "[True, True]"
+

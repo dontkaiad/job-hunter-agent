@@ -33,6 +33,11 @@ from .redact import redact_secrets
 
 logger = logging.getLogger(__name__)
 
+# httpx на уровне INFO пишет в лог полный URL запроса, а в URL Bot API сидит токен бота.
+# Если кто-то включит INFO для всего процесса, токен попал бы в лог: глушим эти логгеры сразу.
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
 _API = "https://api.telegram.org/bot{token}/sendMessage"
 
 # One-time "ops logging not configured" warning guard, so a serve process that
