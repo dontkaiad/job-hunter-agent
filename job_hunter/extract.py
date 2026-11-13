@@ -438,33 +438,75 @@ def _currency_near(text: str, start: int, end: int) -> Optional[str]:
     return _CCY_NEAR_CODE.get(tok) or ("RUB" if tok.startswith("руб") else None)
 
 
-def _detect_salary_span(text: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
-    """(min, max, currency written next to the amount | None). Anchored to currency context, ignores dates.
+# --- B1 (1c): an amount that is not a salary -------------------------------------------------------------------
+# Benefits, equity, relocation help and company funding carry money amounts too, and the regexes above read them as pay
+# ("up to 1390zl wallet for benefits", "raised $200M Series B"). A candidate amount is DROPPED when a context marker
+# stands in the narrow window around it and the window holds no explicit salary word, or when the marker is the nearer
+# label of the amount than the salary word. A real salary next to a bonus is therefore kept ("Salary 5000-7000 EUR plus
+# bonus up to 10%"), and when a salary-labelled amount and a bonus-labelled one are both there, the salary one wins.
+_CTX_WINDOW = 40            # characters either side of the matched amount
+_CONTEXT_BLACKLIST_RE = re.compile(
+    r"wallet|reimburs\w*|stipend|bonus\w*|equity|relocation|релокац\w*|funding|\braised\b|budget|бюджет\w*|"
+    r"льгот\w*|компенсаци\w*", re.I)
+_SALARY_WORD_RE = re.compile(
+    r"\bsalary\b|\bcompensation\b|оклад\w*|зарплат\w*|\bзп\b|\bbase\s*(?:pay|salary)\b|\bbase\s*:", re.I)
 
-    A bare number with no currency/money anchor (e.g. a deadline '31') is NOT treated as salary.
-    """
-    text = _strip_dates(text)
 
+def _is_non_salary_context(text: str, start: int, end: int, own: Tuple[int, int]) -> bool:
+    """True when the amount matched at ``text[start:end]`` is labelled by a blacklisted context word, not by pay.
+
+    ``own`` is the span of the whole match: a marker INSIDE it is the keyword that introduced the amount (the
+    "компенсация 200 000 ₽" keyword), not a context marker. PURE."""
+    while end > start and text[end - 1] in " \t\n.,;":       # the amount pattern swallows a trailing separator
+        end -= 1
+    lo, hi = max(0, start - _CTX_WINDOW), min(len(text), end + _CTX_WINDOW)
+    window = text[lo:hi]
+    marks = [(m.start() + lo, m.end() + lo) for m in _CONTEXT_BLACKLIST_RE.finditer(window)
+             if not (own[0] <= m.start() + lo and m.end() + lo <= own[1])]
+    if not marks:
+        return False
+    pays = [(m.start() + lo, m.end() + lo) for m in _SALARY_WORD_RE.finditer(window)]
+    if not pays:
+        return True                                    # a marker and no salary word at all: not a salary
+    # both are there: the label nearest to the amount decides (a salary word ahead of it, else the closest one)
+    def gap(span):
+        return start - span[1] if span[1] <= start else (span[0] - end if span[0] >= end else 0)
+    nearest_mark = min(marks, key=lambda sp: abs(gap(sp)))
+    nearest_pay = min(pays, key=lambda sp: abs(gap(sp)))
+    return abs(gap(nearest_mark)) < abs(gap(nearest_pay))
+
+
+def _salary_candidates(text: str):
+    """Every candidate amount in the original priority order: range with a currency, range behind a symbol, an amount
+    behind a money keyword, a symbol-attached amount; within one pattern left to right. Yields (lo, hi, cur, start, end, own)."""
     for rx in (_SALARY_RANGE_RE, _SALARY_RANGE_SYM_RE):
-        m = rx.search(text)
-        if m:
+        for m in rx.finditer(text):
             lo, hi = _ordered(*_range_amounts(m.group(1), m.group(2)))
-            return lo, hi, _currency_near(text, m.start(), m.end())
-
-    m = _SALARY_KEYWORD_RE.search(text)
-    if m:
+            yield lo, hi, _currency_near(text, m.start(), m.end()), m.start(), m.end(), m.span()
+    for m in _SALARY_KEYWORD_RE.finditer(text):
         cur = _currency_near(text, m.start(1), m.end())
         if not m.group(2):
             lo = _parse_amount(m.group(1))
-            return lo, lo, cur
-        lo, hi = _ordered(*_range_amounts(m.group(1), m.group(2)))
-        return lo, hi, cur
-
-    m = _SALARY_SYMBOL_RE.search(text)
-    if m:
+            yield lo, lo, cur, m.start(1), m.end(), m.span()
+        else:
+            lo, hi = _ordered(*_range_amounts(m.group(1), m.group(2)))
+            yield lo, hi, cur, m.start(1), m.end(), m.span()
+    for m in _SALARY_SYMBOL_RE.finditer(text):
         val = _parse_amount(m.group(1) or m.group(2))
-        return val, val, _currency_near(text, m.start(), m.end())
+        yield val, val, _currency_near(text, m.start(), m.end()), m.start(), m.end(), m.span()
 
+
+def _detect_salary_span(text: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """(min, max, currency written next to the amount | None). Anchored to currency context, ignores dates.
+
+    A bare number with no currency/money anchor (e.g. a deadline '31') is NOT treated as salary. The first
+    candidate (priority order) that is not labelled by a non-salary context word wins (see ``_is_non_salary_context``).
+    """
+    text = _strip_dates(text)
+    for lo, hi, cur, start, end, own in _salary_candidates(text):
+        if _is_non_salary_context(text, start, end, own):
+            continue
+        return lo, hi, cur
     return None, None, None
 
 

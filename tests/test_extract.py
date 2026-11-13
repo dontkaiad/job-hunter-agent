@@ -1,5 +1,7 @@
 """raw_text -> ExtractResult heuristics (pure)."""
 
+import pytest
+
 from job_hunter.extract import extract
 
 
@@ -383,3 +385,57 @@ def test_cyrillic_k_is_thousands():
     assert extract("зп 100-200к", "ch").salary_max == 200000.0
     assert extract("оплата 250к ₽", "ch").salary_min == 250000.0
     assert extract("зарплата 1кк ₽", "ch").salary_min == 1000000.0        # "кк" is still a million
+
+
+# --- B1 (1c): amounts that are not a salary (benefits, equity, funding) -----------------------------------------
+# Invented texts only: this repository is public.
+
+
+@pytest.mark.parametrize("text", [
+    "Perks: up to 1390zl wallet for benefits",
+    "We just raised $200M Series B and are hiring",
+    "Relocation package €5000 for the right person",
+    "Sign-on bonus $10,000 after the first month",
+    "Equity: $50k in options over four years",
+    "Learning budget €1500 per year",
+    "Annual stipend 3000 EUR for books",
+    "Компенсация обучения до 50 000 ₽ в год",
+    "Льготы: до 30 000 ₽ на спорт",
+    "Reimbursable up to $800 for a home office",
+])
+def test_a_non_salary_amount_is_not_read_as_pay(text):
+    assert _salary(text)[:2] == (None, None)                 # no amount (the currency field is detected on its own)
+
+
+def test_a_real_salary_next_to_a_bonus_is_kept():
+    assert _salary("Salary 5000-7000 EUR plus bonus up to 10%") == (5000.0, 7000.0, "EUR")
+    assert _salary("Зарплата 200 000 - 300 000 ₽ плюс бонус до 50 000 ₽") == (200000.0, 300000.0, "RUB")
+
+
+def test_the_salary_wins_over_a_bonus_amount_with_a_higher_priority_pattern():
+    """The bonus is a range behind a symbol (higher priority than the keyword), the salary sits behind a keyword."""
+    assert _salary("Relocation bonus €2000-3000. Salary: 4000 EUR") == (4000.0, 4000.0, "EUR")
+    assert _salary("Salary: 4000 EUR; bonus: €500-800") == (4000.0, 4000.0, "EUR")
+
+
+def test_a_marker_far_from_the_amount_does_not_block_it():
+    far = "€3000 net per month. " + "We are a friendly remote team building developer tools for small shops. " + "Also equity."
+    assert _salary(far)[0] == 3000.0
+
+
+def test_the_keyword_that_introduces_an_amount_is_not_a_context_marker():
+    assert _salary("Компенсация 200 000 ₽ в месяц") == (200000.0, 200000.0, "RUB")
+
+
+def test_a_plain_salary_without_markers_is_unchanged():
+    assert _salary("от 180 000 ₽ на руки") == (180000.0, 180000.0, "RUB")
+    assert _salary("Base salary $150k") == (150000.0, 150000.0, "USD")
+
+
+def test_an_amount_with_a_marker_but_no_currency_and_no_keyword_stays_unknown():
+    assert _salary("Base: 150k + equity")[:2] == (None, None)
+
+
+def test_extract_leaves_the_salary_empty_for_a_benefit_only_post():
+    r = extract("Python developer. Perks: up to 1390zl wallet for benefits, remote.", "ch")
+    assert r.salary_min is None and r.salary_max is None
