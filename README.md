@@ -69,6 +69,18 @@ transition is consistent and auditable; the automated harvest path and the
 human-action path both go through that one writer. Full design, data model,
 security model, and scope choices are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Evals
+
+| What changed | Data | Metric | Before → after |
+|---|---|---|---|
+| Haiku instead of Sonnet on first-pass scoring, with 4 calibration anchors | stored Sonnet scores, stratified, up to 8 per score band | signed bias vs Sonnet | **+13 → +1.6** |
+| Scoring at `temperature=0` | 3 vacancies × 2 models × 5 runs | spread of the score on the same input | 4–14 points → **0** |
+| Forced tool call instead of text JSON | the 12 calls that failed in prod | parse failures | 6–9 prose refusals (two runs) → **0** |
+| Surface threshold 60 → 50 | 115 vacancies, one labeller | precision · recall | 0.565 · 0.169 → 0.619 · 0.244 (wide CIs) |
+| Judge: Sonnet 4.6 vs 5.5 | 38 labelled vacancies in the judge corridor | precision · cost per call | 0.58 vs 0.52 · $0.0115 vs $0.0164 → **kept 4.6** |
+
+Each row has a write-up with n, limitations and reproduction in [docs/CASES/](docs/CASES/README.md); `python -m evals offline` runs the offline part.
+
 ## Cost
 
 Measured from real API responses (`python -m evals.cost_probe`, 2026-11-01): one
